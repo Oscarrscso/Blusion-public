@@ -1,0 +1,35 @@
+{
+  "id": "org.example.strnums",
+  "name": "Strings And Numbers",
+  "version": 2,
+  "resources": [
+    "catalog"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "x",
+      "name": "X",
+      "extra": [
+        {
+          "name": "genre",
+          "isRequired": "true",
+          "options": [
+            "A",
+            1,
+            true
+          ],
+          "optionsLimit": "1"
+        }
+      ]
+    }
+  ],
+  "behaviorHints": {
+    "adult": "true",
+    "p2p": 0,
+    "configurable": "yes"
+  }
+}

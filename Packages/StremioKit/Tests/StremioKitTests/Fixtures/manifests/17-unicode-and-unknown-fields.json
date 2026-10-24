@@ -1,0 +1,29 @@
+{
+  "id": "org.example.unicode",
+  "name": "Фильмы 🎬 映画",
+  "version": "1.0.0",
+  "description": "Ünïcödé — “quotes” & <tags>",
+  "resources": [
+    "catalog",
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "futureField": {
+    "nested": [
+      1,
+      2,
+      3
+    ]
+  },
+  "anotherUnknown": true,
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "ru",
+      "name": "Кино",
+      "unknown": "ignored"
+    }
+  ]
+}

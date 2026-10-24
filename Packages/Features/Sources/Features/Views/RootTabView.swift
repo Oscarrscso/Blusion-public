@@ -1,0 +1,448 @@
+#if canImport(UIKit)
+import SwiftUI
+import StremioKit
+
+/// Screens reachable from the Settings tab's stack.
+enum SettingsDestination: Hashable {
+    case addons
+    case widgets
+}
+
+/// App-level navigation state, shared through the environment so any screen can switch tab or open Settings.
+@MainActor
+@Observable
+public final class AppRouter {
+    public var tab: LaunchRoute.Tab
+    public var homePath = NavigationPath()
+    var searchPath = NavigationPath()
+    var discoverPath = NavigationPath()
+    var libraryPath = NavigationPath()
+    var searchBrowseRevision = 0
+    var searchFocusRevision = 0
+    /// Counts the titles opened from Search, so the Search screen reads its recent searches again.
+    var recentSearchRevision = 0
+    /// Untyped, because screens inside Settings push values of their own (an addon's id, a widget).
+    var settingsPath = NavigationPath()
+    /// The Mac Widgets tab's stack. The widgets manager registers its own editor destinations, so the stack holds nothing else.
+    var widgetsPath = NavigationPath()
+    var demoPlan: PlaybackPlan?
+    var addonInstallText: String?
+    var userStateRevision = 0
+    /// The depth of `homePath` once a title opened from Home's spotlight is on it. When the path falls below that depth, the spotlight's
+    /// title has been popped and Home is back, see `HomeView`.
+    var spotlightDepth: Int?
+    /// Counts the returns to Home from a spotlight title. The spotlight and Home's scroll reset to their first page and top on each.
+    var spotlightRevision = 0
+    /// Counts the taps on each tab's item, the selected tab's included. The tab's first page scrolls to its top on each, see `tapTab(_:)`.
+    private(set) var tabTapRevisions: [LaunchRoute.Tab: Int] = [:]
+    /// The depths at which a title's page sits in each stack, by its path. A title's page has no tab bar and no Continue Watching bar
+    /// while it is on top, and both start coming back the moment it is left, as its path shrinks (see `titlePage(on:)`).
+    var titlePageDepths: [ReferenceWritableKeyPath<AppRouter, NavigationPath>: Set<Int>] = [:]
+
+    /// The stack each tab shows.
+    func pathKey(for tab: LaunchRoute.Tab) -> ReferenceWritableKeyPath<AppRouter, NavigationPath> {
+        switch tab {
+        case .home: \.homePath
+        case .search: \.searchPath
+        case .discover: \.discoverPath
+        case .library: \.libraryPath
+        case .settings: \.settingsPath
+        case .widgets: \.widgetsPath
+        }
+    }
+
+    /// True while the selected tab has a title's page on top.
+    var showsTitlePage: Bool {
+        let path = pathKey(for: tab)
+        return titlePageDepths[path]?.contains(self[keyPath: path].count) ?? false
+    }
+    /// Navigation values must wait until their stacks and destinations have appeared.
+    private var pendingLaunchRoute: LaunchRoute?
+
+    public init(route: LaunchRoute = .home) {
+        tab = route.tab
+        pendingLaunchRoute = route
+    }
+
+    /// The root selects the launch tab; Home consumes its navigation values only after its stack appears.
+    func presentLaunchRoute(includeHomeDestinations: Bool = true) {
+        guard let route = pendingLaunchRoute else { return }
+        guard !includeHomeDestinations || route.tab == .home else { return }
+        guard !includeHomeDestinations || route.detail != nil || route.streams != nil || route.showsGallery else { return }
+        tab = route.tab
+        guard includeHomeDestinations || (route.detail == nil && route.streams == nil && !route.showsGallery) else { return }
+        pendingLaunchRoute = nil
+        if let detail = route.detail { homePath.append(detail) }
+        if let streams = route.streams { homePath.append(streams) }
+        if route.showsGallery { homePath.append(GalleryDestination(section: route.gallerySection)) }
+        if route.showsPlayerDemo { demoPlan = .demo }
+        if let screen = route.sheet { showSettings(screen) }
+    }
+
+    public func open(_ tab: LaunchRoute.Tab) { self.tab = tab }
+
+    /// A tap on a tab's item. Every tap scrolls that tab's first page to its top (see `tabTapRevisions`), except Widgets, which has no
+    /// scroll to reset and restarts its stack instead. Tapping the tab that is showing
+    /// also takes it back to its first page; switching to another tab keeps its stack, so a title or a draft on it is still there when
+    /// it returns. Widgets is the exception: its stack restarts on each selection, so a draft on it does not survive a return. Search starts afresh on every tap: its browse page, or with its field focused when it was already showing.
+    func tapTab(_ tab: LaunchRoute.Tab) {
+        let isShowing = self.tab == tab
+        switch tab {
+        // A title opened from the spotlight closes with no animation, as its own back button closes it (see `goBack`).
+        case .home: if isShowing { popToRoot(\.homePath, instantly: spotlightDepth != nil) }
+        case .discover: if isShowing { popToRoot(\.discoverPath) }
+        case .library: if isShowing { popToRoot(\.libraryPath) }
+        case .settings: if isShowing { popToRoot(\.settingsPath) }
+        // Widgets restarts on each selection, not only on a tap of the showing tab: an editor parked on its stack can hold a copy from
+        // before a change made on another tab, so it is not kept.
+        case .widgets: popToRoot(\.widgetsPath, instantly: true)
+        case .search:
+            // Every tap on Search brings the keyboard up. Coming from another tab it also starts afresh, on an empty field.
+            popToRoot(\.searchPath)
+            if !isShowing { searchBrowseRevision += 1 }
+            searchFocusRevision += 1
+        }
+        tabTapRevisions[tab, default: 0] += 1
+        self.tab = tab
+    }
+
+    private func popToRoot(_ path: ReferenceWritableKeyPath<AppRouter, NavigationPath>, instantly: Bool = false) {
+        guard !self[keyPath: path].isEmpty else { return }
+        guard instantly else {
+            self[keyPath: path] = NavigationPath()
+            return
+        }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { self[keyPath: path] = NavigationPath() }
+    }
+
+    /// The one way back in a stack: the back swipe and the spotlight title's own back button both pop here, so one gesture never pops
+    /// twice. A title opened from Home's spotlight with no animation closes with none (see `instantDestination()`); every other screen
+    /// closes with its own transition. True when a screen was popped, so the caller knows that screen is on its way out; false when
+    /// there was nothing to pop.
+    @discardableResult
+    func goBack(in path: ReferenceWritableKeyPath<AppRouter, NavigationPath>) -> Bool {
+        guard !self[keyPath: path].isEmpty else { return false }
+        guard path == \AppRouter.homePath, spotlightDepth == homePath.count else {
+            self[keyPath: path].removeLast()
+            return true
+        }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { homePath.removeLast() }
+        return true
+    }
+
+    /// Back on the tab that is showing: pops its stack by one screen, as the back swipe does. False when there was nothing to pop.
+    @discardableResult
+    func goBackOnTab() -> Bool {
+        switch tab {
+        case .home: return goBack(in: \.homePath)
+        case .discover: return goBack(in: \.discoverPath)
+        case .library: return goBack(in: \.libraryPath)
+        case .settings: return goBack(in: \.settingsPath)
+        case .widgets: return goBack(in: \.widgetsPath)
+        case .search: return goBack(in: \.searchPath)
+        }
+    }
+
+    /// Home reloads everything it shows, as a pull from the top would (see `HomeView`).
+    var homeRefreshRevision = 0
+
+    func refreshHome() { homeRefreshRevision += 1 }
+
+    /// The Search tab on its category browser, as if the tab had been tapped from another tab.
+    func showSearchBrowse() {
+        searchPath = NavigationPath()
+        searchBrowseRevision += 1
+        tab = .search
+    }
+
+    /// The Settings tab, on its first screen.
+    public func showSettings() { showSettings(.settings) }
+
+    /// The Settings tab, opened on the addons list.
+    public func showAddons() { showSettings(.addons) }
+
+    /// The Settings tab, opened on the Home widgets manager.
+    public func showWidgets() { showSettings(.widgets) }
+
+    private func showSettings(_ screen: LaunchRoute.Sheet) {
+        switch screen {
+        case .settings: settingsPath = NavigationPath()
+        case .addons: settingsPath = NavigationPath([SettingsDestination.addons])
+        case .widgets: settingsPath = NavigationPath([SettingsDestination.widgets])
+        }
+        tab = .settings
+    }
+}
+
+/// The component gallery's place in a navigation stack (debug aid, see `DesignGalleryView`).
+struct GalleryDestination: Hashable {
+    var section: String?
+}
+
+/// A phone gets the plain tab bar, where Search always stands apart from the other tabs as a button of its own. The sidebar style, which
+/// an iPad and the Mac need, drew Search inside the bar with the rest on a phone whenever the bar was at full size.
+private struct TabBarStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            content.tabViewStyle(.tabBarOnly)
+        } else {
+            content.tabViewStyle(.sidebarAdaptable)
+        }
+    }
+}
+
+public struct RootTabView: View {
+    private let services: AppServices
+    private let initialQuery: String?
+    private let userStateRevision: Int
+    @Binding private var addonLink: String?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var router: AppRouter
+    @State private var resume: ContinueWatchingModel
+    @State private var titleActions: TitleActions
+    @State private var failedHandoff: PlaybackHandoffReceipt?
+    /// A poster held for a second plays: its streams load in `posterStarter`, which draws nothing.
+    @State private var posterPlay: PosterPlayLauncher
+    @State private var isLandscape = false
+    @State private var windowSafeArea = EdgeInsets()
+    /// A phone turned sideways. A Mac window is never a phone, so `isPhoneLandscape` never governs its navigation bar, at any window shape.
+    private var isPhoneLandscape: Bool { isLandscape && !Self.isMacCatalyst }
+    private static var isMacCatalyst: Bool {
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        return false
+        #endif
+    }
+    /// Phones show each tab's icon alone (see `tabItem`). The iPad and the Mac keep the titles, as their sidebar rows need them.
+    private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone }
+
+    public init(services: AppServices, route: LaunchRoute = .home, addonLink: Binding<String?> = .constant(nil), userStateRevision: Int = 0) {
+        self.services = services
+        self.userStateRevision = userStateRevision
+        _addonLink = addonLink
+        initialQuery = route.searchQuery
+        _router = State(initialValue: AppRouter(route: route))
+        _resume = State(initialValue: ContinueWatchingModel(services: services))
+        _titleActions = State(initialValue: TitleActions(services: services))
+        _posterPlay = State(initialValue: PosterPlayLauncher(services: services, failed: {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }))
+    }
+
+    /// A held poster's streams load here, in a picker that draws nothing and starts the stream Play would, in Infuse or here, whatever
+    /// Auto Pick's switch says. It stays once a stream has started, since the player it opened belongs to it.
+    @ViewBuilder
+    private var posterStarter: some View {
+        if let launch = posterPlay.launch {
+            StreamPickerView(request: launch.request, services: services, isEmbedded: true, isRevealed: false, isHeadless: true,
+                             forcesAutomaticStart: true, onAutomaticStart: { started in posterPlay.finish(launch.id, started: started) })
+                .id(launch.id)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
+    }
+
+    public var body: some View {
+        @Bindable var router = router
+        TabView(selection: Binding(get: { router.tab }, set: { router.tapTab($0) })) {
+            Tab(value: LaunchRoute.Tab.home) {
+                NavigationStack(path: $router.homePath) {
+                    HomeView(services: services)
+                        .appDestinations(services: services, path: \.homePath)
+                        .navigationDestination(for: GalleryDestination.self) { DesignGalleryView(section: $0.section) }
+                        .navigationDestination(for: PlayerRecovery.self) { recovery in
+                            StreamPickerView(request: recovery.request, services: services, allowsAutomaticStart: false)
+                        }
+                }
+                .zoomTransitions()
+                .task {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    router.presentLaunchRoute()
+                }
+            } label: {
+                tabItem("Home", router.tab == .home ? "play.house.fill" : "play.house")
+            }
+            Tab(value: LaunchRoute.Tab.discover) {
+                NavigationStack(path: $router.discoverPath) {
+                    DiscoverView(services: services) { router.showAddons() }
+                        .appDestinations(services: services, path: \.discoverPath)
+                }
+                .zoomTransitions()
+            } label: {
+                tabItem("Discover", router.tab == .discover ? "square.grid.2x2.fill" : "square.grid.2x2")
+            }
+            TabSection("Library") {
+                Tab(value: LaunchRoute.Tab.library) {
+                    NavigationStack(path: $router.libraryPath) {
+                        LibraryView(services: services) { router.open(.discover) }
+                            .appDestinations(services: services, path: \.libraryPath)
+                    }
+                    .zoomTransitions()
+                } label: {
+                    tabItem("Library", router.tab == .library ? "books.vertical.fill" : "books.vertical")
+                }
+            }
+            // Settings is a tab like the rest, so there is no sheet to dismiss and no Done button.
+            Tab(value: LaunchRoute.Tab.settings) {
+                NavigationStack(path: $router.settingsPath) {
+                    SettingsView(services: services)
+                        .navigationDestination(for: SettingsDestination.self) { destination in
+                            Group {
+                                switch destination {
+                                case .addons: AddonsView(services: services)
+                                case .widgets: WidgetsManagerView(services: services)
+                                }
+                            }
+                        }
+                }
+            } label: {
+                tabItem("Settings", router.tab == .settings ? "gearshape.fill" : "gearshape")
+            }
+            #if targetEnvironment(macCatalyst)
+            // The Mac sidebar's Widgets item, at its bottom. On iPhone the widgets manager stays in Settings and behind Home's button.
+            Tab(value: LaunchRoute.Tab.widgets) {
+                NavigationStack(path: $router.widgetsPath) {
+                    // Selecting the tab rebuilds the manager, so it loads what is saved now, not a copy from before a Settings edit.
+                    WidgetsManagerView(services: services)
+                        .id(router.tabTapRevisions[.widgets, default: 0])
+                }
+                .zoomTransitions()
+            } label: {
+                Label {
+                    Text("Widgets")
+                } icon: {
+                    Image(systemName: router.tab == .widgets ? "rectangle.3.group.fill" : "rectangle.3.group")
+                        .environment(\.symbolVariants, .none)
+                }
+            }
+            #endif
+            Tab(value: LaunchRoute.Tab.search, role: .search) {
+                NavigationStack(path: $router.searchPath) {
+                    SearchView(services: services, initialQuery: initialQuery)
+                        .appDestinations(services: services, path: \.searchPath)
+                }
+                .zoomTransitions()
+            }
+        }
+        .modifier(TabBarStyle())
+        // Choosing Search goes straight to its field, with the keyboard up.
+        .tabViewSearchActivation(.searchTabSelection)
+        .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
+        .pageTopBar(hidden: isPhoneLandscape)
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage))
+        .task(id: "\(router.tab)-\(userStateRevision)") {
+            router.userStateRevision = userStateRevision
+            await refreshUserState()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshUserState() } }
+        }
+        .onChange(of: titleActions.watchedIdentities) { _, _ in
+            Task { await resume.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .playbackHandoffDidFinish)) { notification in
+            guard let receipt = notification.object as? PlaybackHandoffReceipt else { return }
+            if case .failed = receipt.result { failedHandoff = receipt }
+        }
+        .alert(failedHandoff?.handoff.action == .download ? "Couldn’t start download in Infuse"
+               : failedHandoff?.handoff.action == .save ? "Couldn’t save to Infuse" : "Infuse couldn’t play this stream",
+               isPresented: Binding(get: { failedHandoff != nil }, set: { if !$0 { failedHandoff = nil } }),
+               presenting: failedHandoff) { receipt in
+            if receipt.handoff.isPlayback {
+                Button("Choose another stream") {
+                    router.tab = .home
+                    router.homePath.append(PlayerRecovery(request: receipt.handoff.request))
+                }
+            }
+            Button("OK", role: .cancel) {}
+        } message: { receipt in
+            if case .failed(_, let message) = receipt.result {
+                Text(message ?? "Infuse reported an error. Try another stream.")
+            }
+        }
+        .onChange(of: addonLink, initial: true) { _, link in
+            guard let link else { return }
+            router.addonInstallText = link
+            router.showAddons()
+            addonLink = nil
+        }
+        .fullScreenCover(item: $router.demoPlan) { PlayerScreen(plan: $0, services: services) }
+        .background { posterStarter }
+        .task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            router.presentLaunchRoute(includeHomeDestinations: false)
+            #if canImport(UIKit)
+            // The reviews page's rules and WebKit's process start now, after the first frame, so the first reviews page waits for neither.
+            ReviewPageRules.prewarm()
+            #endif
+        }
+        .environment(router)
+        .environment(services.posterRatings)
+        .environment(services.heroMeta)
+        .environment(titleActions)
+        .environment(posterPlay)
+        .environment(\.isLandscape, isLandscape)
+        .environment(\.isPhoneLandscape, isPhoneLandscape)
+        .environment(\.windowSafeArea, windowSafeArea)
+        .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { isLandscape = $0 }
+        .focusedSceneValue(router)
+        .preferredColorScheme(.dark)
+        // Screens run edge to edge, including the sides of a landscape iPhone. Only the navigation bar and tab bar keep their safe area.
+        .ignoresSafeArea(.container, edges: .horizontal)
+        // Read outside the line above: inside it, the sides are no longer a safe area to report. Screens that run under the notch or the
+        // status bar take these from the environment (see `windowSafeArea`).
+        .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { windowSafeArea = $0 }
+    }
+
+    /// A tab's item. On a phone the tab bar shows the icon alone, and the title stays the item's accessibility label, which the UI tests
+    /// find by. The sidebar shows the title beside the icon.
+    private func tabItem(_ title: LocalizedStringKey, _ symbol: String) -> some View {
+        Group {
+            if showsTabTitles {
+                Label { Text(title) } icon: { Image(systemName: symbol) }
+            } else {
+                Image(systemName: symbol).accessibilityLabel(title)
+            }
+        }
+        .environment(\.symbolVariants, .none)
+    }
+
+    private func refreshUserState() async {
+        let progress = await services.progress.all()
+        resume.update(from: progress)
+        await titleActions.refresh(progress: progress)
+        let settings = await services.settings.load()
+        services.posterRatings.isEnabled = settings.showsPosterRatings
+        services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
+        // Trakt may hold newer saved titles and watched marks, from the other device or from the web. Whatever it changed here is read
+        // again, and Home is told.
+        if let summary = try? await services.traktSync.sync(), summary.changedLocalData {
+            let progress = await services.progress.all()
+            resume.update(from: progress)
+            await titleActions.refresh(progress: progress)
+            router.userStateRevision += 1
+        }
+    }
+}
+
+private struct PlayerRecovery: Hashable {
+    let request: StreamRequest
+}
+
+private extension PlaybackPlan {
+    /// Apple's public HLS test stream as an episode, for the launch route `player`.
+    static var demo: PlaybackPlan? {
+        guard let url = URL(string: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8") else { return nil }
+        return PlaybackPlan(request: StreamRequest(type: "series", id: "demo:1:2", title: "Sample Show · Test Pattern", season: 1, episode: 2),
+                            candidates: [PlaybackCandidate(id: "demo", title: "Sample stream", addonName: "Demo", route: .native(url))])
+    }
+}
+#endif

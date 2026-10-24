@@ -1,0 +1,33 @@
+{
+  "id": "org.example.mixed",
+  "name": "Mixed",
+  "version": "0.9.0",
+  "resources": [
+    "catalog",
+    {
+      "name": "meta",
+      "types": [
+        "movie"
+      ],
+      "idPrefixes": [
+        "tt"
+      ]
+    },
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "popular",
+      "name": "Popular",
+      "extra": [
+        {
+          "name": "skip"
+        }
+      ]
+    }
+  ]
+}

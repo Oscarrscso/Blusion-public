@@ -1,0 +1,40 @@
+# Small, deliberate ruleset: correctness and hygiene, not taste. `swiftlint --strict` gates verify.sh.
+only_rules:
+  - colon
+  - comma
+  - control_statement
+  - duplicate_imports
+  - empty_enum_arguments
+  - force_cast
+  - force_try
+  - leading_whitespace
+  - legacy_constructor
+  - mark
+  - opening_brace
+  - operator_usage_whitespace
+  - return_arrow_whitespace
+  - statement_position
+  - syntactic_sugar
+  - trailing_newline
+  - trailing_semicolon
+  - trailing_whitespace
+  - unused_closure_parameter
+  - vertical_whitespace
+  - void_return
+  - implicit_optional_initialization
+  - shorthand_operator
+  - line_length
+line_length:
+  warning: 170
+  error: 220
+  ignores_urls: true
+  ignores_comments: true
+vertical_whitespace:
+  max_empty_lines: 1
+excluded:
+  - .build
+  - Packages/*/.build
+  - build
+  - DerivedData
+  - Tools
+  - Packages/StremioKit/Tests/StremioKitTests/Fixtures

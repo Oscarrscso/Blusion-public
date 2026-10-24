@@ -1,0 +1,12 @@
+{
+  "id": "org.example.streamonly",
+  "name": "Streams Only",
+  "version": "1.0.0",
+  "resources": [
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "org.example.empty",
+  "name": "Empty",
+  "version": "1.0.0",
+  "resources": [],
+  "types": [
+    "movie"
+  ],
+  "catalogs": []
+}

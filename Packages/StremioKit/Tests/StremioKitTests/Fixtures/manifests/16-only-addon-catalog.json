@@ -1,0 +1,12 @@
+{
+  "id": "org.example.addoncat",
+  "name": "Addon Catalog Only",
+  "version": "1.0.0",
+  "resources": [
+    "addon_catalog"
+  ],
+  "types": [
+    "all"
+  ],
+  "catalogs": []
+}

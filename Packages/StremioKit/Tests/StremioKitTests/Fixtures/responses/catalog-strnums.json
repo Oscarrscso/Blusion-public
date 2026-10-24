@@ -1,0 +1,13 @@
+{
+  "metas": [
+    {
+      "id": "tt0000003",
+      "type": "movie",
+      "name": "Three",
+      "imdbRating": "8.1",
+      "releaseInfo": 2010,
+      "year": "2010",
+      "runtime": 120
+    }
+  ]
+}

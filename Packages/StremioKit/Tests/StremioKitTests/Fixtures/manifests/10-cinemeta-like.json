@@ -1,0 +1,89 @@
+{
+  "id": "org.example.cinemeta",
+  "name": "Metadata Example",
+  "version": "3.0.13",
+  "description": "A catalog addon",
+  "logo": "https://example.com/logo.png",
+  "background": "https://example.com/bg.jpg",
+  "resources": [
+    "catalog",
+    {
+      "name": "meta",
+      "types": [
+        "movie",
+        "series"
+      ],
+      "idPrefixes": [
+        "tt"
+      ]
+    },
+    {
+      "name": "addon_catalog",
+      "types": [
+        "all"
+      ]
+    }
+  ],
+  "types": [
+    "movie",
+    "series"
+  ],
+  "idPrefixes": [
+    "tt"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "top",
+      "name": "Popular",
+      "extra": [
+        {
+          "name": "genre",
+          "options": [
+            "Action",
+            "Comedy",
+            "Drama"
+          ],
+          "optionsLimit": 1
+        },
+        {
+          "name": "search"
+        },
+        {
+          "name": "skip"
+        }
+      ]
+    },
+    {
+      "type": "series",
+      "id": "top",
+      "name": "Popular",
+      "extra": [
+        {
+          "name": "genre",
+          "options": [
+            "Drama"
+          ]
+        },
+        {
+          "name": "skip"
+        }
+      ]
+    },
+    {
+      "type": "movie",
+      "id": "search-only",
+      "name": "Find",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": true
+        }
+      ]
+    }
+  ],
+  "behaviorHints": {
+    "configurable": false,
+    "configurationRequired": false
+  }
+}

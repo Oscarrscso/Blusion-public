@@ -1,0 +1,25 @@
+{
+  "id": "org.example.strings",
+  "name": "String Resources",
+  "version": "1.2.3",
+  "description": "Plain string resources",
+  "resources": [
+    "catalog",
+    "meta",
+    "stream"
+  ],
+  "types": [
+    "movie",
+    "series"
+  ],
+  "idPrefixes": [
+    "tt"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "top",
+      "name": "Top"
+    }
+  ]
+}

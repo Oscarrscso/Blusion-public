@@ -1,0 +1,24 @@
+{
+  "metas": [
+    {
+      "id": "tt0000004",
+      "type": "movie",
+      "name": "Four",
+      "genres": null,
+      "poster": null,
+      "description": null
+    },
+    null,
+    {
+      "name": "no id"
+    },
+    5,
+    "str",
+    {
+      "id": "tt0000005",
+      "name": "Five",
+      "poster": "about:blank",
+      "genres": "Action, Comedy"
+    }
+  ]
+}

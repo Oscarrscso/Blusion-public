@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "id": "tt0000001",
+    "type": "movie",
+    "name": "One",
+    "poster": "https://example.com/1.jpg",
+    "background": "https://example.com/bg.jpg",
+    "description": "A film.",
+    "releaseInfo": "1999",
+    "released": "1999-03-31T00:00:00.000Z",
+    "runtime": "136 min",
+    "imdbRating": "7.5",
+    "genres": [
+      "Action"
+    ],
+    "director": [
+      "Dir A"
+    ],
+    "cast": [
+      "Actor A",
+      "Actor B"
+    ],
+    "writer": [
+      "Writer A"
+    ],
+    "links": [
+      {
+        "name": "Action",
+        "category": "Genres",
+        "url": "stremio:///discover"
+      },
+      {
+        "category": "x"
+      }
+    ],
+    "behaviorHints": {
+      "defaultVideoId": "tt0000001"
+    }
+  }
+}

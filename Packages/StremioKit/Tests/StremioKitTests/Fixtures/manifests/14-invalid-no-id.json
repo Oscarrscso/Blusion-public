@@ -1,0 +1,11 @@
+{
+  "name": "No Id",
+  "version": "1.0.0",
+  "resources": [
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": []
+}

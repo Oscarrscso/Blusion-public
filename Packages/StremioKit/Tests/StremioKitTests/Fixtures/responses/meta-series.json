@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "id": "tt0000010",
+    "type": "series",
+    "name": "Series",
+    "videos": [
+      {
+        "id": "tt0000010:1:2",
+        "title": "Two",
+        "season": 1,
+        "episode": 2
+      },
+      {
+        "id": "tt0000010:1:1",
+        "name": "One",
+        "season": "1",
+        "episode": "1",
+        "released": "2020-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "tt0000010:0:1",
+        "title": "Special",
+        "season": 0,
+        "episode": 1
+      },
+      {
+        "id": "tt0000010:2:1",
+        "title": "S2E1",
+        "season": 2,
+        "episode": 1
+      },
+      {
+        "title": "no id"
+      }
+    ]
+  }
+}

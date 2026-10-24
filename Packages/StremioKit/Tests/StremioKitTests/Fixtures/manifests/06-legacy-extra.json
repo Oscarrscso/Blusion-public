@@ -1,0 +1,38 @@
+{
+  "id": "org.example.legacy",
+  "name": "Legacy Extra",
+  "version": "0.1.0",
+  "resources": [
+    "catalog"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "legacy",
+      "name": "Legacy",
+      "extraSupported": [
+        "search",
+        "genre",
+        "skip"
+      ],
+      "extraRequired": [
+        "search"
+      ],
+      "genres": [
+        "Action",
+        "Drama"
+      ]
+    },
+    {
+      "type": "movie",
+      "id": "browse",
+      "name": "Browse",
+      "extraSupported": [
+        "skip"
+      ]
+    }
+  ]
+}

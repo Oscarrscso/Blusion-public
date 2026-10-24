@@ -1,0 +1,17 @@
+{
+  "id": "org.example.toplevel",
+  "name": "Top Level Prefixes",
+  "version": "1.0.0",
+  "resources": [
+    "stream"
+  ],
+  "types": [
+    "movie",
+    "series"
+  ],
+  "idPrefixes": [
+    "tt",
+    "kitsu:"
+  ],
+  "catalogs": []
+}

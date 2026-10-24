@@ -1,0 +1,14 @@
+{
+  "id": "org.example.nulls",
+  "name": "Null Arrays",
+  "version": "1.0.0",
+  "resources": [
+    "stream",
+    "catalog"
+  ],
+  "types": null,
+  "catalogs": null,
+  "idPrefixes": null,
+  "logo": null,
+  "behaviorHints": null
+}

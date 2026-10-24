@@ -1,0 +1,20 @@
+{
+  "id": "org.example.notypes",
+  "name": "No Types",
+  "version": "1.0.0",
+  "resources": [
+    {
+      "name": "stream",
+      "types": [
+        "movie"
+      ]
+    }
+  ],
+  "catalogs": [
+    {
+      "type": "series",
+      "id": "s",
+      "name": "S"
+    }
+  ]
+}

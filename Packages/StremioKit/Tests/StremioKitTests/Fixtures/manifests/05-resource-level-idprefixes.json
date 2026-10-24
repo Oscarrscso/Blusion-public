@@ -1,0 +1,32 @@
+{
+  "id": "org.example.reslevel",
+  "name": "Resource Level Prefixes",
+  "version": "1.0.0",
+  "resources": [
+    {
+      "name": "stream",
+      "types": [
+        "movie"
+      ],
+      "idPrefixes": [
+        "tt"
+      ]
+    },
+    {
+      "name": "meta",
+      "types": [
+        "movie"
+      ],
+      "idPrefixes": [
+        "custom:"
+      ]
+    }
+  ],
+  "types": [
+    "movie"
+  ],
+  "idPrefixes": [
+    "ignored:"
+  ],
+  "catalogs": []
+}

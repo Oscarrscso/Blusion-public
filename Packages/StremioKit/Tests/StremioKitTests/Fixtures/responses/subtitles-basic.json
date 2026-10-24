@@ -1,0 +1,17 @@
+{
+  "subtitles": [
+    {
+      "id": "1",
+      "url": "https://example.com/en.srt",
+      "lang": "eng"
+    },
+    {
+      "url": "https://example.com/es.vtt",
+      "lang": "spa"
+    },
+    {
+      "id": "bad"
+    },
+    null
+  ]
+}

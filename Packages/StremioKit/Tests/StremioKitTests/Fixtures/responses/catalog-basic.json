@@ -1,0 +1,23 @@
+{
+  "metas": [
+    {
+      "id": "tt0000001",
+      "type": "movie",
+      "name": "One",
+      "poster": "https://example.com/1.jpg",
+      "releaseInfo": "1999",
+      "imdbRating": 7.5,
+      "genres": [
+        "Action",
+        "Drama"
+      ]
+    },
+    {
+      "id": "tt0000002",
+      "type": "movie",
+      "name": "Two",
+      "poster": "https://example.com/2.jpg",
+      "releaseInfo": "2000"
+    }
+  ]
+}

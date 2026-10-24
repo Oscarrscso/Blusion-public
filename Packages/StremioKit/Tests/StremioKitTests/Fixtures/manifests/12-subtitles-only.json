@@ -1,0 +1,13 @@
+{
+  "id": "org.example.subsonly",
+  "name": "Subtitles Only",
+  "version": "1.0.0",
+  "resources": [
+    "subtitles"
+  ],
+  "types": [
+    "movie",
+    "series"
+  ],
+  "catalogs": []
+}

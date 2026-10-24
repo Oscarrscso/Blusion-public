@@ -1,0 +1,500 @@
+#if canImport(UIKit)
+import SwiftUI
+import StremioKit
+import UIKit
+
+/// A series' seasons and episodes: the season picker and the episode-width toggle, then the episodes of the selected season, each a row
+/// with its still, progress and watched mark.
+struct DetailEpisodes: View {
+    let model: DetailViewModel
+    let pageWidth: CGFloat
+    let contentMargin: CGFloat
+    /// True while an episode's menu is open, so the page can blur behind it. Cleared when this view leaves the screen.
+    @Binding var isHoldingEpisode: Bool
+    /// Shuffle and a tapped episode hand their episode to the page's stream flow, the one Play uses, saying which of them asked: the
+    /// streams take the details' place once they are ready.
+    let play: (StreamRequest, StreamTrigger) -> Void
+    /// The request whose streams are loading, from Play, Shuffle or an episode. Shuffle and the episodes take no taps then, since a tap
+    /// would call that lookup off or start a second one.
+    var loadingRequest: StreamRequest?
+    /// What asked for the loading streams. Only that control shows a spinner: Shuffle in place of its symbol, an episode on its card.
+    var loadingTrigger: StreamTrigger?
+    var unavailableStreams: Set<String> = []
+
+    private var isLoadingStreams: Bool { loadingRequest != nil }
+    @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.isLandscape) private var isLandscape
+    @Environment(TitleActions.self) private var titleActions
+    /// The episode Shuffle last picked: the row scrolls it to the front of its season.
+    @State private var shuffledEpisode: String?
+    /// Whether the episode Shuffle plays next is named beside it. Hidden until the space beside Shuffle is tapped; a second tap hides it.
+    @State private var showsShuffleNext = false
+    /// The name's size: a little under `caption2`, and scaled with the text size.
+    @ScaledMetric(relativeTo: .caption2) private var shuffleNextSize: CGFloat = 10
+    /// Handed on to an episode's menu preview, which is drawn outside the page and does not get the page's environment.
+    @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
+
+    /// The height of the season picker and of the episode-width toggle, so the two sit level on one line.
+    private static let secondaryControlHeight: CGFloat = 32
+
+    /// The Shuffle symbol, unseen, behind the season picker's and the width toggle's labels. The glass around a label is the label's height
+    /// plus the same padding, and Shuffle's symbol stands half a point taller than the season name and the width symbol, so with it behind
+    /// them all three glass shapes are the same height. The season name is wider than it, and the width toggle keeps its fixed square.
+    private static var glassHeightReference: some View {
+        Image(systemName: "shuffle").font(.caption.weight(.semibold)).hidden().accessibilityHidden(true)
+    }
+
+    /// The space inside an episode's menu preview, so the menu's rounded corners do not cut into the still or the text.
+    private static let previewPadding: CGFloat = Theme.Spacing.m
+    /// The corner radius of the panel the system draws an episode's menu preview in: 32 pt, measured on an iPhone on iOS 27. The system
+    /// does not say what it is and does not let a preview set it. The preview's hairline uses it, so it follows the panel's edge.
+    private static let previewPanelRadius: CGFloat = 32
+    /// The still's corner radius in the preview: the panel's less the padding between them, so the two corners share a centre and the
+    /// gap between the still and the panel is the same round the corner as along the sides. With the panel's own radius the gap grew
+    /// at the corners, which read as slightly off.
+    private static let previewStillRadius: CGFloat = previewPanelRadius - previewPadding
+
+    var body: some View {
+        let width = episodeWidth(pageWidth: pageWidth)
+        return VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            HStack(spacing: Theme.Spacing.m) {
+                seasonMenu
+                shuffleButton
+                shuffleNextArea
+                episodeWidthToggle
+            }
+            .padding(.horizontal, contentMargin)
+            ScrollViewReader { proxy in
+                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing,
+                            resetKey: "\(model.selectedSeason ?? -1)|\(model.matchesEpisodeWidthToText)|\(Int(width))") {
+                    if model.isLoading && model.episodes.isEmpty {
+                        ForEach(0..<3, id: \.self) { index in
+                            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                                RoundedRectangle(cornerRadius: Theme.Radius.small)
+                                    .fill(Theme.placeholder)
+                                    .frame(width: width, height: width / CardAspect.wide.ratio)
+                                    .loadingCardSpinner()
+                                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                    DetailSkeletonLine(font: Theme.Typography.eyebrow, width: 70)
+                                    DetailSkeletonParagraph(style: .headline, lines: 2)
+                                    DetailSkeletonParagraph(style: .footnote, lines: 3)
+                                    DetailSkeletonLine(font: Theme.Typography.metaLine, width: width * 0.65)
+                                }
+                            }
+                            .frame(width: width, alignment: .leading)
+                            .reportsShelfEdge(id: index)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Loading episode")
+                        }
+                    }
+                    ForEach(model.episodes) { episode in
+                        episodeRow(episode, width: width)
+                            .id(episode.id).reportsShelfEdge(id: episode.id)
+                    }
+                }
+                .animation(.snappy, value: model.matchesEpisodeWidthToText)
+                // Shuffle's episode becomes the first card in view, in its season, once the row has laid that season out.
+                .task(id: shuffledEpisode) {
+                    guard let shuffledEpisode else { return }
+                    try? await Task.sleep(for: .milliseconds(80))
+                    withAnimation(.snappy) { proxy.scrollTo(shuffledEpisode, anchor: .leading) }
+                }
+            }
+        }
+        .detailLoadingTransition(model.isLoading)
+        .environment(\.showsArtworkLoadingSpinner, true)
+        // A page that is left never stays blurred, even if its episode's menu was still open.
+        .onDisappear { isHoldingEpisode = false }
+    }
+
+    /// The season name with its chevron. Choosing opens the list of seasons, and the mark-as-watched action for the selected one.
+    private var seasonMenu: some View {
+        Menu {
+            ForEach(model.seasons, id: \.self) { season in
+                Button(season == 0 ? "Specials" : "Season \(season)") { model.selectedSeason = season }
+            }
+            if let season = model.selectedSeason {
+                Divider()
+                let watched = model.isSeasonWatched(season)
+                let name = season == 0 ? "Specials" : "Season \(season)"
+                Button(watched ? "Mark \(name) as Not Watched" : "Mark \(name) as Watched",
+                       systemImage: watched ? "xmark.circle" : "checkmark.circle") {
+                    Task {
+                        await model.setSeasonWatched(!watched, season: season)
+                        await titleActions.refresh()
+                    }
+                }
+                .accessibilityIdentifier("detail.seasonWatched")
+            }
+        } label: {
+            ZStack {
+                Self.glassHeightReference
+                HStack(spacing: 4) {
+                    Text(model.selectedSeason == 0 ? "Specials" : "Season \(model.selectedSeason ?? 1)").font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: Self.secondaryControlHeight)
+            .glassEffect(.regular.interactive().tint((PlayColourStore.colour(hex: model.playColourHex) ?? .clear).opacity(0.25)), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .frame(height: Self.secondaryControlHeight)
+        .pointerFeedback()
+        .accessibilityIdentifier("detail.seasonPicker")
+    }
+
+    /// The space between Shuffle and the width toggle. With an episode picked, a tap there names the episode Shuffle plays next, very
+    /// small after a dash, and another tap hides it again. Without one it is only space.
+    @ViewBuilder
+    private var shuffleNextArea: some View {
+        if let next = model.shuffleNext, model.canShuffle {
+            let number = [next.season.map { "S\($0)" }, next.episode.map { "E\($0)" }].compactMap { $0 }.joined()
+            let name = number.isEmpty ? next.title : "\(number) · \(next.title)"
+            ZStack(alignment: .leading) {
+                if showsShuffleNext {
+                    Text(verbatim: "- \(name)")
+                        .font(.system(size: shuffleNextSize))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .transition(.opacity)
+                        .accessibilityIdentifier("detail.shuffleNext")
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: Self.secondaryControlHeight, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) { showsShuffleNext.toggle() }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(showsShuffleNext ? "Shuffle plays \(next.title) next" : "Show the episode Shuffle plays next")
+            .accessibilityIdentifier("detail.shuffleNextArea")
+        } else {
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Shuffle, beside the season picker: a random episode that has aired, whose streams show as Play's do. While they load, a thin
+    /// spinner takes the place of its symbol, at the same size. It is dimmed while there is nothing to pick, and takes no taps while any
+    /// streams are loading. Only shown for a series, as this whole list is.
+    private var shuffleButton: some View {
+        let isShuffling = loadingTrigger == .shuffle
+        return Button {
+            guard !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
+            // The episode's season opens with its card first in view, and its streams load (at once the first time: they were
+            // looked up as the page opened).
+            if let video = model.takeShuffle() {
+                if let season = video.season { model.selectedSeason = season }
+                shuffledEpisode = video.id
+                play(model.request(for: video), .shuffle)
+            }
+        } label: {
+            Image(systemName: "shuffle")
+                .font(.subheadline.weight(.semibold))
+                .opacity(isShuffling ? 0 : 1)
+                .overlay {
+                    if isShuffling {
+                        Spinner()
+                            .controlSize(.small)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.smooth(duration: 0.2), value: isShuffling)
+                // The same grey as the trailer's symbol beside the title's other buttons.
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .glassCircleButton(.regular)
+        .frame(width: Self.secondaryControlHeight, height: Self.secondaryControlHeight)
+        .disabled(!model.canShuffle)
+        .opacity(model.canShuffle ? 1 : 0.4)
+        .allowsHitTesting(!isLoadingStreams)
+        .titleTapHaptic()
+        .help("Shuffle")
+        .accessibilityLabel("Shuffle")
+        .accessibilityHint("Picks a random episode that has aired")
+        .accessibilityIdentifier("detail.shuffleButton")
+    }
+
+    /// Switches the episode cards between their fixed width and the width of the text. The symbol shows the layout in use: a row of
+    /// cards, or one card across the page.
+    private var episodeWidthToggle: some View {
+        let isWide = model.matchesEpisodeWidthToText
+        return Button {
+            Task { await model.setMatchesEpisodeWidthToText(!isWide) }
+        } label: {
+            ZStack {
+                Self.glassHeightReference
+                Image(systemName: isWide ? "rectangle" : "rectangle.split.3x1")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+        }
+        .glassCircleButton(.regular)
+        .frame(width: Self.secondaryControlHeight, height: Self.secondaryControlHeight)
+        .titleTapHaptic()
+        .accessibilityLabel("Episode width")
+        .help("Episode width")
+        .accessibilityValue(isWide ? "Full width" : "Fixed width")
+        .accessibilityIdentifier("detail.episodeWidthToggle")
+    }
+
+    /// The text above the episodes runs from one page margin to the other. With the toggle on, each card is that wide, so the cards
+    /// line up with it; otherwise they keep their fixed width.
+    private func episodeWidth(pageWidth: CGFloat) -> CGFloat {
+        model.matchesEpisodeWidthToText ? pageWidth - contentMargin * 2 : metrics.episodeWidth
+    }
+
+    private func episodeRow(_ video: Video, width: CGFloat) -> some View {
+        let airsLater = !video.hasAired()
+        let request = model.request(for: video)
+        let hasNoStreams = unavailableStreams.contains(request.identity)
+        return Button {
+            // As Shuffle does: the episode's streams load on this page, with a spinner on its card only, and replace the details once
+            // ready. One lookup at a time, so a second tap does not call it off or open another. A swipe that ends on the card, such as
+            // one going back, plays nothing, as on a stream's card.
+            guard !isLoadingStreams, !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
+            play(request, .episode)
+        } label: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                episodeCard(video, width: width, airsLater: airsLater,
+                            isLoadingStreams: loadingTrigger == .episode && loadingRequest?.id == request.id)
+                if hasNoStreams {
+                    Text("No streams").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(PressableCardStyle())
+        .allowsHitTesting(!isLoadingStreams)
+        // An episode that has not aired cannot be opened: its card shows the air date instead.
+        .disabled(airsLater || hasNoStreams)
+        .titleTapHaptic()
+        .contextMenu {
+            let watched = model.isWatched(video)
+            ControlGroup {
+                Button(watched ? "Mark as not watched" : "Mark as watched",
+                       systemImage: watched ? "xmark.circle" : "checkmark.circle") {
+                    Task {
+                        await model.setWatched(!watched, for: request)
+                        await titleActions.refresh()
+                    }
+                }
+                Button {
+                    guard let ratings else { return }
+                    Task { await EpisodeIMDbReviews.open(request, ratings: ratings) }
+                } label: {
+                    Label {
+                        Text("IMDb")
+                    } icon: {
+                        ReviewSiteIcon(site: .imdb, size: 22, keepsColour: true)
+                    }
+                }
+            }
+            Button("Mark All Episodes Up to Here as Watched", systemImage: "checkmark.circle.fill") {
+                Task {
+                    await model.markEpisodesWatched(through: video)
+                    await titleActions.refresh()
+                }
+            }
+        } preview: {
+            // The same card, the full width between the page margins, inset by its padding so the menu's corners do not cut into it. Its
+            // still's corners follow the panel's, and the panel gets the hairline the app's glass cards have. The preview is on screen
+            // only while the menu is open.
+            // In landscape the still sits beside the text: under it, a still as wide as the page is taller than the screen, and the menu
+            // cut the synopsis off.
+            episodeCard(video, width: pageWidth - contentMargin * 2 - Self.previewPadding * 2, airsLater: airsLater,
+                        stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: isLandscape)
+                .padding(Self.previewPadding)
+                .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
+                // Without the store the IMDb mark forgot the coloured-logos setting and changed colour while the card was held.
+                .environment(ratings)
+                .onAppear { isHoldingEpisode = true }
+                .onDisappear { isHoldingEpisode = false }
+        }
+        .accessibilityIdentifier("detail.episode.\(video.id)")
+        // IMDb's episode scores come from OMDb, a season at a time, asked for when its first card comes on screen (and again if the key changes).
+        .task(id: "\(video.id):\(model.reviewServicesRevision):\(model.isLoading):\(model.hasSettledHero)") {
+            guard model.hasSettledHero else { return }
+            await model.episodeAppeared(video)
+        }
+    }
+
+    /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes
+    /// `showsWholeOverview`, so a held episode's synopsis is never cut; the list follows the full-width setting.
+    private func episodeCard(_ video: Video, width: CGFloat, airsLater: Bool, isLoadingStreams: Bool = false,
+                             stillRadius: CGFloat = Theme.Radius.small, showsWholeOverview: Bool? = nil, sideBySide: Bool = false) -> EpisodeRow {
+        EpisodeRow(video: video, fraction: model.progressFraction(for: video), watched: model.isWatched(video),
+                   artwork: model.backdropURL, score: model.score(for: video), runtimeMinutes: model.runtimeMinutes(for: video), width: width,
+                   showsWholeOverview: showsWholeOverview ?? model.matchesEpisodeWidthToText, airsLater: airsLater,
+                   isLoadingStreams: isLoadingStreams,
+                   stillRadius: stillRadius, sideBySide: sideBySide)
+    }
+}
+
+/// Use the episode's own IMDb ID to open its reviews, preferring the IMDb app.
+@MainActor
+enum EpisodeIMDbReviews {
+    static func open(_ request: StreamRequest, ratings: PosterRatingsStore) async {
+        guard let season = request.season, let episode = request.episode else { return }
+        let seriesID = ContentID(request.id).baseID
+        guard LetterboxdRatings.isIMDbID(seriesID) else { return }
+        guard let episodeID = await ratings.imdbEpisodeID(seriesIMDbID: seriesID, season: season, episode: episode) else {
+            // Without a reliable episode ID, link to that season instead of inventing an ID.
+            if let seasonURL = URL(string: "https://www.imdb.com/title/\(seriesID)/episodes/?season=\(season)") {
+                _ = await UIApplication.shared.open(seasonURL)
+            }
+            return
+        }
+        guard let appURL = URL(string: "imdb:///title/\(episodeID)/reviews"),
+              let webURL = URL(string: "https://www.imdb.com/title/\(episodeID)/reviews/") else { return }
+        UIApplication.shared.open(appURL, options: [:]) { opened in
+            if !opened { UIApplication.shared.open(webURL) }
+        }
+    }
+}
+
+/// One episode: its still with the progress line or watched mark over it, the numbered title, the air date, length and rating, and the
+/// overview: three lines in a fixed-width card, all of it when the list is set to full width.
+private struct EpisodeRow: View {
+    let video: Video
+    let fraction: Double?
+    let watched: Bool
+    let artwork: URL?
+    let score: DetailViewModel.EpisodeScore?
+    /// How long the episode runs, in minutes, once TMDb has said.
+    var runtimeMinutes: Int?
+
+    private var runtime: String? { runtimeMinutes.map(DetailViewModel.runtimeText(minutes:)) }
+
+    /// The length as VoiceOver reads it: "47 minutes", "1 hour, 2 minutes".
+    private var spokenRuntime: String? {
+        runtimeMinutes.map { Duration.seconds($0 * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide)) }
+    }
+    let width: CGFloat
+    /// Set for a full-width card: the whole overview shows at its own height, so the rating sits under this episode's own text.
+    var showsWholeOverview = false
+    /// Set for an episode that has not aired: its still is dimmed, and the card cannot be opened.
+    var airsLater = false
+    /// Set while this episode's streams load: a spinner over its still, as Play has one.
+    var isLoadingStreams = false
+    /// The still's corner radius. The menu's preview gives it one that follows its panel's, which is rounder than a card's.
+    var stillRadius: CGFloat = Theme.Radius.small
+    /// Set for the menu's preview in landscape: the still takes a little under half the width, with the text beside it, so the whole card
+    /// fits the screen's height.
+    var sideBySide = false
+
+    private var stillWidth: CGFloat { sideBySide ? (width * 0.45).rounded() : width }
+
+    /// How far the progress line and the watched mark move in from the still's edges, so a rounder corner does not cut into them.
+    private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
+
+    var body: some View {
+        Group {
+            if sideBySide {
+                HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                    still
+                    text
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    still
+                    text
+                }
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .multilineTextAlignment(.leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The numbered title, the overview, and the date, length and score.
+    private var text: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            if let episode = video.episode {
+                Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.secondary)
+            }
+            Text(video.title)
+                .font(.headline)
+                .lineLimit(2, reservesSpace: true)
+            if let overview = video.overview, !overview.isEmpty {
+                JustifiedText(text: overview, textStyle: .footnote, color: .secondaryLabel,
+                              lineLimit: showsWholeOverview ? 0 : 3, reservesSpace: !showsWholeOverview)
+            }
+            dateAndScore
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The episode's own still, or the series' backdrop when the addon sent none.
+    private var still: some View {
+        ArtworkImage(url: video.thumbnail ?? artwork, maxPixelSize: stillWidth * 3)
+            .frame(width: stillWidth, height: stillWidth / CardAspect.wide.ratio)
+            .opacity(airsLater ? 0.45 : 1)
+            .overlay {
+                if !watched, let fraction {
+                    PlaybackProgressOverlay(fraction: fraction, width: stillWidth, inset: overlayInset)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if watched { checkmark.padding(overlayInset) }
+            }
+            .overlay {
+                if isLoadingStreams {
+                    ZStack {
+                        Color.black.opacity(0.35)
+                        Spinner()
+                            .controlSize(.large)
+                    }
+                    .transition(.opacity)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Loading streams")
+                }
+            }
+            .animation(.smooth(duration: 0.25), value: isLoadingStreams)
+            .mediaArtwork(cornerRadius: stillRadius)
+    }
+
+    private var checkmark: some View {
+        Image(systemName: "checkmark")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(.black.opacity(0.6), in: Circle())
+            .padding(Theme.Spacing.xs)
+            .accessibilityHidden(true)
+    }
+
+    /// "Jan 20, 2008 · 47m · [IMDb] 8.9": the air date, the length, then the score with the IMDb mark when it is IMDb's (a star when it is
+    /// the addon's).
+    @ViewBuilder
+    private var dateAndScore: some View {
+        let date = video.airDate?.formatted(date: .abbreviated, time: .omitted)
+        if date != nil || runtime != nil || score != nil {
+            HStack(spacing: 5) {
+                if let date { Text(date) }
+                if date != nil, runtime != nil { Text("·") }
+                if let runtime { Text(runtime).monospacedDigit() }
+                if date != nil || runtime != nil, score != nil { Text("·") }
+                if let score {
+                    if score.isIMDb {
+                        ReviewSiteIcon(site: .imdb, size: 13)
+                    } else {
+                        Image(systemName: "star.fill").font(.system(size: 9, weight: .bold))
+                    }
+                    Text(score.text).monospacedDigit()
+                    if !score.isIMDb, video.ratingSource == .tmdb { Text("TMDb") }
+                }
+            }
+            .font(Theme.Typography.metaLine)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([date, spokenRuntime, score.map {
+                "\($0.isIMDb ? "IMDb rating" : video.ratingSource == .tmdb ? "TMDb rating" : "Rating") \($0.text)"
+            }].compactMap { $0 }.joined(separator: ", "))
+        }
+    }
+}
+#endif

@@ -1,0 +1,16 @@
+{
+  "id": "org.example.config",
+  "name": "Needs Config",
+  "version": "1.0.0",
+  "resources": [
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": [],
+  "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+  }
+}

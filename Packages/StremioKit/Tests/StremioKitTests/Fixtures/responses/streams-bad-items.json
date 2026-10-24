@@ -1,0 +1,19 @@
+{
+  "streams": [
+    {
+      "name": "No source"
+    },
+    null,
+    3,
+    {
+      "url": "not a url"
+    },
+    {
+      "url": "ftp://example.com/x.mp4"
+    },
+    {
+      "url": "https://ok.example.com/x.mp4",
+      "name": "ok"
+    }
+  ]
+}

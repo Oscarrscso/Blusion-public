@@ -1,0 +1,37 @@
+{
+  "id": "org.example.baditems",
+  "name": "Bad Items",
+  "version": "1.0.0",
+  "resources": [
+    "stream",
+    42,
+    null,
+    {
+      "types": [
+        "movie"
+      ]
+    },
+    {
+      "name": "meta"
+    },
+    ""
+  ],
+  "types": [
+    "movie"
+  ],
+  "catalogs": [
+    {
+      "type": "movie"
+    },
+    {
+      "id": "no-type"
+    },
+    {
+      "type": "movie",
+      "id": "ok",
+      "name": "OK"
+    },
+    "garbage",
+    null
+  ]
+}

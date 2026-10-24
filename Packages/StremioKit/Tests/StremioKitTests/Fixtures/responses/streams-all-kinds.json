@@ -1,0 +1,72 @@
+{
+  "streams": [
+    {
+      "name": "Direct",
+      "description": "1080p\nline two",
+      "url": "https://cdn.example.com/a.mp4",
+      "behaviorHints": {
+        "bingeGroup": "g1",
+        "videoSize": "1048576",
+        "filename": "a.mp4"
+      }
+    },
+    {
+      "name": "Torrent",
+      "title": "legacy title",
+      "infoHash": "ABCDEF0123456789ABCDEF0123456789ABCDEF01",
+      "fileIdx": "2",
+      "sources": [
+        "tracker:udp://t.example:1"
+      ]
+    },
+    {
+      "name": "YT",
+      "ytId": "aqz-KE-bpKQ"
+    },
+    {
+      "name": "External",
+      "externalUrl": "https://example.com/watch"
+    },
+    {
+      "name": "NZB",
+      "nzbUrl": "https://example.com/x.nzb"
+    },
+    {
+      "name": "Rar",
+      "rarUrls": [
+        {
+          "url": "https://example.com/x.rar"
+        }
+      ]
+    },
+    {
+      "name": "Proxy",
+      "url": "https://cdn.example.com/p.mp4",
+      "behaviorHints": {
+        "notWebReady": true,
+        "proxyHeaders": {
+          "request": {
+            "Referer": "https://example.com"
+          },
+          "response": {
+            "X": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "WithSubs",
+      "url": "https://cdn.example.com/s.mp4",
+      "subtitles": [
+        {
+          "id": "s1",
+          "url": "https://example.com/s.srt",
+          "lang": "eng"
+        },
+        {
+          "id": "bad"
+        }
+      ]
+    }
+  ]
+}

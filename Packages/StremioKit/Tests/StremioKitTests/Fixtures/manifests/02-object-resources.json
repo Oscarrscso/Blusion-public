@@ -1,0 +1,28 @@
+{
+  "id": "org.example.objects",
+  "name": "Object Resources",
+  "version": "1.0.0",
+  "resources": [
+    {
+      "name": "stream",
+      "types": [
+        "movie"
+      ],
+      "idPrefixes": [
+        "tt"
+      ]
+    },
+    {
+      "name": "subtitles",
+      "types": [
+        "movie",
+        "series"
+      ]
+    }
+  ],
+  "types": [
+    "movie",
+    "series"
+  ],
+  "catalogs": []
+}
