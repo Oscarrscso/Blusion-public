@@ -56,6 +56,29 @@ final class PlaybackFlowTests: XCTestCase {
     }
 
     @MainActor
+    private func seek(_ app: XCUIApplication, to fraction: Double) {
+        let slider = app.sliders["player.scrubber"]
+        var requested = fraction
+        var actual: Double?
+        for _ in 0..<4 {
+            // XCTest estimates the new glass thumb's travel and can overshoot.
+            // Read the real percentage and correct the gesture before testing a
+            // short cue; never substitute the requested time for playback time.
+            slider.adjust(toNormalizedSliderPosition: min(1, max(0, requested)))
+            let percentage = (slider.value as? String ?? "").filter { $0.isNumber || $0 == "." }
+            guard let value = Double(percentage) else {
+                XCTFail("native slider did not expose its playback percentage: \(String(describing: slider.value))")
+                return
+            }
+            actual = value / 100
+            if abs(value / 100 - fraction) <= 0.015 { return }
+            requested += fraction - value / 100
+        }
+        captureScreenshot(app, named: "player-seek-failure")
+        XCTFail("native slider did not reach \(fraction): actual \(String(describing: actual))")
+    }
+
+    @MainActor
     private func waitForTime(_ app: XCUIApplication, atLeast target: Double, timeout: TimeInterval = 20) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -195,14 +218,14 @@ final class PlaybackFlowTests: XCTestCase {
         // The cues are 1.0-3.0 "First cue", 4.5-6.25 "Second cue…", 8.0-9.5 "Third cue" on a 10 s clip.
         for (fraction, expected) in [(0.2, "First cue"), (0.55, "Second cue")] as [(Double, String)] {
             showControls(app)
-            app.sliders["player.scrubber"].adjust(toNormalizedSliderPosition: fraction)
+            seek(app, to: fraction)
             let cue = app.descendants(matching: .any)["player.subtitle"].firstMatch
             let shown = NSPredicate { _, _ in cue.exists && cue.label.hasPrefix(expected) }
             wait(for: [XCTNSPredicateExpectation(predicate: shown, object: cue)], timeout: 10)
             captureScreenshot(app, named: "player-subtitle-\(fraction)")
         }
         showControls(app)
-        app.sliders["player.scrubber"].adjust(toNormalizedSliderPosition: 0.37)   // 3.7 s: between cues
+        seek(app, to: 0.37)   // 3.7 s: between cues
         let cue = app.descendants(matching: .any)["player.subtitle"].firstMatch
         let gone = NSPredicate { _, _ in !cue.exists || cue.label.isEmpty }
         wait(for: [XCTNSPredicateExpectation(predicate: gone, object: cue)], timeout: 10)
