@@ -538,6 +538,45 @@ import StremioKitTestSupport
         #expect(value("url", in: query(link)) == remuxURL)
     }
 
+    @Test func autoPickKeepsBuiltInPlayerEvenWhenInfuseIsInstalled() async throws {
+        let services = try await services(
+            bodies: [body([direct("4K REMUX", "https://a.example.com/movie.mkv", "2160p BluRay REMUX")])],
+            settings: PlaybackSettings(playerPreference: .builtIn), fallbackLinked: true
+        )
+        let model = picker(movie, services)
+        await model.load()
+        guard case .play(let plan)? = await model.autoPickBest() else {
+            Issue.record("Auto Pick must use Blusion, not Infuse"); return
+        }
+        #expect(plan.candidates.first?.title == "4K REMUX")
+        #expect(model.recommendedStream?.id == model.autoPickedStream?.id)
+    }
+
+    @Test func autoPickUsesFallbackEngineBeforeInfuseWhenPreferred() async throws {
+        let services = try await services(
+            bodies: [body([direct("MKV", "https://a.example.com/movie.mkv", "2160p")])],
+            settings: PlaybackSettings(playerPreference: .infuseWhenNeeded), fallbackLinked: true
+        )
+        let model = picker(movie, services)
+        await model.load()
+        guard case .play? = await model.autoPickBest() else {
+            Issue.record("Fallback-capable Blusion must handle the MKV"); return
+        }
+    }
+
+    @Test func autoPickOnlyHandsOffWhenPolicyRequiresIt() async throws {
+        let services = try await services(
+            bodies: [body([direct("MKV", "https://a.example.com/movie.mkv", "2160p")])],
+            settings: PlaybackSettings(playerPreference: .infuseWhenNeeded)
+        )
+        let model = picker(movie, services)
+        await model.load()
+        guard case .openInPlayer(let player, _)? = await model.autoPickBest() else {
+            Issue.record("An unsupported MKV may use Infuse when fallback is selected"); return
+        }
+        #expect(player == .infuse)
+    }
+
     @Test func aReleaseNameDoesNotLendItsDottedEndingAsTheExtension() async throws {
         // Real addons send release names as the file name, with no extension: the file's extension comes from the URL instead.
         let release = "Breaking.Bad.S01E01.Pilot.2160p.NF.WEB-DL.DD+5.1.H.265-playWEB"

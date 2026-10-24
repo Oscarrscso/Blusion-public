@@ -46,8 +46,10 @@ struct PlayerOptionsPanel: View {
                     .onTapGesture { close() }
                     .accessibilityHidden(true)
                 panel
-                    .frame(width: wide ? min(400, proxy.size.width * 0.5) : nil)
-                    .frame(maxHeight: wide ? .infinity : proxy.size.height * 0.66)
+                    .frame(width: wide ? min(420, proxy.size.width * 0.55) : nil)
+                    // A short tab shouldn't leave an enormous empty sheet beneath its content.
+                    .frame(height: !wide && tab == .speed ? 246 : nil)
+                    .frame(maxHeight: wide ? .infinity : proxy.size.height * 0.70)
                     .padding(wide ? 12 : 10)
                     .transition(.move(edge: wide ? .trailing : .bottom).combined(with: .opacity))
             }
@@ -65,8 +67,9 @@ struct PlayerOptionsPanel: View {
             HStack(spacing: 8) {
                 tabBar
                 Button(action: close) {
-                    Image(systemName: "xmark").font(.subheadline.weight(.bold)).frame(width: 36, height: 36)
-                        .background(.white.opacity(0.12), in: .circle)
+                    Image(systemName: "xmark").font(.subheadline.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .glassEffect(.regular.interactive(), in: .circle)
                         .contentShape(.circle)
                 }
                 .buttonStyle(.plain)
@@ -76,35 +79,47 @@ struct PlayerOptionsPanel: View {
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("player.panel.close")
             }
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
             ScrollView {
                 content
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 20)
             }
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
         }
-        .glassEffect(.regular.tint(.black.opacity(0.4)), in: .rect(cornerRadius: 30))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 28))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("player.panel")
     }
 
     private var tabBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 3) {
             ForEach(tabs) { item in
                 let selected = item == tab
                 Button {
+                    Haptics.selection()
                     withAnimation(.snappy(duration: 0.22)) { tab = item }
                 } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: item.symbol).font(.system(size: 16, weight: .semibold)).frame(height: 18)
-                        Text(item.title).font(.caption2.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                    VStack(spacing: 4) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(height: 19)
+                        Text(item.title)
+                            .font(.system(size: 10, weight: selected ? .semibold : .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, minHeight: 46)
-                    .foregroundStyle(selected ? .black : .white.opacity(0.8))
-                    .background { if selected { Capsule().fill(.white) } }
+                    .foregroundStyle(selected ? .white : .white.opacity(0.72))
+                    .background {
+                        if selected {
+                            Capsule().glassEffect(.regular.interactive(), in: .capsule)
+                        }
+                    }
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -114,7 +129,7 @@ struct PlayerOptionsPanel: View {
             }
         }
         .padding(3)
-        .background(.white.opacity(0.1), in: .capsule)
+        .background(.white.opacity(0.055), in: .capsule)
     }
 
     @ViewBuilder
@@ -142,13 +157,13 @@ struct PlayerOptionsPanel: View {
     // MARK: Subtitles
 
     private var subtitles: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 if let status = model.subtitleStatus {
                     Text(status).font(.footnote).foregroundStyle(.white.opacity(0.6)).padding(.horizontal, 4)
                 }
                 PanelGroup {
-                    PanelOptionRow(title: "Off", selected: model.subtitleChoice == .off) { pickSubtitle(.off) }
+                    PanelOptionRow(title: "Off", symbol: "captions.bubble", selected: model.subtitleChoice == .off) { pickSubtitle(.off) }
                     ForEach(model.embeddedSubtitleTracks) { track in
                         PanelOptionRow(title: track.title, tags: tags(forced: track.isForced, sdh: track.isHearingImpaired, title: track.title),
                                   selected: model.subtitleChoice == .embedded(track.id)) { pickSubtitle(.embedded(track.id)) }
@@ -185,7 +200,7 @@ struct PlayerOptionsPanel: View {
     private var subtitleStyle: some View {
         let style = model.subtitleStyle
         return PanelSection("Style") {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 PanelChips(title: "Size", options: [0.75, 1.0, 1.25, 1.5, 2.0], selection: style.scale, label: { "\(Int($0 * 100))%" }) { value in
                     restyle { $0.scale = value }
                 }
@@ -253,12 +268,32 @@ struct PlayerOptionsPanel: View {
 
     // MARK: Audio
 
+    /// File track titles sometimes already contain the codec and channel count in
+    /// brackets. Hide a second generated codec suffix without changing track identity.
+    private func audioDisplayTitle(_ track: MediaTrack) -> String {
+        let parts = track.title.components(separatedBy: " · ")
+        guard parts.count > 1 else { return track.title }
+        let base = parts[0].lowercased()
+        let codecs = ["dolby digital plus", "dolby digital", "truehd", "dts-hd", "dts", "aac", "flac", "opus", "pcm"]
+        let layouts = ["7.1", "6.1", "5.1", "2.0", "1.0", "stereo", "mono"]
+        let extra = parts.dropFirst().filter { detail in
+            let lower = detail.lowercased()
+            if base.contains(lower) { return false }
+            let sameCodec = codecs.contains { lower.contains($0) && base.contains($0) }
+            let layout = layouts.first { lower.contains($0) }
+            let sameLayout = layout.map { base.contains($0) || ($0 == "stereo" && base.contains("2.0"))
+                || ($0 == "mono" && base.contains("1.0")) } ?? true
+            return !(sameCodec && sameLayout)
+        }
+        return ([parts[0]] + extra).joined(separator: " · ")
+    }
+
     private var audio: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 18) {
             if !model.audioTracks.isEmpty {
                 PanelGroup {
                     ForEach(model.audioTracks) { track in
-                        PanelOptionRow(title: track.title, tags: tags(forced: track.isForced, sdh: track.isHearingImpaired, title: track.title),
+                        PanelOptionRow(title: audioDisplayTitle(track), tags: tags(forced: track.isForced, sdh: track.isHearingImpaired, title: track.title),
                                   selected: model.selectedAudioTrackID == track.id) {
                             model.selectAudioTrack(id: track.id)
                             close()
@@ -282,9 +317,9 @@ struct PlayerOptionsPanel: View {
     private var picture: some View {
         let layout = model.videoLayout
         let processing = model.processing
-        return VStack(alignment: .leading, spacing: 22) {
+        return VStack(alignment: .leading, spacing: 18) {
             PanelSection("Frame") {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
                     PanelChips(title: "Fit", options: VideoFit.allCases, selection: layout.fit, label: \.label) { model.setVideoFit($0) }
                     PanelChips(title: "Zoom", options: [1.0, 1.15, 1.33, 1.5, 2.0], selection: layout.zoom,
                             label: { $0 == 1 ? "Off" : "\($0.formatted())×" }) { model.setZoom($0) }
@@ -296,7 +331,7 @@ struct PlayerOptionsPanel: View {
                 }
             }
             PanelSection("Colour") {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
                     if model.capabilities.contains(.dolbyVisionSwitch) {
                         PanelToggle(title: "Dolby Vision", isOn: processing.dolbyVision) { model.setDolbyVision($0) }
                             .accessibilityIdentifier("player.panel.dolbyVision")
@@ -310,7 +345,7 @@ struct PlayerOptionsPanel: View {
                 }
             }
             PanelSection("Quality") {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 14) {
                     PanelChips(title: "Upscaling", options: UpscalingMode.allCases, selection: processing.upscaling,
                             label: upscalingLabel) { value in changeProcessing { $0.upscaling = value } }
                     if model.capabilities.contains(.deinterlace) {
@@ -345,16 +380,20 @@ struct PlayerOptionsPanel: View {
     // MARK: Speed
 
     private var speed: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in
                 let selected = model.state.rate == rate
                 Button { model.setRate(rate) } label: {
                     Text(rate == 1 ? "1×" : "\(rate.formatted())×")
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                        .frame(maxWidth: .infinity, minHeight: 64)
-                        .foregroundStyle(selected ? .black : .white)
-                        .background(selected ? .white : .white.opacity(0.1), in: .rect(cornerRadius: 18))
-                        .contentShape(.rect(cornerRadius: 18))
+                        .font(.body.weight(selected ? .semibold : .medium).monospacedDigit())
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .foregroundStyle(.white)
+                        .background(selected ? .white.opacity(0.18) : .white.opacity(0.07), in: .rect(cornerRadius: 14))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14)
+                                .strokeBorder(.white.opacity(selected ? 0.30 : 0.07), lineWidth: 0.75)
+                        }
+                        .contentShape(.rect(cornerRadius: 14))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(rate == 1 ? "Normal speed" : "\(rate.formatted()) times")
@@ -390,9 +429,30 @@ private struct PanelSection<Content: View>: View {
         self.content = content()
     }
 
+    private var symbol: String? {
+        switch title {
+        case "Frame": "rectangle.expand.vertical"
+        case "Colour": "paintpalette"
+        case "Quality": "sparkles.tv"
+        case "Style": "textformat"
+        case "Online": "globe"
+        default: nil
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.title3.weight(.bold)).padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+            }
+            .padding(.horizontal, 4)
             content
         }
     }
@@ -415,12 +475,12 @@ private struct PanelGroup<Content: View>: View {
         VStack(spacing: 0) {
             Group(subviews: content) { rows in
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    if index > 0 { Divider().overlay(.white.opacity(0.08)).padding(.leading, 16) }
+                    if index > 0 { Divider().overlay(.white.opacity(0.06)).padding(.leading, 14) }
                     row
                 }
             }
         }
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18))
+        .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
     }
 }
 
@@ -429,26 +489,52 @@ private struct PanelOptionRow: View {
     let title: String
     var detail: String?
     var tags: [String] = []
+    var symbol: String?
     let selected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Text(title).font(.body.weight(selected ? .semibold : .regular)).lineLimit(2).multilineTextAlignment(.leading)
-                ForEach(tags, id: \.self) { tag in
-                    Text(tag).font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.white.opacity(0.15), in: .capsule)
-                        .foregroundStyle(.white.opacity(0.8))
+            HStack(alignment: .center, spacing: 12) {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.56))
+                        .frame(width: 18)
                 }
-                Spacer(minLength: 8)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title)
+                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !tags.isEmpty {
+                        HStack(spacing: 5) {
+                            ForEach(tags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.68))
+                                    .padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(.white.opacity(0.08), in: .capsule)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if let detail {
-                    Text(detail).font(.subheadline.monospacedDigit()).foregroundStyle(.white.opacity(0.55))
+                    Text(detail)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.6))
+                        .fixedSize()
                 }
-                Image(systemName: "checkmark").font(.subheadline.weight(.bold)).opacity(selected ? 1 : 0)
+                Image(systemName: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 18)
+                    .opacity(selected ? 1 : 0)
+                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(minHeight: 54)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -475,8 +561,14 @@ private struct PanelChips<Value: Hashable>: View {
                         Button { choose(option) } label: {
                             Text(label(option)).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 .padding(.horizontal, 14).frame(minHeight: 36)
-                                .foregroundStyle(selected ? .black : .white)
-                                .background(selected ? .white : .white.opacity(0.1), in: .capsule)
+                                .foregroundStyle(.white)
+                                .background {
+                                    if selected {
+                                        Capsule().glassEffect(.regular.interactive(), in: .capsule)
+                                    } else {
+                                        Capsule().fill(.white.opacity(0.09))
+                                    }
+                                }
                                 .contentShape(.capsule)
                         }
                         .buttonStyle(.plain)
@@ -486,7 +578,7 @@ private struct PanelChips<Value: Hashable>: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .scrollClipDisabled()
+            .contentMargins(.horizontal, 2, for: .scrollContent)
         }
         .accessibilityElement(children: .contain)
     }

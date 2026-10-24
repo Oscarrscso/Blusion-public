@@ -87,17 +87,11 @@ public final class StreamPickerViewModel {
         }
         addonSections = runs.map { AddonSection(addon: $0[0].addon, streams: $0) }
         links = Self.linksToOffer(in: listing.items)
-        bestAssessment = listing.isLoading ? nil : AutoStreamRanking.best(from: infuseCandidates, duration: request.expectedDuration)
-        // The list applies release priority before route and resolution. Rank within the first watchable route class;
-        // AutoStreamRanking preserves that same release priority. An explicit resolution preference uses the list's order.
-        let watchable = listing.items.filter { $0.route.isWatchable }
-        if settings.rankingPreferences.preferredResolution != nil {
-            bestToPlay = watchable.first
-        } else {
-            bestToPlay = watchable.first.flatMap { first in
-                AutoStreamRanking.best(from: watchable.filter { $0.route.sortClass == first.route.sortClass }, duration: request.expectedDuration)?.item
-            }
-        }
+        // The player's routing policy has already applied the saved preference. Auto Pick must
+        // rank only these watchable routes, not bypass the preference with an Infuse handoff.
+        let candidates = automaticCandidates
+        bestAssessment = listing.isLoading ? nil : AutoStreamRanking.best(from: candidates, duration: request.expectedDuration)
+        bestToPlay = bestAssessment?.item ?? candidates.first
     }
 
     public func load() async {
@@ -157,7 +151,7 @@ public final class StreamPickerViewModel {
             }
         }
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        while isLoading, !(stopsForWaitTarget && waitTargetHasAnswered(needsInfuse: false)), ContinuousClock.now < deadline,
+        while isLoading, !(stopsForWaitTarget && waitTargetHasAnswered()), ContinuousClock.now < deadline,
               !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
@@ -261,29 +255,27 @@ public final class StreamPickerViewModel {
         return await choose(best)
     }
 
-    /// Called by the Auto Pick action, and when the streams open with automatic playback on. All resolutions, including REMUX, are
-    /// compared together.
+    /// Called by Auto Pick and automatic playback. Uses the selected player policy,
+    /// so choosing Blusion never silently switches to Infuse.
     public func autoPickBest() async -> Choice? {
         guard !isAutoPicking else { return nil }
         isAutoPicking = true
         autoPickMessage = nil
         defer { isAutoPicking = false }
-        // The normal fetch already asks every installed addon whose manifest supports this title.
-        // Wait for their releases instead of inventing unsupported resolution-specific addon queries, or, when Auto Pick waits for one
-        // addon, until that addon has answered with a stream Infuse can take.
-        while isLoading, !waitTargetHasAnswered(needsInfuse: true) {
+        // Wait for the chosen addon when applicable; it must have a stream playable
+        // through the saved policy, rather than merely one Infuse could accept.
+        while isLoading, !waitTargetHasAnswered() {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
         }
         guard !Task.isCancelled else { return nil }
-        // Acting before every addon has answered, everything that has arrived is ranked.
-        let assessment = isLoading ? AutoStreamRanking.best(from: infuseCandidates, duration: request.expectedDuration) : bestAssessment
+        let assessment = isLoading ? AutoStreamRanking.best(from: automaticCandidates, duration: request.expectedDuration) : bestAssessment
         guard let pick = assessment else {
-            autoPickMessage = "No streams compatible with Infuse were found."
+            autoPickMessage = "No playable streams were found."
             return nil
         }
         guard !Task.isCancelled else { return nil }
         autoPickedStream = pick.item
-        return await handoffChoice(for: pick.item, player: .infuse)
+        return await choose(pick.item)
     }
 
     /// The stream Auto Pick would start, marked in the list before anyone asks for it. Nil while the addons are still answering, so the
@@ -301,14 +293,13 @@ public final class StreamPickerViewModel {
         return "\(sharpness) · \(pick.isRemux ? "REMUX" : pick.item.quality.source?.rawValue ?? "release")"
     }
 
-    /// The streams Infuse can take as they are: what Auto Pick ranks.
-    private var infuseCandidates: [RankedStream] {
-        listing.items.filter(isInfuseCandidate)
-    }
-
-    private func isInfuseCandidate(_ item: RankedStream) -> Bool {
-        guard let url = PlaybackPolicy.playbackURL(for: item.stream, config: listing.config) else { return false }
-        return ExternalPlayer.infuse.canPlay(streamURL: url, headers: item.stream.behaviorHints.proxyHeaders?.request ?? [:])
+    /// Auto Pick and the recommendation use the same set of routes as ordinary Play.
+    /// Respect an explicit resolution preference and avoid mixing lower-ranked route classes.
+    private var automaticCandidates: [RankedStream] {
+        let watchable = listing.items.filter { $0.route.isWatchable }
+        if settings.rankingPreferences.preferredResolution != nil { return Array(watchable.prefix(1)) }
+        guard let first = watchable.first else { return [] }
+        return watchable.filter { $0.route.sortClass == first.route.sortClass }
     }
 
     /// The addon Auto Pick waits for under the saved choice: one the user named, Auto's fastest, or nil for every addon.
@@ -323,14 +314,13 @@ public final class StreamPickerViewModel {
         return target
     }
 
-    /// True once the addon Auto Pick waits for has answered with a stream it can start: one Infuse can take for Auto Pick, any stream
-    /// that can be watched for automatic playback. False with no such addon, while it is still answering, or when it failed, had nothing
-    /// that fits, or was never asked (it does not cover the title): Auto Pick then waits for every addon.
-    private func waitTargetHasAnswered(needsInfuse: Bool) -> Bool {
+    /// True once the chosen addon answers with a stream the saved player can start.
+    /// When it fails or has no watchable streams we continue waiting for other addons.
+    private func waitTargetHasAnswered() -> Bool {
         guard let waitTarget, hasLoaded, !listing.pending.contains(where: { $0.id == waitTarget }) else { return false }
         return listing.items.contains { item in
             (item.addon.id == waitTarget || item.alsoProvidedBy.contains { $0.id == waitTarget })
-                && (needsInfuse ? isInfuseCandidate(item) : item.route.isWatchable)
+                && item.route.isWatchable
         }
     }
 

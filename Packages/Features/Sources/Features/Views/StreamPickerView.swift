@@ -302,11 +302,9 @@ struct StreamPickerView: View {
                     // The picker was left while it loaded: nothing starts, and no Auto Pick is left waiting on a load that was called off.
                     guard !Task.isCancelled else { return }
                     if startsAutomatically, !hasSelectedManually {
-                        // With the switch on, opening the streams does what the Auto Pick button beside it does, for a viewer whose streams
-                        // go to Infuse. Otherwise the best stream by rank starts, as automatic playback always has.
-                        if settings.playerPreference.externalPlayer == .infuse, isInstalled(.infuse) {
-                            autoPick(fallingBackToBest: true)
-                        } else if let best = model.bestToPlay {
+                        // All automatic launches take the same ranked route as normal Play:
+                        // Blusion by default, Infuse only when the saved preference calls for it.
+                        if let best = model.bestToPlay {
                             select(best, automatically: true)
                         } else {
                             finishAutomaticStart(started: false)
@@ -1036,27 +1034,18 @@ struct StreamPickerView: View {
         onAutomaticStart?(started)
     }
 
-    /// Runs Auto Pick and starts its choice. The run made when the streams open (`fallingBackToBest`) starts the best stream by rank when
-    /// Auto Pick has nothing it can hand over, so automatic playback still starts something.
-    private func autoPick(fallingBackToBest: Bool = false) {
+    /// Manual Auto Pick uses the same ranked, preference-aware player route as Play.
+    private func autoPick() {
         guard !isOpeningPlayer else { return }
         isOpeningPlayer = true
         hasSelectedManually = true
         autoPickTask?.cancel()
         autoPickTask = Task {
-            if let choice = await model.autoPickBest(), !Task.isCancelled, let item = model.autoPickedStream {
-                let started = present(choice, for: item)
-                if fallingBackToBest { finishAutomaticStart(started: started) }
-                return
-            }
-            guard fallingBackToBest, !Task.isCancelled else { isOpeningPlayer = false; return }
-            guard let best = model.bestToPlay, let choice = await model.choose(best) else {
+            guard let choice = await model.autoPickBest(), !Task.isCancelled, let item = model.autoPickedStream else {
                 isOpeningPlayer = false
-                finishAutomaticStart(started: false)
                 return
             }
-            guard !Task.isCancelled else { isOpeningPlayer = false; return }
-            finishAutomaticStart(started: present(choice, for: best))
+            _ = present(choice, for: item)
         }
     }
 
