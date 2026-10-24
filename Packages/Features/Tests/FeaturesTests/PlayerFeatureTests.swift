@@ -213,6 +213,32 @@ import StremioKitTestSupport
         await model.close()
     }
 
+    @Test func fitAndFillDiscardLegacyStretchZoomAspectAndCrop() async throws {
+        var settings = PlaybackSettings()
+        settings.player.videoLayout = VideoLayout(fit: .stretch, zoom: 2,
+                                                  aspect: .ratio4x3, crop: .ratio239)
+        let store = InMemorySettingsStore(settings)
+        let engines = Engines { _ in MockEngine() }
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
+                                    services: try await services(store: store, engines: engines))
+        await model.start()
+        #expect(model.videoLayout == VideoLayout(), "the first frame must not inherit stretched or zoomed settings")
+
+        model.setAspect(.ratio16x9)
+        model.setCrop(.ratio239)
+        model.setZoom(2)
+        model.setVideoFit(.fill)
+        #expect(model.videoLayout == VideoLayout(fit: .fill), "fill is a centred, aspect-preserving crop")
+
+        model.setVideoFit(.fit)
+        #expect(model.videoLayout == VideoLayout(), "pinching inward restores the original uncropped picture")
+
+        await model.waitForSavedPreferences()
+        let saved = await store.load().player.videoLayout
+        #expect(saved.fit == .fit)
+        await model.close()
+    }
+
     @Test func cropAndZoomKeepEachOtherAndDolbyVisionKeepsTheRestOfThePicture() async throws {
         let store = InMemorySettingsStore()
         let engines = Engines { _ in MockEngine() }

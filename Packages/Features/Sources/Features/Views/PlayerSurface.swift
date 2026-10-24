@@ -30,6 +30,8 @@ final class PlayerLayerView: UIView {
     var layout = VideoLayout() { didSet { if layout != oldValue { setNeedsLayout() } } }
     private var sourceSize: CGSize? { didSet { if sourceSize != oldValue { setNeedsLayout() } } }
     private var sizeObservation: NSKeyValueObservation?
+    private var frameObservation: NSKeyValueObservation?
+    var onFirstVideoFrame: (() -> Void)?
     private weak var observedPlayer: AVPlayer?
 
     override init(frame: CGRect) {
@@ -52,8 +54,16 @@ final class PlayerLayerView: UIView {
         guard player !== observedPlayer else { return }
         observedPlayer = player
         sizeObservation = nil
+        frameObservation = nil
         sourceSize = nil
         guard let player else { return }
+        // AVPlayer may report "playing" before the layer displays a decoded frame.
+        // Keep the startup artwork until the actual first picture appears.
+        frameObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+            let ready = layer.isReadyForDisplay
+            guard ready else { return }
+            Task { @MainActor in self?.onFirstVideoFrame?() }
+        }
         sizeObservation = player.observe(\.currentItem?.presentationSize, options: [.initial, .new]) { [weak self] player, _ in
             let size = player.currentItem?.presentationSize ?? .zero
             Task { @MainActor in self?.sourceSize = size.width > 0 && size.height > 0 ? size : nil }
@@ -157,6 +167,7 @@ struct PlayerSurface: UIViewRepresentable {
     var ambientMode = false
     var superResolution: SuperResolutionRenderer?
     var ambient: AmbientSampler?
+    var onFirstVideoFrame: () -> Void = {}
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
@@ -167,6 +178,7 @@ struct PlayerSurface: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
+        view.onFirstVideoFrame = onFirstVideoFrame
         if let avEngine = engine as? AVEngine {
             view.embed(nil)
             if view.playerLayer.player !== avEngine.player {

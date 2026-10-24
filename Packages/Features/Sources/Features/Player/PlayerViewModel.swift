@@ -85,7 +85,14 @@ public final class PlayerViewModel {
         let resume = ProgressRecorder.resumePosition(for: previous)
         let session = ProgressSession(request: plan.request, previous: previous, store: services.progress)
         let player = settings.player
-        let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: player.videoLayout,
+        // Older builds could save stretch or arbitrary display ratios. Start with
+        // an undistorted picture, retaining only the preferred Fit/Fill mode.
+        var safeLayout = player.videoLayout
+        if safeLayout.fit == .stretch { safeLayout.fit = .fit }
+        safeLayout.zoom = 1
+        safeLayout.aspect = .source
+        safeLayout.crop = .off
+        let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: safeLayout,
                                               processing: player.processing, subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
         coordinator.onEnded = { [weak self] in self?.hasFinished = true }
         coordinator.onCandidateChange = { [weak self] candidate in self?.lookUpSubtitles(for: candidate) }
@@ -318,13 +325,17 @@ public final class PlayerViewModel {
     public var videoLayout: VideoLayout { coordinator?.videoLayout ?? settings.player.videoLayout }
     public var processing: VideoProcessing { coordinator?.processing ?? settings.player.processing }
 
-    /// Fit, fill or stretch is kept for next time; zoom, aspect and crop are for this video.
+    /// Fit preserves the full frame; Fill crops centrally to screen, never stretching.
+    /// Changing modes also discards legacy aspect, crop and arbitrary zoom overrides.
     public func setVideoFit(_ fit: VideoFit) {
+        let safeFit: VideoFit = fit == .fill ? .fill : .fit
         var layout = videoLayout
-        layout.fit = fit
+        layout.fit = safeFit
         layout.zoom = 1
+        layout.aspect = .source
+        layout.crop = .off
         coordinator?.setVideoLayout(layout)
-        savePreferences { $0.videoLayout.fit = fit }
+        savePreferences { $0.videoLayout.fit = safeFit }
         showControls()
     }
 

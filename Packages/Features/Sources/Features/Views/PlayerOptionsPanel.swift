@@ -35,6 +35,7 @@ struct PlayerOptionsPanel: View {
     let model: PlayerViewModel
     @Binding var tab: PlayerPanelTab?
     var actions = PlayerControlActions()
+    @Namespace private var tabSelection
 
     var body: some View {
         GeometryReader { proxy in
@@ -51,7 +52,8 @@ struct PlayerOptionsPanel: View {
                     .frame(height: !wide && tab == .speed ? 246 : nil)
                     .frame(maxHeight: wide ? .infinity : proxy.size.height * 0.70)
                     .padding(wide ? 12 : 10)
-                    .transition(.move(edge: wide ? .trailing : .bottom).combined(with: .opacity))
+                    // The enclosing overlay fades in. Never move the panel diagonally
+                    // across the video while changing between portrait and landscape.
             }
         }
         .foregroundStyle(.white)
@@ -97,39 +99,45 @@ struct PlayerOptionsPanel: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 3) {
-            ForEach(tabs) { item in
-                let selected = item == tab
-                Button {
-                    Haptics.selection()
-                    withAnimation(.snappy(duration: 0.22)) { tab = item }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(height: 19)
-                        Text(item.title)
-                            .font(.system(size: 10, weight: selected ? .semibold : .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .foregroundStyle(selected ? .white : .white.opacity(0.72))
-                    .background {
-                        if selected {
-                            Capsule().glassEffect(.regular.interactive(), in: .capsule)
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: 2) {
+                ForEach(tabs) { item in
+                    let selected = item == tab
+                    Button {
+                        Haptics.selection()
+                        withAnimation(.smooth(duration: 0.26)) { tab = item }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: item.symbol)
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(height: 19)
+                            Text(item.title)
+                                .font(.system(size: 10, weight: selected ? .semibold : .medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .foregroundStyle(.white.opacity(selected ? 1 : 0.72))
+                        .background {
+                            if selected {
+                                Capsule()
+                                    .fill(.white.opacity(0.10))
+                                    .glassEffect(.regular.tint(.black.opacity(0.4)), in: .capsule)
+                                    .matchedGeometryEffect(id: "selectedPlayerTab", in: tabSelection)
+                            }
+                        }
+                        .contentShape(.capsule)
                     }
-                    .contentShape(.capsule)
+                    .buttonStyle(.plain)
+                    .zIndex(selected ? 1 : 0)
+                    .accessibilityLabel(item.title)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("player.panel.tab.\(item.rawValue)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.title)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier("player.panel.tab.\(item.rawValue)")
             }
+            .padding(3)
+            .background(.white.opacity(0.055), in: .capsule)
         }
-        .padding(3)
-        .background(.white.opacity(0.055), in: .capsule)
     }
 
     @ViewBuilder
@@ -320,14 +328,13 @@ struct PlayerOptionsPanel: View {
         return VStack(alignment: .leading, spacing: 18) {
             PanelSection("Frame") {
                 VStack(alignment: .leading, spacing: 14) {
-                    PanelChips(title: "Fit", options: VideoFit.allCases, selection: layout.fit, label: \.label) { model.setVideoFit($0) }
-                    PanelChips(title: "Zoom", options: [1.0, 1.15, 1.33, 1.5, 2.0], selection: layout.zoom,
-                            label: { $0 == 1 ? "Off" : "\($0.formatted())×" }) { model.setZoom($0) }
-                    if model.capabilities.contains(.aspectOverride) {
-                        PanelChips(title: "Aspect Ratio", options: AspectOverride.allCases, selection: layout.aspect, label: \.label) { model.setAspect($0) }
-                        PanelChips(title: "Crop", options: VideoCrop.allCases, selection: layout.crop,
-                                label: { $0 == .off ? "Off" : $0.rawValue }) { model.setCrop($0) }
-                    }
+                    PanelChips(title: "Screen", options: [VideoFit.fit, .fill], selection: layout.fit,
+                               label: { $0 == .fit ? "Original" : "Fill Screen" }) { model.setVideoFit($0) }
+                    Text("Fill Screen crops evenly to fit your display without stretching the picture. Pinch outward to fill, inward to restore.")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.60))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                 }
             }
             PanelSection("Colour") {

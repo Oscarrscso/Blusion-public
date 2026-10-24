@@ -35,7 +35,7 @@ struct PlayerContent: View {
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
-    @State private var pinchStart: Double?
+    @State private var showingStartupArtwork = true
     @Environment(\.dismiss) private var dismiss
     let services: AppServices
     let onNextPlan: (PlaybackPlan) -> Void
@@ -53,7 +53,16 @@ struct PlayerContent: View {
             #if canImport(UIKit) && canImport(AVKit)
             if model.preferences.ambientMode { AmbientGlow(colours: ambient.colours) }
             #endif
-            surface
+            // Keep the video at a fixed full-screen size while controls come and go.
+            GeometryReader { viewport in
+                surface
+                    .frame(width: viewport.size.width, height: viewport.size.height)
+                    .clipped()
+            }
+            .ignoresSafeArea()
+            if showingStartupArtwork && model.failureMessage == nil {
+                startupArtwork.transition(.opacity)
+            }
             SubtitleOverlay(cues: model.activeCues, bitmap: model.activeBitmapCue, style: model.subtitleStyle, controlsVisible: model.controlsVisible)
             if model.showsBufferingIndicator {
                 Spinner().controlSize(.large)
@@ -87,6 +96,13 @@ struct PlayerContent: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.controlsVisible)
+        .onChange(of: model.state.status) { _, status in
+            // The native engine waits for its layer's first decoded frame; fallback
+            // engines use the playing state because they have a separate surface.
+            if !(model.coordinator?.engine is AVEngine), status == .playing {
+                revealVideo()
+            }
+        }
         .task { await model.start() }
         .task {
             while !Task.isCancelled {
@@ -126,7 +142,42 @@ struct PlayerContent: View {
 
     private func openPanel(_ tab: PlayerPanelTab) {
         Haptics.tap()
-        withAnimation(.snappy(duration: 0.25)) { panel = tab }
+        withAnimation(.easeInOut(duration: 0.17)) { panel = tab }
+    }
+
+    private func revealVideo() {
+        guard showingStartupArtwork else { return }
+        withAnimation(.easeOut(duration: 0.2)) { showingStartupArtwork = false }
+    }
+
+    /// Display the title's existing poster rather than an empty black screen
+    /// until the video renderer has its actual first frame.
+    private var startupArtwork: some View {
+        GeometryReader { viewport in
+            ZStack {
+                Color.black
+                if let poster = PosterQuality.smallest(model.plan.request.poster) {
+                    // Reuse Blusion's downsampled/cached image instead of downloading
+                    // and decoding the original poster again at video startup.
+                    ArtworkImage(url: poster, maxPixelSize: 600, contentMode: .fill,
+                                 acceptsAnyCachedSize: true)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                        .blur(radius: 34)
+                        .overlay(.black.opacity(0.58))
+                }
+                VStack(spacing: 14) {
+                    ProgressView().controlSize(.large).tint(.white)
+                    Text("Preparing video")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .frame(width: viewport.size.width, height: viewport.size.height)
+            .clipped()
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityLabel("Preparing video")
     }
 
     #if targetEnvironment(macCatalyst)
@@ -182,8 +233,8 @@ struct PlayerContent: View {
         #if canImport(UIKit) && canImport(AVKit)
         PlayerSurface(engine: model.coordinator?.engine, pip: pip, layout: model.videoLayout, upscaling: model.processing.upscaling,
                       embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
-                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, ambient: ambient)
-            .ignoresSafeArea()
+                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, ambient: ambient,
+                      onFirstVideoFrame: revealVideo)
             // The picture stays put: no animation of the controls or anything else carries over to it.
             .transaction { $0.animation = nil }
             .onDisappear {
@@ -230,11 +281,15 @@ struct PlayerContent: View {
                 #if !targetEnvironment(macCatalyst)
                 .gesture(DragGesture(minimumDistance: 16).onChanged { value in swipeChanged(value, in: proxy.size) }
                     .onEnded { value in swipeEnded(value, in: proxy.size) })
-                .simultaneousGesture(MagnifyGesture().onChanged { value in
-                    let start = pinchStart ?? model.videoLayout.zoom
-                    pinchStart = start
-                    model.setZoom(start * value.magnification)
-                }.onEnded { _ in pinchStart = nil })
+                .simultaneousGesture(MagnifyGesture().onEnded { value in
+                    // Pinch out to fill the display with a centred crop, pinch in
+                    // to show the whole original frame. Never distort the ratio.
+                    if value.magnification > 1.08 {
+                        model.setVideoFit(.fill)
+                    } else if value.magnification < 0.92 {
+                        model.setVideoFit(.fit)
+                    }
+                })
                 #endif
         }
         .accessibilityHidden(true)
