@@ -70,6 +70,18 @@ import StremioKitTestSupport
         #expect(merged[1].source == .addon("Subs") && merged[1].title == "French · Subs")
     }
 
+    @Test func deduplicationKeepsDistinctResourcesLanguagesAndAccessibilityVariants() {
+        let url = URL(string: "https://subs.example.com/english.srt")!
+        let main = SubtitleOption(id: "main", language: "eng", title: "English", url: url, source: .stream)
+        let duplicate = SubtitleOption(id: "mirror", language: "en", title: "English · Mirror", url: url, source: .addon("Mirror"))
+        let forced = SubtitleOption(id: "forced", language: "eng", title: "English", url: url, source: .stream, isForced: true)
+        let sdh = SubtitleOption(id: "sdh", language: "eng", title: "English", url: url, source: .stream, isHearingImpaired: true)
+        let french = SubtitleOption(id: "french", language: "fre", title: "French", url: url, source: .stream)
+        let alternate = SubtitleOption(id: "alternate", language: "eng", title: "English", url: URL(string: "https://subs.example.com/alternate.srt")!, source: .stream)
+        let result = SubtitleService.merge([main, main], [duplicate, forced, sdh, french, alternate])
+        #expect(result.map(\.id) == ["main", "forced", "sdh", "french", "alternate"])
+    }
+
     @Test func defaultOptionHonoursTheLanguageAndPrefersBundledSubtitles() {
         func option(_ id: String, _ language: String, _ source: SubtitleOption.Source) -> SubtitleOption {
             SubtitleOption(id: id, language: LanguageCodes.normalise(language), title: id, url: URL(string: "https://e.example.com/\(id)")!, source: source)

@@ -15,5 +15,6 @@ echo "enable-fallback: wrote $OUT"
 
 [[ "${1:-}" == "--generate-only" ]] && exit 0
 command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen is required (brew install xcodegen)" >&2; exit 2; }
+bash scripts/prepare-aether.sh
 xcodegen generate --spec "$OUT" --quiet
 echo "enable-fallback: Blusion.xcodeproj now includes FallbackPlayer (MPVKit). Build and run as usual."

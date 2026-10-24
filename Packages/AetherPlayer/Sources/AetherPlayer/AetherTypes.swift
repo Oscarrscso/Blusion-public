@@ -49,6 +49,7 @@ public struct AetherFailure: Error, Sendable, Equatable {
 
 public enum AetherEvent: Sendable, Equatable {
     case loaded(duration: TimeInterval?, audio: [AetherTrack], subtitles: [AetherTrack], selectedAudio: Int?, selectedSubtitle: Int?)
+    case videoFrameReady
     case position(TimeInterval)
     case buffered(TimeInterval)
     case paused(Bool)

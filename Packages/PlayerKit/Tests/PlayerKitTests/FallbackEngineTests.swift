@@ -19,6 +19,24 @@ import PlayerKitTestSupport
         try await waitUntil { condition(engine.state) }
     }
 
+    @Test func aPlayingClockDoesNotClaimTheFirstVideoFrame() async throws {
+        let (engine, backend) = make()
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .playing }
+        backend.emit(.position(2))
+        try await settle(engine) { $0.position == 2 }
+        #expect(!engine.state.hasVideoFrame)
+        backend.emit(.videoFrameReady)
+        try await settle(engine) { $0.hasVideoFrame }
+        engine.pause()
+        try await settle(engine) { $0.status == .paused }
+        #expect(engine.state.hasVideoFrame)
+        engine.load(item)
+        #expect(!engine.state.hasVideoFrame, "a new load must keep its artwork until its own first frame")
+        engine.stop()
+    }
+
     @Test func loadingThenReadyWhenPlayWasNotRequested() async throws {
         let (engine, backend) = make()
         #expect(engine.state.status == .idle)

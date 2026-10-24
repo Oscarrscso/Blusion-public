@@ -35,7 +35,10 @@ struct PlayerContent: View {
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
-    @State private var showingStartupArtwork = true
+    @State private var nativeFrameEngineID: ObjectIdentifier?
+    #if DEBUG
+    @State private var testVideoGeometry = ""
+    #endif
     @Environment(\.dismiss) private var dismiss
     let services: AppServices
     let onNextPlan: (PlaybackPlan) -> Void
@@ -60,9 +63,12 @@ struct PlayerContent: View {
                     .clipped()
             }
             .ignoresSafeArea()
-            if showingStartupArtwork && model.failureMessage == nil {
-                startupArtwork.transition(.opacity)
+            ZStack {
+                if !hasVideoFrame && model.failureMessage == nil {
+                    startupArtwork.transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.15), value: hasVideoFrame)
             SubtitleOverlay(cues: model.activeCues, bitmap: model.activeBitmapCue, style: model.subtitleStyle, controlsVisible: model.controlsVisible)
             if model.showsBufferingIndicator {
                 Spinner().controlSize(.large)
@@ -70,19 +76,26 @@ struct PlayerContent: View {
                     .accessibilityIdentifier("player.buffering")
             }
             gestureLayer
-            if model.controlsVisible && panel == nil && model.failureMessage == nil {
-                PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
-                               openPanel: openPanel)
-                    .transition(.opacity)
-            }
+            // Retain the controls (and native scrubber) while hidden. Their local
+            // fade cannot change the video viewport or animate the renderer.
+            PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
+                           openPanel: openPanel)
+                .opacity(controlsAreVisible ? 1 : 0)
+                .allowsHitTesting(controlsAreVisible)
+                .accessibilityHidden(!controlsAreVisible)
+                .disabled(!controlsAreVisible)
+                .animation(.easeInOut(duration: 0.18), value: controlsAreVisible)
             if let marker = model.activeSkipMarker, model.failureMessage == nil {
                 skipButton(marker)
             }
             if let swipeLevel { SwipeLevelIndicator(level: swipeLevel) }
-            if panel != nil && model.failureMessage == nil {
-                PlayerOptionsPanel(model: model, tab: $panel, actions: controlActions)
-                    .transition(.opacity)
+            ZStack {
+                if panel != nil && model.failureMessage == nil {
+                    PlayerOptionsPanel(model: model, tab: $panel, actions: controlActions)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.18), value: panel != nil)
             if let notice = model.notice, model.failureMessage == nil, !model.isPlaying || model.coordinator?.failedAttempts.isEmpty == false {
                 VStack {
                     Spacer()
@@ -95,14 +108,7 @@ struct PlayerContent: View {
                 FailureOverlay(message: message, onClose: close)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: model.controlsVisible)
-        .onChange(of: model.state.status) { _, status in
-            // The native engine waits for its layer's first decoded frame; fallback
-            // engines use the playing state because they have a separate surface.
-            if !(model.coordinator?.engine is AVEngine), status == .playing {
-                revealVideo()
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await model.start() }
         .task {
             while !Task.isCancelled {
@@ -130,6 +136,7 @@ struct PlayerContent: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         #endif
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("player.screen")
         #if targetEnvironment(macCatalyst)
         // Moving the pointer over the player shows its controls again, as they hide when idle while playing.
@@ -142,12 +149,19 @@ struct PlayerContent: View {
 
     private func openPanel(_ tab: PlayerPanelTab) {
         Haptics.tap()
-        withAnimation(.easeInOut(duration: 0.17)) { panel = tab }
+        panel = tab
     }
 
-    private func revealVideo() {
-        guard showingStartupArtwork else { return }
-        withAnimation(.easeOut(duration: 0.2)) { showingStartupArtwork = false }
+    private var controlsAreVisible: Bool {
+        model.controlsVisible && panel == nil && model.failureMessage == nil
+    }
+
+    private var hasVideoFrame: Bool {
+        guard let engine = model.coordinator?.engine else { return false }
+        #if canImport(AVKit)
+        if engine is AVEngine { return nativeFrameEngineID == ObjectIdentifier(engine) }
+        #endif
+        return model.state.hasVideoFrame
     }
 
     /// Display the title's existing poster rather than an empty black screen
@@ -162,8 +176,7 @@ struct PlayerContent: View {
                     ArtworkImage(url: poster, maxPixelSize: 600, contentMode: .fill,
                                  acceptsAnyCachedSize: true)
                         .frame(width: viewport.size.width, height: viewport.size.height)
-                        .blur(radius: 34)
-                        .overlay(.black.opacity(0.58))
+                        .overlay(.black.opacity(0.65))
                 }
                 VStack(spacing: 14) {
                     ProgressView().controlSize(.large).tint(.white)
@@ -178,13 +191,14 @@ struct PlayerContent: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityLabel("Preparing video")
+        .accessibilityIdentifier("player.preparing")
     }
 
     #if targetEnvironment(macCatalyst)
     /// Escape closes the options panel first, then the player.
     private func escape() {
         if panel != nil {
-            withAnimation(.snappy(duration: 0.25)) { panel = nil }
+            panel = nil
             model.showControls()
         } else {
             close()
@@ -231,10 +245,11 @@ struct PlayerContent: View {
     @ViewBuilder
     private var surface: some View {
         #if canImport(UIKit) && canImport(AVKit)
-        PlayerSurface(engine: model.coordinator?.engine, pip: pip, layout: model.videoLayout, upscaling: model.processing.upscaling,
-                      embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
-                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, ambient: ambient,
-                      onFirstVideoFrame: revealVideo)
+        configuredSurface
+            .equatable()
+            #if DEBUG
+            .modifier(PlayerSurfaceTestAccessibility(geometry: testVideoGeometry))
+            #endif
             // The picture stays put: no animation of the controls or anything else carries over to it.
             .transaction { $0.animation = nil }
             .onDisappear {
@@ -245,6 +260,23 @@ struct PlayerContent: View {
         Color.black
         #endif
     }
+
+    #if canImport(UIKit) && canImport(AVKit)
+    private var configuredSurface: PlayerSurface {
+        let engine = model.coordinator?.engine
+        var picture = PlayerSurface(engine: engine, pip: pip, layout: model.videoLayout, upscaling: model.processing.upscaling,
+                      embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
+                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, ambient: ambient,
+                      onFirstVideoFrame: {
+                          guard let engine, model.coordinator?.engine === engine else { return }
+                          nativeFrameEngineID = ObjectIdentifier(engine)
+                      })
+        #if DEBUG
+        picture.onTestGeometry = { testVideoGeometry = $0 }
+        #endif
+        return picture
+    }
+    #endif
 
     private var pipAvailable: Bool {
         #if canImport(UIKit) && canImport(AVKit)
@@ -354,6 +386,26 @@ struct PlayerContent: View {
         if model.hasNextEpisode { playNextEpisode() } else { model.showControls() }
     }
 }
+
+#if DEBUG
+/// The value comes from the renderer's real layout, with its identity, viewport,
+/// clipping rectangle and picture frame. It is exposed only to UI automation.
+private struct PlayerSurfaceTestAccessibility: ViewModifier {
+    let geometry: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1" {
+            content.accessibilityElement(children: .ignore)
+                .accessibilityLabel("Video surface")
+                .accessibilityValue(geometry)
+                .accessibilityIdentifier("player.videoSurface")
+        } else {
+            content
+        }
+    }
+}
+#endif
 
 /// Starts fetching the stream a player opens on as soon as the player is made, before its screen appears. SwiftUI makes a view again
 /// and again, so each plan starts it once.

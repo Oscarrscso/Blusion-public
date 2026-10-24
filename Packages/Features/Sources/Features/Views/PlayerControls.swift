@@ -20,8 +20,9 @@ struct PlayerControls: View {
     var openPanel: (PlayerPanelTab) -> Void = { _ in }
 
     var body: some View {
-        ZStack {
-            scrims
+        // Overlay content must never contribute a minimum size to the player.
+        // In landscape the old 150 + 280 pt scrims made the whole video taller.
+        GeometryReader { viewport in
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 12)
@@ -32,9 +33,10 @@ struct PlayerControls: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
             #if targetEnvironment(macCatalyst)
-            // A window is wider than the controls should run, so they keep to a readable column, centred.
             .frame(maxWidth: 900)
             #endif
+            .frame(width: viewport.size.width, height: viewport.size.height)
+            .background { scrims(in: viewport.size) }
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -42,14 +44,14 @@ struct PlayerControls: View {
         .accessibilityIdentifier("player.controls")
     }
 
-    /// Soft fades behind the top and bottom controls, so they read over any picture without dimming the middle of it.
-    private var scrims: some View {
+    /// Contrast at the edges, sized within the viewport even in compact landscape.
+    private func scrims(in size: CGSize) -> some View {
         VStack(spacing: 0) {
             LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0.2), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: 150)
+                .frame(height: min(150, size.height * 0.35))
             Spacer(minLength: 0)
             LinearGradient(colors: [.clear, .black.opacity(0.35), .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 280)
+                .frame(height: min(280, size.height * 0.55))
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -140,7 +142,7 @@ struct PlayerControls: View {
                 .accessibilityIdentifier("player.skipBack")
                 Button { model.togglePlayPause() } label: {
                     Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 34, weight: .semibold)).contentTransition(.symbolEffect(.replace))
+                        .font(.system(size: 34, weight: .semibold))
                         .frame(width: 80, height: 80).glassEffect(.regular.interactive(), in: .circle)
                         .pointerInteraction(cornerRadius: 40)
                 }
@@ -193,16 +195,19 @@ struct PlayerControls: View {
             HStack(spacing: 12) {
                 Text(model.positionText)
                     .font(.footnote.monospacedDigit().weight(.medium))
+                    .frame(width: 62, alignment: .leading)
                     .accessibilityIdentifier("player.time")
                     .accessibilityLabel("Elapsed time")
                     .accessibilityValue(model.positionText)
                 Slider(value: Binding(get: { model.fraction }, set: { model.updateScrub(fraction: $0) }), in: 0...1) { editing in
                     if editing { model.beginScrub() } else { Task { await model.endScrub() } }
                 }
-                .accessibilityLabel("Position")
-                .accessibilityValue("\(model.positionText) of \(model.duration.map(PlayerTime.format) ?? "unknown")")
+                // Keep the system's percentage value for native slider adjustment.
+                // Speak the useful clock information in its label instead.
+                .accessibilityLabel(Text("Position, \(model.positionText) of \(model.duration.map(PlayerTime.format) ?? "unknown")"))
                 .accessibilityIdentifier("player.scrubber")
                 Text(model.remainingText).font(.footnote.monospacedDigit().weight(.medium)).foregroundStyle(.white.opacity(0.75))
+                    .frame(width: 68, alignment: .trailing)
                     .accessibilityLabel("Remaining time")
             }
             HStack(spacing: 2) {

@@ -29,6 +29,7 @@ public enum AutoStreamRanking {
     }
 
     public static func best(from items: [RankedStream], duration: TimeInterval?) -> Assessment? {
+        let items = StreamAvailability.automaticCandidates(from: items)
         // Restrict every later tie-breaker, including swarm health, to the highest release tier.
         guard let priority = items.map({ $0.quality.releasePriority }).max() else { return nil }
         let ranked = items.filter { $0.quality.releasePriority == priority }.map { assess($0, duration: duration) }.sorted {

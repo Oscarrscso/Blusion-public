@@ -116,6 +116,7 @@ public final class AetherBackend: FallbackBackend {
         case .loaded(let duration, let audio, let subtitles, let selectedAudio, let selectedSubtitle):
             return .loaded(duration: duration, audio: audio.map(audioTrack), subtitles: subtitles.map(subtitleTrack),
                            selectedAudio: selectedAudio.map { "a\($0)" }, selectedSubtitle: selectedSubtitle.map { "s\($0)" })
+        case .videoFrameReady: return .videoFrameReady
         case .position(let position): return .position(position)
         case .buffered(let until): return .buffered(until)
         case .paused(let paused): return .paused(paused)

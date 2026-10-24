@@ -22,7 +22,7 @@ final class SuperResolutionRenderer {
     @ObservationIgnored private weak var player: AVPlayer?
     @ObservationIgnored private var item: AVPlayerItem?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
-    @ObservationIgnored private var pipeline: SuperResolutionPipeline?
+    @ObservationIgnored private var pipeline: (any VideoScalingPipeline)?
     @ObservationIgnored private var link: CADisplayLink?
     @ObservationIgnored private var targetSize = CGSize.zero
     @ObservationIgnored private var wanted = false
@@ -40,7 +40,7 @@ final class SuperResolutionRenderer {
     init() {
         displayLayer.videoGravity = .resizeAspect
         displayLayer.isHidden = true
-        displayLayer.backgroundColor = UIColor.black.cgColor
+        displayLayer.backgroundColor = UIColor.clear.cgColor
     }
 
     /// `targetSize` is the layer's size in pixels. Call again when anything changes; it starts or stops as needed.
@@ -171,9 +171,17 @@ private final class DisplayLinkTarget: NSObject {
     @objc func fire(_ link: CADisplayLink) { action(link) }
 }
 
+/// The hardware-only scaler is not declared by the simulator SDK. Its renderer
+/// keeps a protocol reference, while the implementation compiles only on device.
+private protocol VideoScalingPipeline: AnyObject {
+    func submit(_ source: CVPixelBuffer, presentationTime: CMTime, frameInterval: CFTimeInterval)
+    func end()
+}
+
+#if !targetEnvironment(simulator)
 /// The scaler session and its buffers, used off the main thread. One frame in flight at a time: a frame that arrives while one is being
 /// scaled is dropped, and a run of frames slower than the frame interval ends the session.
-private final class SuperResolutionPipeline: @unchecked Sendable {
+private final class SuperResolutionPipeline: VideoScalingPipeline, @unchecked Sendable {
     private let processor = VTFrameProcessor()
     private let pool: CVPixelBufferPool
     private let renderer: AVSampleBufferVideoRenderer
@@ -255,6 +263,7 @@ private final class SuperResolutionPipeline: @unchecked Sendable {
 private struct UncheckedBuffer: @unchecked Sendable {
     let buffer: CVPixelBuffer
 }
+#endif
 
 /// Ambient mode: the colours at the picture's edges, sampled twice a second from a tiny copy of the frame, for a glow around
 /// letterboxed video. Reads AVPlayer frames only; the fallback engine draws straight to the screen, so there is nothing to sample there.

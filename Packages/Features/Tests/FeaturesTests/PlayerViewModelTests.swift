@@ -278,7 +278,10 @@ import StremioKitTestSupport
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
+        engines.made["a"]?.simulate(position: 40)
+        try await waitUntil { model.position == 40 }
         model.beginScrub()
+        #expect(model.position == 40 && model.fraction == 0.2, "touching the timeline must retain the current playhead")
         model.updateScrub(fraction: 0.25)
         #expect(model.isScrubbing && model.position == 50 && model.fraction == 0.25 && model.positionText == "0:50")
         #expect(engines.made["a"]?.seeks.isEmpty == true, "dragging alone does not seek")

@@ -2,6 +2,7 @@
 import PlayerKit
 import StremioKit
 import SwiftUI
+import UIKit
 
 /// The player's options, one tab per kind, opened from the bar under the timeline.
 enum PlayerPanelTab: String, CaseIterable, Identifiable {
@@ -35,7 +36,7 @@ struct PlayerOptionsPanel: View {
     let model: PlayerViewModel
     @Binding var tab: PlayerPanelTab?
     var actions = PlayerControlActions()
-    @Namespace private var tabSelection
+    @State private var scrollPosition = ScrollPosition()
 
     var body: some View {
         GeometryReader { proxy in
@@ -47,10 +48,10 @@ struct PlayerOptionsPanel: View {
                     .onTapGesture { close() }
                     .accessibilityHidden(true)
                 panel
-                    .frame(width: wide ? min(420, proxy.size.width * 0.55) : nil)
-                    // A short tab shouldn't leave an enormous empty sheet beneath its content.
-                    .frame(height: !wide && tab == .speed ? 246 : nil)
-                    .frame(maxHeight: wide ? .infinity : proxy.size.height * 0.70)
+                    .frame(width: wide ? min(440, proxy.size.width * 0.55) : min(560, proxy.size.width - 20),
+                           height: wide ? max(0, proxy.size.height - 24) : min(400, proxy.size.height * 0.54))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("player.panel")
                     .padding(wide ? 12 : 10)
                     // The enclosing overlay fades in. Never move the panel diagonally
                     // across the video while changing between portrait and landscape.
@@ -60,84 +61,48 @@ struct PlayerOptionsPanel: View {
         .tint(.white)
     }
 
-    private var tabs: [PlayerPanelTab] {
-        PlayerPanelTab.allCases.filter { $0 != .chapters || !model.chapters.isEmpty }
-    }
-
     private var panel: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                tabBar
+            HStack {
+                Text((tab ?? .subtitles).title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 12)
                 Button(action: close) {
-                    Image(systemName: "xmark").font(.subheadline.weight(.semibold))
-                        .frame(width: 36, height: 36)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .contentShape(.circle)
+                    Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 #if !targetEnvironment(macCatalyst)
-                .keyboardShortcut(.escape, modifiers: [])   // the Mac's Escape goes through PlayerKeyboard
+                .keyboardShortcut(.escape, modifiers: [])
                 #endif
                 .accessibilityLabel("Close")
                 .accessibilityIdentifier("player.panel.close")
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 8)
+            PlayerOptionsTabPicker(selection: $tab)
+                .frame(height: 44)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            Divider()
             ScrollView {
                 content
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
             }
-            .scrollIndicators(.hidden)
+            .scrollPosition($scrollPosition)
+            .scrollIndicators(.visible)
             .scrollBounceBehavior(.basedOnSize)
+            .onChange(of: tab) { _, _ in scrollPosition.scrollTo(edge: .top) }
+            // The system segmented control animates its own thumb. Track rows never
+            // participate in a selection morph or an opening/closing transaction.
+            .transaction { $0.animation = nil }
         }
-        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 28))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("player.panel")
-    }
-
-    private var tabBar: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 2) {
-                ForEach(tabs) { item in
-                    let selected = item == tab
-                    Button {
-                        Haptics.selection()
-                        withAnimation(.smooth(duration: 0.26)) { tab = item }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: item.symbol)
-                                .font(.system(size: 16, weight: .medium))
-                                .frame(height: 19)
-                            Text(item.title)
-                                .font(.system(size: 10, weight: selected ? .semibold : .medium))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .foregroundStyle(.white.opacity(selected ? 1 : 0.72))
-                        .background {
-                            if selected {
-                                Capsule()
-                                    .fill(.white.opacity(0.10))
-                                    .glassEffect(.regular.tint(.black.opacity(0.4)), in: .capsule)
-                                    .matchedGeometryEffect(id: "selectedPlayerTab", in: tabSelection)
-                            }
-                        }
-                        .contentShape(.capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .zIndex(selected ? 1 : 0)
-                    .accessibilityLabel(item.title)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                    .accessibilityIdentifier("player.panel.tab.\(item.rawValue)")
-                }
-            }
-            .padding(3)
-            .background(.white.opacity(0.055), in: .capsule)
-        }
+        .background(.regularMaterial, in: .rect(cornerRadius: 24))
+        .clipShape(.rect(cornerRadius: 24))
     }
 
     @ViewBuilder
@@ -152,7 +117,7 @@ struct PlayerOptionsPanel: View {
     }
 
     private func close() {
-        withAnimation(.snappy(duration: 0.25)) { tab = nil }
+        tab = nil
         model.showControls()
     }
 
@@ -172,19 +137,20 @@ struct PlayerOptionsPanel: View {
                 }
                 PanelGroup {
                     PanelOptionRow(title: "Off", symbol: "captions.bubble", selected: model.subtitleChoice == .off) { pickSubtitle(.off) }
-                    ForEach(model.embeddedSubtitleTracks) { track in
-                        PanelOptionRow(title: track.title, tags: tags(forced: track.isForced, sdh: track.isHearingImpaired, title: track.title),
-                                  selected: model.subtitleChoice == .embedded(track.id)) { pickSubtitle(.embedded(track.id)) }
+                    ForEach(model.embeddedSubtitleRows) { row in
+                        PanelOptionRow(title: row.title, subtitle: row.subtitle, tags: row.tags,
+                                       selected: model.subtitleChoice == .embedded(row.id)) { pickSubtitle(.embedded(row.id)) }
+                            .accessibilityIdentifier("player.subtitle.embedded.\(row.id)")
                     }
                 }
             }
-            if !model.subtitleOptions.isEmpty {
+            if !model.externalSubtitleRows.isEmpty {
                 PanelSection("Online") {
                     PanelGroup {
-                        ForEach(model.subtitleOptions) { option in
-                            PanelOptionRow(title: option.title, tags: tags(for: option), selected: model.subtitleChoice == .external(option.id)) {
-                                pickSubtitle(.external(option.id))
-                            }
+                        ForEach(Array(model.externalSubtitleRows.enumerated()), id: \.element.id) { index, row in
+                            PanelOptionRow(title: row.title, subtitle: row.subtitle, tags: row.tags,
+                                           selected: model.subtitleChoice == .external(row.id)) { pickSubtitle(.external(row.id)) }
+                                .accessibilityIdentifier("player.subtitle.external.\(index)")
                         }
                     }
                 }
@@ -260,54 +226,23 @@ struct PlayerOptionsPanel: View {
                                              hdrPeakNits: style.hdrPeakNits))
     }
 
-    private func tags(forced: Bool, sdh: Bool, title: String) -> [String] {
-        var tags: [String] = []
-        if forced, !title.localizedCaseInsensitiveContains("forced") { tags.append("Forced") }
-        if sdh, !title.localizedCaseInsensitiveContains("SDH") { tags.append("SDH") }
-        return tags
-    }
-
-    private func tags(for option: SubtitleOption) -> [String] {
-        var tags = tags(forced: option.isForced, sdh: option.isHearingImpaired, title: option.title)
-        if option.format == .ass { tags.append("Styled") }
-        if option.format == .pgs || option.format == .vobsub { tags.append("Image") }
-        return tags
-    }
-
     // MARK: Audio
-
-    /// File track titles sometimes already contain the codec and channel count in
-    /// brackets. Hide a second generated codec suffix without changing track identity.
-    private func audioDisplayTitle(_ track: MediaTrack) -> String {
-        let parts = track.title.components(separatedBy: " · ")
-        guard parts.count > 1 else { return track.title }
-        let base = parts[0].lowercased()
-        let codecs = ["dolby digital plus", "dolby digital", "truehd", "dts-hd", "dts", "aac", "flac", "opus", "pcm"]
-        let layouts = ["7.1", "6.1", "5.1", "2.0", "1.0", "stereo", "mono"]
-        let extra = parts.dropFirst().filter { detail in
-            let lower = detail.lowercased()
-            if base.contains(lower) { return false }
-            let sameCodec = codecs.contains { lower.contains($0) && base.contains($0) }
-            let layout = layouts.first { lower.contains($0) }
-            let sameLayout = layout.map { base.contains($0) || ($0 == "stereo" && base.contains("2.0"))
-                || ($0 == "mono" && base.contains("1.0")) } ?? true
-            return !(sameCodec && sameLayout)
-        }
-        return ([parts[0]] + extra).joined(separator: " · ")
-    }
 
     private var audio: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !model.audioTracks.isEmpty {
+            if !model.audioTrackRows.isEmpty {
                 PanelGroup {
-                    ForEach(model.audioTracks) { track in
-                        PanelOptionRow(title: audioDisplayTitle(track), tags: tags(forced: track.isForced, sdh: track.isHearingImpaired, title: track.title),
-                                  selected: model.selectedAudioTrackID == track.id) {
-                            model.selectAudioTrack(id: track.id)
+                    ForEach(model.audioTrackRows) { row in
+                        PanelOptionRow(title: row.title, subtitle: row.subtitle, tags: row.tags,
+                                       selected: model.audioTrackSelectionID == row.id) {
+                            model.selectAudioTrack(id: row.id)
                             close()
                         }
+                        .accessibilityIdentifier("player.audio.\(row.id)")
                     }
                 }
+            } else {
+                Text("No alternate audio tracks").font(.subheadline).foregroundStyle(.secondary)
             }
             if model.capabilities.contains(.externalAudio) {
                 PanelButton("Add File", symbol: "doc.badge.plus") { closeThen(actions.openAudioFile) }
@@ -337,17 +272,19 @@ struct PlayerOptionsPanel: View {
                         .padding(.horizontal, 4)
                 }
             }
-            PanelSection("Colour") {
-                VStack(alignment: .leading, spacing: 14) {
-                    if model.capabilities.contains(.dolbyVisionSwitch) {
-                        PanelToggle(title: "Dolby Vision", isOn: processing.dolbyVision) { model.setDolbyVision($0) }
-                            .accessibilityIdentifier("player.panel.dolbyVision")
-                    }
-                    if model.capabilities.contains(.toneMapping) {
-                        PanelChips(title: "Output", options: HDROutputMode.allCases, selection: processing.hdrOutput,
-                                label: { $0 == .auto ? "HDR" : "SDR" }) { value in changeProcessing { $0.hdrOutput = value } }
-                        PanelChips(title: "Tone Mapping", options: ToneMappingCurve.allCases, selection: processing.toneMapping,
-                                label: { $0 == .hable ? "Hable" : $0.label }) { value in changeProcessing { $0.toneMapping = value } }
+            if model.capabilities.contains(.dolbyVisionSwitch) || model.capabilities.contains(.toneMapping) {
+                PanelSection("Colour") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        if model.capabilities.contains(.dolbyVisionSwitch) {
+                            PanelToggle(title: "Dolby Vision", isOn: processing.dolbyVision) { model.setDolbyVision($0) }
+                                .accessibilityIdentifier("player.panel.dolbyVision")
+                        }
+                        if model.capabilities.contains(.toneMapping) {
+                            PanelChips(title: "Output", options: HDROutputMode.allCases, selection: processing.hdrOutput,
+                                    label: { $0 == .auto ? "HDR" : "SDR" }) { value in changeProcessing { $0.hdrOutput = value } }
+                            PanelChips(title: "Tone Mapping", options: ToneMappingCurve.allCases, selection: processing.toneMapping,
+                                    label: { $0 == .hable ? "Hable" : $0.label }) { value in changeProcessing { $0.toneMapping = value } }
+                        }
                     }
                 }
             }
@@ -411,13 +348,19 @@ struct PlayerOptionsPanel: View {
 
     // MARK: Chapters
 
+    @ViewBuilder
     private var chapters: some View {
-        let current = model.currentChapter
-        return PanelGroup {
-            ForEach(model.chapters) { chapter in
-                PanelOptionRow(title: chapter.title, detail: PlayerTime.format(chapter.start), selected: chapter == current) {
-                    Task { await model.seek(toChapter: chapter) }
-                    close()
+        if model.chapters.isEmpty {
+            Text("This video has no chapter markers.").font(.subheadline).foregroundStyle(.secondary)
+        } else {
+            let current = model.currentChapter
+            PanelGroup {
+                ForEach(model.chapters) { chapter in
+                    PanelOptionRow(title: chapter.title, detail: PlayerTime.format(chapter.start), selected: chapter == current) {
+                        Task { await model.seek(toChapter: chapter) }
+                        close()
+                    }
+                    .accessibilityIdentifier("player.chapter.\(chapter.index)")
                 }
             }
         }
@@ -479,11 +422,11 @@ private struct PanelGroup<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             Group(subviews: content) { rows in
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    if index > 0 { Divider().overlay(.white.opacity(0.06)).padding(.leading, 14) }
+                ForEach(rows) { row in
                     row
+                    Divider().padding(.leading, 14)
                 }
             }
         }
@@ -494,6 +437,7 @@ private struct PanelGroup<Content: View>: View {
 /// A choice in a list: its name, small tags beside it, a check when it is the one in use.
 private struct PanelOptionRow: View {
     let title: String
+    var subtitle: String?
     var detail: String?
     var tags: [String] = []
     var symbol: String?
@@ -514,16 +458,18 @@ private struct PanelOptionRow: View {
                         .font(.subheadline.weight(selected ? .semibold : .regular))
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if !tags.isEmpty {
-                        HStack(spacing: 5) {
-                            ForEach(tags, id: \.self) { tag in
-                                Text(tag)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.68))
-                                    .padding(.horizontal, 7).padding(.vertical, 3)
-                                    .background(.white.opacity(0.08), in: .capsule)
-                            }
-                        }
+                        Text(tags.joined(separator: " · "))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -540,12 +486,12 @@ private struct PanelOptionRow: View {
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(minHeight: 54)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(([title] + tags).joined(separator: " · "))
+        .accessibilityLabel(([title] + [subtitle, detail].compactMap { $0 } + tags).joined(separator: " · "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -569,13 +515,7 @@ private struct PanelChips<Value: Hashable>: View {
                             Text(label(option)).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 .padding(.horizontal, 14).frame(minHeight: 36)
                                 .foregroundStyle(.white)
-                                .background {
-                                    if selected {
-                                        Capsule().glassEffect(.regular.interactive(), in: .capsule)
-                                    } else {
-                                        Capsule().fill(.white.opacity(0.09))
-                                    }
-                                }
+                                .background(.white.opacity(selected ? 0.20 : 0.08), in: .capsule)
                                 .contentShape(.capsule)
                         }
                         .buttonStyle(.plain)

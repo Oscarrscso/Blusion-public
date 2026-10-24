@@ -22,6 +22,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     # Set by scripts/install-iphone.sh to the git commit it builds, so Settings › About shows which build is running.
     BLUSION_BUILD_TAG: dev
+    BLUSION_SOURCE_REVISION: unversioned
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     CODE_SIGN_STYLE: Automatic
     # String Catalogs (App/Localizable.xcstrings, App/InfoPlist.xcstrings); seed with scripts/extract-strings.py.
@@ -58,6 +59,7 @@ targets:
       properties:
         CFBundleDisplayName: Blusion
         BlusionBuildTag: $(BLUSION_BUILD_TAG)
+        BlusionSourceRevision: $(BLUSION_SOURCE_REVISION)
         # Always dark, from the first frame: the launch screen and system alerts follow this key, not SwiftUI's preferredColorScheme.
         UIUserInterfaceStyle: Dark
         UILaunchScreen:

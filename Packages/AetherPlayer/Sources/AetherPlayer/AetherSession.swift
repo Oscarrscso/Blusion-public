@@ -104,6 +104,7 @@ public final class AetherSession {
                                    selectedAudio: tracks.audioID, selectedSubtitle: tracks.subtitleID))
         publishChapters()
         publishTransport()
+        if engine.hasFirstFrameReadyForDisplay { continuation.yield(.videoFrameReady) }
         host.displaySize = presentedSize()
     }
 
@@ -294,6 +295,14 @@ public final class AetherSession {
         }.store(in: &subscriptions)
         engine.clock.$sourceTime.receive(on: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshSubtitles() }
+        }.store(in: &subscriptions)
+        // This publisher is backed by the native or sample-buffer layer's actual
+        // display readiness. Transport .playing can precede it by several seconds.
+        engine.$hasFirstFrameReadyForDisplay.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
+            MainActor.assumeIsolated {
+                guard let self, self.isLoaded, ready else { return }
+                self.continuation.yield(.videoFrameReady)
+            }
         }.store(in: &subscriptions)
         engine.$softwareDisplaySize.receive(on: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated {
@@ -501,14 +510,14 @@ final class AetherHostView: UIView {
     let overlay = AetherSubtitleOverlay()
     /// Clips the picture to its visible part, so a crop hides the bars.
     private let clipView = UIView()
-    var fit = AetherFit.fit { didSet { setNeedsLayout() } }
-    var zoom = 1.0 { didSet { setNeedsLayout() } }
+    var fit = AetherFit.fit { didSet { if fit != oldValue { setNeedsLayout() } } }
+    var zoom = 1.0 { didSet { if zoom != oldValue { setNeedsLayout() } } }
     /// Width over height replacing the file's; nil keeps it.
-    var aspect: Double? { didSet { setNeedsLayout() } }
+    var aspect: Double? { didSet { if aspect != oldValue { setNeedsLayout() } } }
     /// Width over height to crop the picture to, centred; nil keeps it whole.
-    var crop: Double? { didSet { setNeedsLayout() } }
+    var crop: Double? { didSet { if crop != oldValue { setNeedsLayout() } } }
     /// The picture's presented size, when the engine says it.
-    var displaySize: CGSize? { didSet { setNeedsLayout() } }
+    var displaySize: CGSize? { didSet { if displaySize != oldValue { setNeedsLayout() } } }
     /// Tells the engine how to draw into the player view: stretched into the frame laid out here, or by fit before the size is known.
     var onGravity: (@MainActor (AVLayerVideoGravity) -> Void)?
     private var lastGravity: AVLayerVideoGravity?

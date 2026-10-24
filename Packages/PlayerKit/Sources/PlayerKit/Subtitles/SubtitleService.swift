@@ -101,13 +101,30 @@ public final class SubtitleService: Sendable {
         let language = LanguageCodes.normalise(item.lang)
         var title = LanguageCodes.displayName(item.lang)
         if case .addon(let name) = source { title += " · \(name)" }
-        return SubtitleOption(id: "\(item.id)|\(item.url.absoluteString)", language: language, title: title, url: item.url, source: source)
+        return SubtitleOption(id: "\(item.id)|\(language)|\(item.url.absoluteString)", language: language, title: title, url: item.url, source: source)
     }
 
-    /// Appends `new` options, dropping any whose URL is already present.
+    private struct ResourceIdentity: Hashable {
+        let url: URL
+        let language: String
+        let format: String
+        let forced: Bool
+        let sdh: Bool
+
+        init(_ option: SubtitleOption) {
+            url = option.url
+            language = LanguageCodes.normalise(option.language)
+            format = option.format.rawValue
+            forced = option.isForced
+            sdh = option.isHearingImpaired
+        }
+    }
+
+    /// Remove only repeat references to the same resource and variant. Equal
+    /// language labels alone never establish that translations are duplicates.
     public static func merge(_ existing: [SubtitleOption], _ new: [SubtitleOption]) -> [SubtitleOption] {
-        var seen = Set(existing.map(\.url))
-        return existing + new.filter { seen.insert($0.url).inserted }
+        var seen: Set<ResourceIdentity> = []
+        return (existing + new).filter { seen.insert(ResourceIdentity($0)).inserted }
     }
 
     /// The option matching the preferred language; stream-bundled subtitles win over addon ones, then list order. Forced-only files are

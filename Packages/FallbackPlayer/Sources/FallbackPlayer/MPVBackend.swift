@@ -263,6 +263,12 @@ private final class MPVEventPump: @unchecked Sendable {
                 default:
                     break   // durations of live streams can change later and are ignored
                 }
+            case MPV_EVENT_PLAYBACK_RESTART:
+                // Unlike FILE_LOADED / pause=false, restart follows output preroll.
+                // Audio-only files have no picture and must not claim frame readiness.
+                if loaded, (properties.int("video-out-params/w") ?? 0) > 0 {
+                    continuation.yield(.videoFrameReady)
+                }
             case MPV_EVENT_VIDEO_RECONFIG:
                 onVideoReconfig()
             default:

@@ -49,14 +49,19 @@ targets:
         DEVELOPMENT_TEAM: ""
 YAML
 xcodegen generate --spec "$WORK/project.install.yml" --project "$WORK" --quiet || fail "xcodegen failed"
-echo "install-mac: building (log: $LOG)"
+REVISION="$(git rev-parse HEAD)"
+TAG="$(git rev-parse --short HEAD)"
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || TAG="$TAG-dirty"
+echo "install-mac: building $TAG ($REVISION; log: $LOG)"
 xcodebuild -project "$WORK/Blusion.xcodeproj" -scheme Blusion -configuration Release \
-  -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath "$WORK/DerivedData" -jobs 4 BLUSION_BUILD_TAG="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" build >"$LOG" 2>&1 || true
+  -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath "$WORK/DerivedData" -jobs 4 BLUSION_BUILD_TAG="$TAG" BLUSION_SOURCE_REVISION="$REVISION" build >"$LOG" 2>&1 || true
 if ! grep -q '\*\* BUILD SUCCEEDED \*\*' "$LOG"; then
   grep -E 'error:' "$LOG" | sed -E "s#$ROOT/##g" | sort -u | head -40 >&2
   fail "BUILD FAILED (full log: $LOG)"
 fi
 [[ -d "$APP" ]] || fail "no build at $APP"
+python3 scripts/verify-player-build.py --app "$APP" --expected-revision "$REVISION" --expected-tag "$TAG" \
+  || fail "compiled app verification failed; nothing was installed"
 
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ { print $2; exit }')"
 if [[ -n "$IDENTITY" ]]; then

@@ -261,6 +261,7 @@ public final class StreamPickerViewModel {
         guard !isAutoPicking else { return nil }
         isAutoPicking = true
         autoPickMessage = nil
+        autoPickedStream = nil
         defer { isAutoPicking = false }
         // Wait for the chosen addon when applicable; it must have a stream playable
         // through the saved policy, rather than merely one Infuse could accept.
@@ -270,7 +271,7 @@ public final class StreamPickerViewModel {
         guard !Task.isCancelled else { return nil }
         let assessment = isLoading ? AutoStreamRanking.best(from: automaticCandidates, duration: request.expectedDuration) : bestAssessment
         guard let pick = assessment else {
-            autoPickMessage = "No playable streams were found."
+            autoPickMessage = "No streams are ready for automatic playback. Choose a stream manually."
             return nil
         }
         guard !Task.isCancelled else { return nil }
@@ -296,7 +297,7 @@ public final class StreamPickerViewModel {
     /// Auto Pick and the recommendation use the same set of routes as ordinary Play.
     /// Respect an explicit resolution preference and avoid mixing lower-ranked route classes.
     private var automaticCandidates: [RankedStream] {
-        let watchable = listing.items.filter { $0.route.isWatchable }
+        let watchable = StreamAvailability.automaticCandidates(from: listing.items.filter { $0.route.isWatchable })
         if settings.rankingPreferences.preferredResolution != nil { return Array(watchable.prefix(1)) }
         guard let first = watchable.first else { return [] }
         return watchable.filter { $0.route.sortClass == first.route.sortClass }
@@ -320,7 +321,7 @@ public final class StreamPickerViewModel {
         guard let waitTarget, hasLoaded, !listing.pending.contains(where: { $0.id == waitTarget }) else { return false }
         return listing.items.contains { item in
             (item.addon.id == waitTarget || item.alsoProvidedBy.contains { $0.id == waitTarget })
-                && item.route.isWatchable
+                && item.route.isWatchable && StreamAvailability.canStartAutomatically(item)
         }
     }
 

@@ -10,6 +10,8 @@ public protocol VideoSurfaceProviding: AnyObject {
 
 public enum FallbackEvent: Sendable, Equatable {
     case loaded(duration: TimeInterval?, audio: [MediaTrack], subtitles: [MediaTrack], selectedAudio: String?, selectedSubtitle: String?)
+    /// The video output has presented its first frame for this load.
+    case videoFrameReady
     case position(TimeInterval)
     case buffered(TimeInterval)
     case paused(Bool)
@@ -193,6 +195,8 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
                 $0.selectedAudioTrackID = selectedAudio
                 $0.selectedEmbeddedSubtitleID = selectedSubtitle
             }
+        case .videoFrameReady:
+            update { $0.hasVideoFrame = true }
         case .position(let position):
             update { $0.position = max(0, position) }
         case .buffered(let until):

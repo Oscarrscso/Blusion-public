@@ -662,7 +662,7 @@ struct ModelDescriptionInterpreter: DescriptionInterpreting {
         do {
             let session = PrewarmedSessions.reading.take()
             let answer = try await session.respond(to: text, generating: GeneratedReading.self,
-                                                   options: GenerationOptions(samplingMode: .greedy)).content
+                                                   options: GenerationOptions(sampling: .greedy)).content
             let plan = AISearchGrounding.plan(answer.reading, for: text)
             if !Task.isCancelled { await AISearchInferenceCache.shared.store(plan, for: text) }
             return plan

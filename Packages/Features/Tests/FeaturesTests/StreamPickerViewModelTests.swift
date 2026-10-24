@@ -507,6 +507,44 @@ import StremioKitTestSupport
         #expect(value("filename", in: query(link)) == "Test-Movie-2010.mkv")
     }
 
+    @Test func autoPickSkipsUncachedRemuxBeforeApplyingResolutionPreferenceAndRetries() async throws {
+        let services = try await services(bodies: [body([
+            direct("[TB download] REMUX", "https://a.example.com/wait.mp4", "2160p BluRay REMUX"),
+            direct("[TB+] Ready", "https://a.example.com/ready.mp4", "1080p WEB-DL")
+        ])], settings: PlaybackSettings(preferredResolution: 2160))
+        let model = picker(movie, services)
+        await model.load()
+        guard case .play(let plan)? = await model.autoPickBest() else { Issue.record("expected ready playback"); return }
+        #expect(plan.candidates.map(\.title) == ["[TB+] Ready"])
+        #expect(model.bestToPlay?.title == "[TB+] Ready")
+        #expect(model.recommendedStream?.title == "[TB+] Ready")
+    }
+
+    @Test(arguments: ["[TB download]", "[RD download]", "⏳ TB", "Uncached", "Not cached", "Cached: false"])
+    func uncachedStreamsRequireManualSelection(_ marker: String) async throws {
+        let services = try await services(bodies: [body([direct(marker, "https://a.example.com/wait.mp4", "2160p REMUX")])])
+        let model = picker(movie, services)
+        await model.load()
+        let automatic = await model.autoPickBest()
+        #expect(automatic == nil && model.bestToPlay == nil && model.recommendedStream == nil)
+        #expect(model.autoPickMessage != nil)
+        let item = try #require(model.listing.items.first)
+        guard case .play? = await model.choose(item) else { Issue.record("manual selection must stay available"); return }
+    }
+
+    @Test func cachedStreamsLeadUnknownAvailabilityAndBingeNeverStartsUncached() async throws {
+        let services = try await services(bodies: [body([
+            direct("Unknown REMUX", "https://a.example.com/unknown.mp4", "2160p BluRay REMUX"),
+            direct("[RD+] Ready", "https://a.example.com/ready.mp4", "1080p WEB-DL"),
+            #"{"name":"[TB download] Next","url":"https://a.example.com/wait.mp4","behaviorHints":{"bingeGroup":"series"}}"#
+        ])])
+        let model = picker(movie, services)
+        await model.load()
+        #expect(model.recommendedStream?.title == "[RD+] Ready")
+        let next = await model.bingeChoice(continuing: BingeContext(bingeGroup: "series"))
+        #expect(next == nil, "show the picker instead of downloading an uncached next episode")
+    }
+
     @Test func theRecommendedStreamIsTheOneAutoPickStarts() async throws {
         let services = try await services(bodies: [body([direct("1080", "https://a.example.com/2.mp4", "1080p"),
                                                          direct("4K", "https://a.example.com/1.mkv", "2160p")])],

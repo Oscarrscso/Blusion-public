@@ -107,7 +107,9 @@ public enum BingeSelection {
     /// `nil` when nothing matches, so the picker is shown instead.
     public static func pick(from ranked: [RankedStream], continuing previous: BingeContext?) -> RankedStream? {
         guard let previous else { return nil }
-        let candidates = ranked.filter { $0.route.isPlayable && $0.stream.behaviorHints.bingeGroup == previous.bingeGroup }
+        let candidates = StreamAvailability.automaticCandidates(from: ranked.filter {
+            $0.route.isPlayable && $0.stream.behaviorHints.bingeGroup == previous.bingeGroup
+        })
         return candidates.first { $0.addon.id == previous.addonID } ?? candidates.first
     }
 }

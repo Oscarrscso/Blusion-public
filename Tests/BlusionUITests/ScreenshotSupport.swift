@@ -33,7 +33,9 @@ extension XCTestCase {
     /// also writes `<name>.png` there so milestone screenshots can be reviewed and committed.
     @MainActor
     func captureScreenshot(_ app: XCUIApplication, named name: String) {
-        let shot = app.screenshot()
+        // Capture the display, avoiding app-bounds cropping while XCTest
+        // changes coordinate spaces after rotating a full-screen player.
+        let shot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: shot)
         attachment.name = name
         attachment.lifetime = .keepAlways

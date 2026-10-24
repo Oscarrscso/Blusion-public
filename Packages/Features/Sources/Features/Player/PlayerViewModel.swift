@@ -29,7 +29,13 @@ public final class PlayerViewModel {
 
     public let plan: PlaybackPlan
     public private(set) var coordinator: PlaybackCoordinator?
-    public private(set) var subtitleOptions: [SubtitleOption] = []
+    public private(set) var subtitleOptions: [SubtitleOption] = [] {
+        didSet { externalSubtitleRows = PlayerTrackPresentation.external(subtitleOptions) }
+    }
+    public private(set) var externalSubtitleRows: [PlayerTrackRow] = []
+    public private(set) var embeddedSubtitleRows: [PlayerTrackRow] = []
+    public private(set) var audioTrackRows: [PlayerTrackRow] = []
+    public private(set) var audioTrackSelectionID: String?
     public private(set) var subtitleChoice: SubtitleChoice = .off
     public private(set) var subtitleStatus: String?
     /// Positive delays the subtitles. Applies to whichever draws them: the app's overlay, or the engine for its own tracks and files.
@@ -199,8 +205,11 @@ public final class PlayerViewModel {
     }
 
     public func beginScrub() {
+        // Capture the live position before fraction starts reading scrubFraction.
+        // Otherwise touching the timeline jumps its thumb to the previous drag.
+        let currentFraction = fraction
+        scrubFraction = currentFraction
         isScrubbing = true
-        scrubFraction = fraction
         showControls()
     }
 
@@ -298,6 +307,7 @@ public final class PlayerViewModel {
 
     public func selectAudioTrack(id: String) {
         userChoseAudio = true
+        audioTrackSelectionID = id
         coordinator?.selectAudioTrack(id: id)
         showControls()
     }
@@ -628,6 +638,13 @@ public final class PlayerViewModel {
     }
 
     private func tracksChanged() {
+        // These snapshots change only with the track list, so a paused menu is
+        // not re-laid out on every playback-clock tick.
+        let audioRows = PlayerTrackPresentation.embedded(state.audioTracks, audio: true)
+        let subtitleRows = PlayerTrackPresentation.embedded(embeddedSubtitleTracks)
+        if audioTrackRows != audioRows { audioTrackRows = audioRows }
+        if embeddedSubtitleRows != subtitleRows { embeddedSubtitleRows = subtitleRows }
+        if audioTrackSelectionID != state.selectedAudioTrackID { audioTrackSelectionID = state.selectedAudioTrackID }
         if !userChoseAudio, let track = SubtitleDefaults.audioTrack(in: state.audioTracks, selected: state.selectedAudioTrackID,
                                                                     language: settings.player.audioLanguage) {
             coordinator?.selectAudioTrack(id: track.id)

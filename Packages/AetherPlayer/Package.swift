@@ -15,7 +15,10 @@ let package = Package(
         .library(name: "AetherPlayer", type: .dynamic, targets: ["AetherPlayer"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/superuser404notfound/AetherEngine", .upToNextMinor(from: "7.47.0"),
+        // Prepared at the pinned 7.47.0 commit by scripts/prepare-aether.sh.
+        // Its source patch keeps both decode probes synchronous, fixing Swift 6's
+        // rejection of an upstream C-pointer capture without weakening checks.
+        .package(path: "../../build/dependencies/AetherEngine",
                  traits: ["TrueHDObjectAudio", "DTSXObjectAudio", "DualLayerDolbyVision"]),
     ],
     targets: [

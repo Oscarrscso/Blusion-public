@@ -172,6 +172,8 @@ public struct PlaybackState: Sendable, Equatable {
     /// Subtitle tracks inside the media. External subtitles are not engine tracks: they are drawn by the app (PLAN §5).
     public var embeddedSubtitleTracks: [MediaTrack] = []
     public var selectedEmbeddedSubtitleID: String?
+    /// Latched only by renderer readiness, never by a playing clock or a loaded file.
+    public var hasVideoFrame = false
     public var isExternalPlaybackActive = false
     public var chapters: [Chapter] = []
 

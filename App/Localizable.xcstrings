@@ -1013,6 +1013,17 @@
         }
       }
     },
+    "Dolby Vision off plays the HDR10 picture underneath instead, for a release whose Dolby Vision looks wrong; it applies to MKV files (AetherEngine and the advanced player), and profile 5 always keeps its Dolby Vision. Fit keeps the full original picture; Fill crops centrally without stretching. Tone mapping, HDR and deinterlacing apply in the advanced player; the system handles them for MP4 and HLS. AI super resolution uses this device's machine-learning video scaler for SDR video below the screen's resolution, where the chip supports it, and a sharp conventional scaler otherwise.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dolby Vision off plays the HDR10 picture underneath instead, for a release whose Dolby Vision looks wrong; it applies to MKV files (AetherEngine and the advanced player), and profile 5 always keeps its Dolby Vision. Fit keeps the full original picture; Fill crops centrally without stretching. Tone mapping, HDR and deinterlacing apply in the advanced player; the system handles them for MP4 and HLS. AI super resolution uses this device's machine-learning video scaler for SDR video below the screen's resolution, where the chip supports it, and a sharp conventional scaler otherwise."
+          }
+        }
+      }
+    },
     "Done": {
       "extractionState": "manual",
       "localizations": {
@@ -2021,6 +2032,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "No addons yet"
+          }
+        }
+      }
+    },
+    "No alternate audio tracks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No alternate audio tracks"
           }
         }
       }
@@ -3649,6 +3671,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "This stream only opens in another app, which keeps its own history. Pick another stream, or turn ghost mode off in Settings."
+          }
+        }
+      }
+    },
+    "This video has no chapter markers.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video has no chapter markers."
           }
         }
       }

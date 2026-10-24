@@ -17,21 +17,9 @@ final class FallbackFlowTests: XCTestCase {
     private func openStream(_ name: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["BLUSION_UITEST"] = "1"
+        app.launchEnvironment["BLUSION_EXTRA_ADDONS"] = "\(catalogURL)/uitest/manifest.json,\(streamURL)/uitest-streams/manifest.json"
+        app.launchEnvironment["BLUSION_ROUTE"] = "streams:movie:mock:movie1?title=Mock%20Movie%201"
         app.launch()
-        openAddons(app)
-        for url in ["\(catalogURL)/uitest/manifest.json", "\(streamURL)/uitest-streams/manifest.json"] {
-            let field = app.textFields["addons.installField"]
-            XCTAssertTrue(field.waitForExistence(timeout: 10))
-            field.tap()
-            field.typeText(url)
-            app.buttons["addons.installButton"].tap()
-            XCTAssertTrue(app.staticTexts["addons.success"].waitForExistence(timeout: 15))
-        }
-        dismissSettings(app)
-        let poster = app.buttons["poster.mock:movie1"].firstMatch
-        XCTAssertTrue(poster.waitForExistence(timeout: 15))
-        poster.tap()
-        app.buttons["detail.playButton"].tap()
         let row = app.buttons["stream.row.\(name)"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
@@ -44,8 +32,12 @@ final class FallbackFlowTests: XCTestCase {
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
             if !app.buttons["player.playPause"].exists { app.otherElements["player.screen"].tap() }
-            let parts = app.staticTexts["player.time"].label.split(separator: ":").compactMap { Double($0) }
+            let time = app.staticTexts["player.time"]
+            let parts = (time.value as? String ?? time.label).split(separator: ":").compactMap { Double($0) }
             if parts.reduce(0, { $0 * 60 + $1 }) >= 1.0 {
+                let preparing = app.descendants(matching: .any)["player.preparing"].firstMatch
+                let gone = NSPredicate(format: "exists == false")
+                wait(for: [XCTNSPredicateExpectation(predicate: gone, object: preparing)], timeout: 15)
                 captureScreenshot(app, named: shot)
                 return
             }

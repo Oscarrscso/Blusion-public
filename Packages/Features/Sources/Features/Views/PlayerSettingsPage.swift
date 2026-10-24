@@ -72,7 +72,7 @@ struct PlayerSettingsPage: View {
 
             Section {
                 Picker("Picture", selection: binding(\.videoLayout.fit)) {
-                    ForEach(VideoFit.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach([VideoFit.fit, .fill], id: \.self) { Text($0.label).tag($0) }
                 }
                 Toggle("Dolby Vision", isOn: binding(\.processing.dolbyVision))
                     .accessibilityIdentifier("settings.player.dolbyVision")
@@ -95,8 +95,8 @@ struct PlayerSettingsPage: View {
             } footer: {
                 Text("""
                     Dolby Vision off plays the HDR10 picture underneath instead, for a release whose Dolby Vision looks wrong; it applies \
-                    to MKV files (AetherEngine and the advanced player), and profile 5 always keeps its Dolby Vision. The picture menu \
-                    while playing also has aspect ratios and crops. Tone mapping, HDR and deinterlacing apply in the advanced player; the \
+                    to MKV files (AetherEngine and the advanced player), and profile 5 always keeps its Dolby Vision. Fit keeps the full \
+                    original picture; Fill crops centrally without stretching. Tone mapping, HDR and deinterlacing apply in the advanced player; the \
                     system handles them for MP4 and HLS. AI super \
                     resolution uses this device's machine-learning video scaler for SDR video below the screen's resolution, where the chip \
                     supports it, and a sharp conventional scaler otherwise.

@@ -33,6 +33,14 @@ final class PlayerLayerView: UIView {
     private var frameObservation: NSKeyValueObservation?
     var onFirstVideoFrame: (() -> Void)?
     private weak var observedPlayer: AVPlayer?
+    private var observationGeneration = 0
+    private var reportedFirstFrame = false
+    #if DEBUG
+    var onTestGeometry: ((String) -> Void)?
+    private let testSurfaceID = UUID().uuidString
+    private var lastTestGeometry = ""
+    private var exposesTestGeometry: Bool { ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1" }
+    #endif
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -53,6 +61,9 @@ final class PlayerLayerView: UIView {
     func watch(_ player: AVPlayer?) {
         guard player !== observedPlayer else { return }
         observedPlayer = player
+        observationGeneration += 1
+        let generation = observationGeneration
+        reportedFirstFrame = false
         sizeObservation = nil
         frameObservation = nil
         sourceSize = nil
@@ -62,11 +73,19 @@ final class PlayerLayerView: UIView {
         frameObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
             let ready = layer.isReadyForDisplay
             guard ready else { return }
-            Task { @MainActor in self?.onFirstVideoFrame?() }
+            Task { @MainActor [weak self] in
+                guard let self, self.observationGeneration == generation, !self.reportedFirstFrame,
+                      self.playerLayer.isReadyForDisplay else { return }
+                self.reportedFirstFrame = true
+                self.onFirstVideoFrame?()
+            }
         }
         sizeObservation = player.observe(\.currentItem?.presentationSize, options: [.initial, .new]) { [weak self] player, _ in
             let size = player.currentItem?.presentationSize ?? .zero
-            Task { @MainActor in self?.sourceSize = size.width > 0 && size.height > 0 ? size : nil }
+            Task { @MainActor [weak self] in
+                guard let self, self.observationGeneration == generation else { return }
+                self.sourceSize = size.width > 0 && size.height > 0 ? size : nil
+            }
         }
     }
 
@@ -106,6 +125,19 @@ final class PlayerLayerView: UIView {
         superResolutionLayer?.frame = videoView.bounds
         superResolutionLayer?.videoGravity = videoGravity
         CATransaction.commit()
+        #if DEBUG
+        if exposesTestGeometry, window != nil {
+            let frame = embedded?.frame ?? videoView.frame
+            let measured = "\(testSurfaceID)|\(convert(bounds, to: nil))|\(clipView.frame)|\(frame)"
+            if measured != lastTestGeometry {
+                lastTestGeometry = measured
+                Task { @MainActor [weak self] in
+                    guard let self, self.window != nil else { return }
+                    self.onTestGeometry?(measured)
+                }
+            }
+        }
+        #endif
     }
 
     func host(superResolution layer: AVSampleBufferDisplayLayer) {
@@ -158,7 +190,7 @@ final class PiPProxy {
     }
 }
 
-struct PlayerSurface: UIViewRepresentable {
+struct PlayerSurface: UIViewRepresentable, Equatable {
     let engine: (any PlaybackEngine)?
     let pip: PiPProxy
     var layout = VideoLayout()
@@ -168,6 +200,16 @@ struct PlayerSurface: UIViewRepresentable {
     var superResolution: SuperResolutionRenderer?
     var ambient: AmbientSampler?
     var onFirstVideoFrame: () -> Void = {}
+    #if DEBUG
+    var onTestGeometry: ((String) -> Void)?
+    #endif
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.engine.map { ObjectIdentifier($0) } == rhs.engine.map { ObjectIdentifier($0) }
+            && lhs.pip === rhs.pip && lhs.layout == rhs.layout && lhs.upscaling == rhs.upscaling
+            && lhs.embeddedSubtitlesOn == rhs.embeddedSubtitlesOn && lhs.ambientMode == rhs.ambientMode
+            && lhs.superResolution === rhs.superResolution && lhs.ambient === rhs.ambient
+    }
 
     func makeUIView(context: Context) -> PlayerLayerView {
         let view = PlayerLayerView()
@@ -179,6 +221,9 @@ struct PlayerSurface: UIViewRepresentable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         view.onFirstVideoFrame = onFirstVideoFrame
+        #if DEBUG
+        view.onTestGeometry = onTestGeometry
+        #endif
         if let avEngine = engine as? AVEngine {
             view.embed(nil)
             if view.playerLayer.player !== avEngine.player {
