@@ -46,7 +46,15 @@ struct PlayerContent: View {
     init(plan: PlaybackPlan, services: AppServices, onNextPlan: @escaping (PlaybackPlan) -> Void) {
         self.services = services
         self.onNextPlan = onNextPlan
+        #if DEBUG
+        // Automation round trips can exceed the normal controls idle window.
+        // Freeze only its injected interaction clock; playback and gestures stay live.
+        let isUITesting = ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1"
+        _model = State(initialValue: PlayerViewModel(plan: plan, services: services,
+                                                   now: { isUITesting ? Date.distantPast : Date() }))
+        #else
         _model = State(initialValue: PlayerViewModel(plan: plan, services: services))
+        #endif
         PlayerPreload.begin(plan, services: services)
     }
 

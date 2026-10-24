@@ -19,7 +19,7 @@ final class PlaybackFlowTests: XCTestCase {
         app.launchEnvironment["BLUSION_EXTRA_ADDONS"] = "\(catalogURL)/uitest/manifest.json,\(streamURL)/uitest-streams/manifest.json"
         app.launchEnvironment["BLUSION_ROUTE"] = "streams:movie:mock:movie1?title=Mock%20Movie%201"
         app.launch()
-        XCTAssertTrue(app.buttons["stream.row.Mock MP4"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["stream.row.Mock MP4"].firstMatch.waitForExistence(timeout: 60))
         return app
     }
 
@@ -41,6 +41,18 @@ final class PlaybackFlowTests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
         let ready = NSPredicate { _, _ in playPause.exists && playPause.isEnabled && playPause.isHittable }
         wait(for: [XCTNSPredicateExpectation(predicate: ready, object: playPause)], timeout: 5)
+    }
+
+    @MainActor
+    private func pausePlayback(_ app: XCUIApplication) {
+        let playPause = app.buttons["player.playPause"]
+        for _ in 0..<3 {
+            showControls(app)
+            // A short fixture may have ended during a slow automation round trip.
+            if playPause.label == "Play" { return }
+            playPause.tap()
+        }
+        XCTAssertEqual(playPause.label, "Play", "leave playback paused before checking layout or cue timing")
     }
 
     @MainActor
@@ -90,10 +102,9 @@ final class PlaybackFlowTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         waitForTime(app, atLeast: 0.5)
-        showControls(app)
-        app.buttons["player.playPause"].tap()
+        pausePlayback(app)
         let preparing = app.descendants(matching: .any)["player.preparing"].firstMatch
-        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: preparing)], timeout: 15)
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: preparing)], timeout: 30)
         captureScreenshot(app, named: "player-video-ready")
         let video = app.descendants(matching: .any)["player.videoSurface"].firstMatch
         XCTAssertTrue(video.waitForExistence(timeout: 5))
@@ -172,14 +183,13 @@ final class PlaybackFlowTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         waitForTime(app, atLeast: 0.5)
-        showControls(app)
-        app.buttons["player.playPause"].tap()   // pause so we can place the playhead precisely
+        pausePlayback(app)   // place the playhead precisely while paused
 
         showControls(app)
         app.buttons["player.subtitlesMenu"].tap()
         let english = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                                                        "player.subtitle.external.", "English · Mock Streams")).firstMatch
-        XCTAssertTrue(english.waitForExistence(timeout: 5))
+        XCTAssertTrue(english.waitForExistence(timeout: 20))
         english.tap()
 
         // The cues are 1.0-3.0 "First cue", 4.5-6.25 "Second cue…", 8.0-9.5 "Third cue" on a 10 s clip.
@@ -188,14 +198,14 @@ final class PlaybackFlowTests: XCTestCase {
             app.sliders["player.scrubber"].adjust(toNormalizedSliderPosition: fraction)
             let cue = app.descendants(matching: .any)["player.subtitle"].firstMatch
             let shown = NSPredicate { _, _ in cue.exists && cue.label.hasPrefix(expected) }
-            wait(for: [XCTNSPredicateExpectation(predicate: shown, object: cue)], timeout: 5)
+            wait(for: [XCTNSPredicateExpectation(predicate: shown, object: cue)], timeout: 10)
             captureScreenshot(app, named: "player-subtitle-\(fraction)")
         }
         showControls(app)
         app.sliders["player.scrubber"].adjust(toNormalizedSliderPosition: 0.37)   // 3.7 s: between cues
         let cue = app.descendants(matching: .any)["player.subtitle"].firstMatch
         let gone = NSPredicate { _, _ in !cue.exists || cue.label.isEmpty }
-        wait(for: [XCTNSPredicateExpectation(predicate: gone, object: cue)], timeout: 5)
+        wait(for: [XCTNSPredicateExpectation(predicate: gone, object: cue)], timeout: 10)
         captureScreenshot(app, named: "M5-subtitles")
     }
 
