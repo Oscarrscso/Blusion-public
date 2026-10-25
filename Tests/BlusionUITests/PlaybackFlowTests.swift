@@ -61,10 +61,18 @@ final class PlaybackFlowTests: XCTestCase {
         var requested = fraction
         var actual: Double?
         for _ in 0..<6 {
-            // XCTest estimates the new glass thumb's travel and can overshoot.
+            // Drag the visible native thumb directly: XCTest's normalized
+            // adjustment helper miscalculates its travel on Liquid Glass.
             // Verify playback is inside the cue's interval, away from its edges.
             // Touch accuracy does not need to equal an exact subtitle timestamp.
-            slider.adjust(toNormalizedSliderPosition: min(1, max(0, requested)))
+            let startPercentage = (slider.value as? String ?? "").filter { $0.isNumber || $0 == "." }
+            guard let start = Double(startPercentage) else {
+                XCTFail("native slider did not expose its current playback percentage")
+                return
+            }
+            let thumb = slider.coordinate(withNormalizedOffset: CGVector(dx: start / 100, dy: 0.5))
+            let destination = slider.coordinate(withNormalizedOffset: CGVector(dx: min(1, max(0, requested)), dy: 0.5))
+            thumb.press(forDuration: 0.2, thenDragTo: destination)
             let percentage = (slider.value as? String ?? "").filter { $0.isNumber || $0 == "." }
             guard let value = Double(percentage) else {
                 XCTFail("native slider did not expose its playback percentage: \(String(describing: slider.value))")

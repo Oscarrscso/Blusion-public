@@ -118,7 +118,6 @@ if [[ "$HAS_XCODE" == 1 ]]; then
   SPEC="project.yml"
   if [[ -n "${FALLBACK:-}" ]]; then
     ./scripts/enable-fallback.sh --generate-only || fail "enable-fallback"
-    bash scripts/prepare-aether.sh || fail "prepare-aether"
     SPEC="project.fallback.generated.yml"
   fi
   xcodegen generate --spec "$SPEC" --quiet || fail "xcodegen generate ($SPEC)"

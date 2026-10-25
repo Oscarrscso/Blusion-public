@@ -145,6 +145,10 @@ schemes:
     build:
       targets:
         Blusion: all
+      #fallback# preActions:
+      #fallback#   - name: Apply Aether Swift 6 compatibility fix
+      #fallback#     settingsTarget: Blusion
+      #fallback#     script: 'bash "$SRCROOT/scripts/prepare-aether.sh" "$BUILD_DIR"'
     run:
       config: Debug
     test:

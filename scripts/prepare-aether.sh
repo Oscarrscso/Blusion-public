@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# Prepare the existing AetherEngine release with synchronous decode probes.
+# Called automatically by the fallback scheme after SwiftPM resolves AetherEngine.
 # Swift 6 rejects the upstream C-pointer capture in an actor-isolated closure.
-# Source stays in ignored build output; no third-party binaries are committed.
+# Patch Xcode's existing checkout; no separate local dependency is required.
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REVISION=a1a70cd63c1fef89cffcf0e8110456807d0fab05
-DEST="$ROOT/build/dependencies/AetherEngine"
-mkdir -p "$ROOT/build/dependencies"
-if [[ ! -d "$DEST" ]]; then
-  git clone --depth 1 --branch 7.47.0 https://github.com/superuser404notfound/AetherEngine.git "$DEST"
-fi
+CURSOR="${1:-${BUILD_DIR:-}}"
+[[ -n "$CURSOR" ]] || { echo "prepare-aether: run through the generated Blusion scheme" >&2; exit 64; }
+DEST=""
+# Both normal builds and archives keep SourcePackages above their build folder.
+while [[ -n "$CURSOR" && "$CURSOR" != / ]]; do
+  for candidate in "$CURSOR/SourcePackages/checkouts/AetherEngine" "$CURSOR/SourcePackages/checkouts/aetherengine"; do
+    if [[ -f "$candidate/Package.swift" ]]; then DEST="$candidate"; break; fi
+  done
+  [[ -z "$DEST" ]] || break
+  CURSOR="$(dirname "$CURSOR")"
+done
+[[ -n "$DEST" ]] || { echo "prepare-aether: Xcode's resolved AetherEngine checkout was not found" >&2; exit 1; }
 [[ "$(git -C "$DEST" rev-parse HEAD)" == "$REVISION" ]] || {
   echo "prepare-aether: unexpected dependency revision; preserving $DEST unchanged" >&2; exit 1;
 }
 python3 - "$DEST" <<'PY'
 from pathlib import Path
-import subprocess,sys
+import stat,subprocess,sys
 root=Path(sys.argv[1])
 path='Sources/AetherEngine/AetherEngine.swift'
 original=subprocess.check_output(['git','-C',str(root),'show','HEAD:'+path],text=True)
@@ -35,6 +41,8 @@ previous=original.replace('let forcesSoftware = {\n                VideoRoutingP
 file=root/path
 if file.read_text() not in (original,previous,patched):
     raise SystemExit('prepare-aether: dependency has local source changes; preserving them')
-file.write_text(patched)
+if file.read_text() != patched:
+    file.chmod(file.stat().st_mode | stat.S_IWUSR)
+    file.write_text(patched)
 PY
 echo "prepare-aether: AetherEngine 7.47.0 ($REVISION), synchronous decode-probe fix applied"
