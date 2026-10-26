@@ -404,7 +404,7 @@ public struct RootTabView: View {
         .pageTopBar(hidden: isPhoneLandscape)
         .tabBarMinimizeBehavior(isPhoneInLandscape ? .never : .onScrollDown)
         .toolbar(isPhoneInLandscape && landscapeTabs.collapsed ? .hidden : .automatic, for: .tabBar)
-        .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage))
+        .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage || isPhoneInLandscape))
         .overlay(alignment: .bottomLeading) {
             if isPhoneInLandscape && landscapeTabs.collapsed && !router.showsTitlePage {
                 Button {
