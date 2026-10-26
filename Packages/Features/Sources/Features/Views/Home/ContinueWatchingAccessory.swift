@@ -2,6 +2,7 @@
 import PlayerKit
 import StremioKit
 import SwiftUI
+import UIKit
 
 /// What the tab bar accessory shows: the newest title to resume. The accessory is enabled only while there is one.
 @MainActor
@@ -49,6 +50,8 @@ struct ResumeAccessoryModifier: ViewModifier {
     let model: ContinueWatchingModel
     /// True while a title's page is on top: the page has the whole screen, without the accessory.
     var hidden = false
+    /// Suppress the native accessory on a landscape iPhone without changing the tab view's identity.
+    var isPhoneLandscape = false
 
     func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
@@ -56,17 +59,101 @@ struct ResumeAccessoryModifier: ViewModifier {
         content
         #else
         if #available(iOS 26.1, *) {
-            content.tabViewBottomAccessory(isEnabled: model.newest != nil && !hidden) {
-                if !hidden, let newest = model.newest {
+            // Keep this modifier attached in both orientations: branching around Content rebuilds the entire TabView.
+            content.tabViewBottomAccessory(isEnabled: model.newest != nil && !hidden && !isPhoneLandscape) {
+                if let newest = model.newest {
                     ContinueWatchingAccessory(item: newest,
                                               onMarkWatched: { Task { await model.markWatched(newest) } },
                                               onRemove: { Task { await model.remove(newest) } })
                 }
             }
+            .background {
+                ResumeAccessoryVisibility(isEnabled: model.newest != nil && !hidden, isPhoneLandscape: isPhoneLandscape)
+                    .frame(width: 0, height: 0)
+            }
         } else {
             content
         }
         #endif
+    }
+}
+
+/// SwiftUI can retain the UIKit accessory after its tab bar hides. Remove it through UIKit's public API as well.
+@available(iOS 26.1, *)
+private struct ResumeAccessoryVisibility: UIViewControllerRepresentable {
+    let isEnabled: Bool
+    let isPhoneLandscape: Bool
+
+    func makeUIViewController(context: Context) -> ResumeAccessoryVisibilityController {
+        ResumeAccessoryVisibilityController()
+    }
+
+    func updateUIViewController(_ controller: ResumeAccessoryVisibilityController, context: Context) {
+        controller.isEnabled = isEnabled
+        controller.isPhoneLandscape = isPhoneLandscape
+        // Run after SwiftUI has applied its own accessory update to the tab controller.
+        DispatchQueue.main.async { [weak controller] in controller?.synchronize() }
+    }
+}
+
+@available(iOS 26.1, *)
+final class ResumeAccessoryVisibilityController: UIViewController {
+    var isEnabled = false
+    var isPhoneLandscape = false
+    private var savedAccessory: UITabAccessory?
+    private weak var owner: UITabBarController?
+
+    override func loadView() {
+        let surface = UIView()
+        surface.backgroundColor = .clear
+        surface.isUserInteractionEnabled = false
+        view = surface
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        synchronize()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        synchronize()
+    }
+
+    func synchronize() {
+        guard let tabs = tabBarController ?? Self.findTabs(in: view.window?.rootViewController) else { return }
+        let landscape = UIDevice.current.userInterfaceIdiom == .phone
+            && (view.window?.windowScene?.interfaceOrientation.isLandscape ?? isPhoneLandscape)
+        synchronize(with: tabs, landscape: landscape)
+    }
+
+    /// Also used by the UIKit regression tests, without a window or device rotation.
+    func synchronize(with tabs: UITabBarController, landscape: Bool) {
+        if owner !== tabs {
+            savedAccessory = nil
+            owner = tabs
+        }
+        if !isEnabled || landscape || isPhoneLandscape {
+            if let accessory = tabs.bottomAccessory {
+                savedAccessory = isEnabled ? accessory : nil
+                tabs.setBottomAccessory(nil, animated: false)
+            }
+            if !isEnabled { savedAccessory = nil }
+        } else {
+            if tabs.bottomAccessory == nil, let savedAccessory {
+                tabs.setBottomAccessory(savedAccessory, animated: false)
+            }
+            savedAccessory = nil
+        }
+    }
+
+    private static func findTabs(in controller: UIViewController?) -> UITabBarController? {
+        guard let controller else { return nil }
+        if let tabs = controller as? UITabBarController { return tabs }
+        for child in controller.children {
+            if let tabs = findTabs(in: child) { return tabs }
+        }
+        return nil
     }
 }
 

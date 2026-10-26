@@ -1,20 +1,22 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// One darkened landscape image and centered logo, shared by Continue and landscape poster cards. With no logo and no title, only the
-/// darkened image is drawn.
+/// Original-colour landscape artwork and a centered logo, shared by Continue and landscape poster cards.
+/// Logo legibility comes from its own shadow; the artwork is never dimmed.
 struct LandscapeArtwork: View {
     let title: String
     let artwork: URL?
     let logo: URL?
     let maxPixelSize: CGFloat
+    let fallbackArtwork: URL?
     @State private var logoImage: UIImage?
 
-    init(title: String, artwork: URL?, logo: URL?, maxPixelSize: CGFloat) {
+    init(title: String, artwork: URL?, logo: URL?, maxPixelSize: CGFloat, fallbackArtwork: URL? = nil) {
         self.title = title
         self.artwork = artwork
         self.logo = logo
         self.maxPixelSize = maxPixelSize
+        self.fallbackArtwork = fallbackArtwork
         _logoImage = State(initialValue: logo.flatMap { ImagePipeline.shared.cachedImage(for: $0, maxPixelSize: 400) })
     }
 
@@ -25,8 +27,8 @@ struct LandscapeArtwork: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ArtworkImage(url: artwork, maxPixelSize: maxPixelSize)
-                .overlay { Color.black.opacity(0.32).allowsHitTesting(false) }
+            ArtworkImage(url: artwork ?? fallbackArtwork, maxPixelSize: maxPixelSize, fallbackURL: fallbackArtwork,
+                         acceptsAnyCachedSize: true, keepsPictureOnShow: true)
                 .overlay {
                     if logo != nil || !title.isEmpty {
                         Group {
@@ -42,17 +44,20 @@ struct LandscapeArtwork: View {
                             }
                         }
                         .frame(width: geometry.size.width * 0.74, height: geometry.size.height * 0.38)
-                        .shadow(color: .black.opacity(0.4), radius: 2)
+                        .shadow(color: .black.opacity(0.85), radius: 3, y: 1)
                         .allowsHitTesting(false)
+                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
                     }
                 }
         }
         .accessibilityHidden(true)
         .task(id: logo) {
-            guard let logo else { logoImage = nil; return }
+            // A recycled card must not keep another title's logo, or crossfade its fallback text over the new logo.
+            logoImage = logo.flatMap { ImagePipeline.shared.cachedImage(for: $0, maxPixelSize: 400) }
+            guard let logo, logoImage == nil else { return }
             let image = try? await ImagePipeline.shared.image(for: logo, maxPixelSize: 400)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.25)) { logoImage = image }
+            logoImage = image
         }
     }
 }

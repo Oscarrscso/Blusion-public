@@ -150,7 +150,7 @@ struct ArtworkImage: View {
             .loadingCardSpinner(showsLoadingSpinner && url != nil && image == nil && placeholderImage == nil && !hasFinishedLoading)
             .accessibilityHidden(true)
             // Stretching changes only the frame; it must not restart the download, decode or fade.
-            .task(id: url) { await load() }
+            .task(id: [url, fallbackURL]) { await load() }
             // Promote an existing queued request when its row scrolls on screen, without restarting its download.
             .task(id: "\(url?.absoluteString ?? "-")|\(artworkPriority.rawValue)|\(artworkOrder ?? -1)") {
                 guard let url, artworkOrder != nil else { return }

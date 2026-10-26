@@ -3,8 +3,55 @@ import PlayerKit
 import StremioKit
 import Testing
 @testable import Features
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @Suite struct ContinueWatchingCardTests {
+    #if canImport(UIKit) && !targetEnvironment(macCatalyst)
+    @MainActor
+    @Test func nativeResumeAccessoryIsRemovedAndRestoredThroughRotation() throws {
+        guard #available(iOS 26.1, *) else { return }
+        let tabs = UITabBarController()
+        let accessory = UITabAccessory(contentView: UIView())
+        tabs.setBottomAccessory(accessory, animated: false)
+        let visibility = ResumeAccessoryVisibilityController()
+        visibility.isEnabled = true
+
+        visibility.synchronize(with: tabs, landscape: true)
+        #expect(tabs.bottomAccessory == nil)
+        visibility.synchronize(with: tabs, landscape: false)
+        #expect(tabs.bottomAccessory === accessory)
+    }
+
+    @MainActor
+    @Test func landscapeAlsoRemovesAnAccessoryReattachedDuringRefresh() throws {
+        guard #available(iOS 26.1, *) else { return }
+        let tabs = UITabBarController()
+        let visibility = ResumeAccessoryVisibilityController()
+        visibility.isEnabled = true
+        for _ in 0..<3 {
+            tabs.setBottomAccessory(UITabAccessory(contentView: UIView()), animated: false)
+            visibility.synchronize(with: tabs, landscape: true)
+            #expect(tabs.bottomAccessory == nil)
+        }
+    }
+
+    @MainActor
+    @Test func removingResumeDataWhileLandscapeDoesNotRestoreOldAccessory() throws {
+        guard #available(iOS 26.1, *) else { return }
+        let tabs = UITabBarController()
+        tabs.setBottomAccessory(UITabAccessory(contentView: UIView()), animated: false)
+        let visibility = ResumeAccessoryVisibilityController()
+        visibility.isEnabled = true
+        visibility.synchronize(with: tabs, landscape: true)
+        visibility.isEnabled = false
+        visibility.synchronize(with: tabs, landscape: true)
+        visibility.synchronize(with: tabs, landscape: false)
+        #expect(tabs.bottomAccessory == nil)
+    }
+    #endif
+
     private func progress(_ id: String, minutesAgo: Double, series: String? = nil, episode: Int? = nil) -> WatchProgress {
         let poster = URL(string: "https://img.example.com/\(series ?? id).jpg")
         if let series {

@@ -205,7 +205,8 @@ struct MediaCard: View {
             .overlay {
                 if usesLandscapeArtwork {
                     LandscapeArtwork(title: item.name, artwork: textlessBackdrop ?? Self.landscapeArtworkURL(for: item),
-                                     logo: Self.landscapeLogoURL(for: item), maxPixelSize: pixelSize)
+                                     logo: Self.landscapeLogoURL(for: item), maxPixelSize: pixelSize,
+                                     fallbackArtwork: PosterQuality.poster(for: item))
                 } else {
                     // One picture view whether or not the card uses BetterPosters, so turning the setting on or off keeps the picture on show
                     // until the other one has loaded: the usual poster stays while the BetterPosters picture loads, and no placeholder shows.

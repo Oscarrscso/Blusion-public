@@ -148,17 +148,12 @@ private struct ScreenBackgroundModifier: ViewModifier {
     /// shows over their artwork at rest. Mac has no soft edge: over black it reads as a black band, so its top bar is a material blur instead.
     @ViewBuilder
     func body(content: Content) -> some View {
-        if isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone {
-            // Landscape should never lay a system scroll-edge gradient over the page.
-            content.background { Theme.background.ignoresSafeArea() }
-                .scrollEdgeEffectHidden(true, for: .all)
-                .pageTopBar(hidden: true)
-        } else {
-            content.background { Theme.background.ignoresSafeArea() }
-                .scrollEdgeEffectStyle(.soft, for: .top)
-                .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
-                .pageTopBar(hidden: isPhoneLandscape)
-        }
+        // Keep the same view hierarchy through rotation so scrolling and artwork tasks survive.
+        content.background { Theme.background.ignoresSafeArea() }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
+            .scrollEdgeEffectHidden(isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone, for: .bottom)
+            .pageTopBar(hidden: isPhoneLandscape)
     }
 
     /// Mac builds take the top bar's material blur (see `pageTopBar`), with no soft edge.
