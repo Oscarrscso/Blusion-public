@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import StremioKit
 import SwiftUI
+import UIKit
 
 /// The grid behind "See All", a collection tile or a genre: the titles of the request's sources, loading the next page as the user
 /// scrolls. The items already on screen stay while a refresh runs.
@@ -9,6 +10,8 @@ struct CatalogListView: View {
     @State private var model: CatalogListViewModel
     /// The first load starts once; coming back to this screen keeps what is loaded instead of asking the addon again.
     @State private var hasStarted = false
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
 
     init(request: CatalogListRequest, services: AppServices) {
         self.request = request
@@ -20,15 +23,21 @@ struct CatalogListView: View {
             content
                 .padding(.vertical, Theme.Spacing.l)
         }
+        .trackLandscapeTabScroll()
         .screenBackground()
-        .navigationTitle(request.title)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(isPhoneInLandscape ? "" : request.title)
+        .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+        .navigationBarTitleDisplayMode(isPhoneInLandscape ? .inline : .large)
         .task {
             guard !hasStarted else { return }
             hasStarted = true
             await model.load()
         }
     }
+
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well. A phone in landscape has no room for
+    /// a title over the grid, so it is left out there; the bar keeps only the back button.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     @ViewBuilder
     private var content: some View {

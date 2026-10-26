@@ -520,6 +520,23 @@ import StremioKitTestSupport
         #expect(model.recommendedStream?.title == "[TB+] Ready")
     }
 
+    @Test func theAutoPickSourceSettingChoosesUsenetOrDebridAndBalancedLetsQualityDecide() async throws {
+        let streams = body([direct("☁️ ⚡ Debrid 4K", "https://a.example.com/debrid.mp4", "2160p BluRay REMUX · 📡 Source: ☁️ TB"),
+                            direct("📰 ⚡ Usenet 1080", "https://a.example.com/usenet.mp4", "1080p WEB-DL · 📡 Source: 📰 TB")])
+        for (source, expected) in [(StreamSourcePreference.usenet, "📰 ⚡ Usenet 1080"), (.debrid, "☁️ ⚡ Debrid 4K"),
+                                   (.balanced, "☁️ ⚡ Debrid 4K")] {
+            let model = picker(movie, try await services(bodies: [streams], settings: PlaybackSettings(autoPickSource: source)))
+            await model.load()
+            #expect(model.recommendedStream?.title == expected, "\(source)")
+            guard case .play(let plan)? = await model.autoPickBest() else { Issue.record("expected playback for \(source)"); continue }
+            #expect(plan.candidates.first?.title == expected)
+        }
+        let usenet = picker(movie, try await services(bodies: [streams], settings: PlaybackSettings(autoPickSource: .usenet)))
+        await usenet.load()
+        #expect(usenet.recommendedStreamLabel?.hasSuffix("· Usenet") == true, "Auto Pick's button names the kind it starts")
+        #expect(usenet.autoPickSourceNote == "Auto Pick prefers Usenet streams")
+    }
+
     @Test(arguments: ["[TB download]", "[RD download]", "⏳ TB", "Uncached", "Not cached", "Cached: false"])
     func uncachedStreamsRequireManualSelection(_ marker: String) async throws {
         let services = try await services(bodies: [body([direct(marker, "https://a.example.com/wait.mp4", "2160p REMUX")])])

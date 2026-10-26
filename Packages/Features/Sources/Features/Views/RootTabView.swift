@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import Persistence
 import SwiftUI
 import StremioKit
 
@@ -183,6 +184,62 @@ struct GalleryDestination: Hashable {
     var section: String?
 }
 
+/// The tab bar collapses to Home after scrolling down on a landscape iPhone.
+@MainActor
+@Observable
+final class LandscapeTabBarState {
+    var collapsed = false
+    private var previousOffset: CGFloat?
+    private var distanceDown: CGFloat = 0
+    private var distanceUp: CGFloat = 0
+
+    func reset() {
+        collapsed = false
+        previousOffset = nil
+        distanceDown = 0
+        distanceUp = 0
+    }
+
+    func update(offset: CGFloat) {
+        let offset = max(0, offset)
+        guard offset > 8 else { reset(); return }
+        guard let previousOffset else { self.previousOffset = offset; return }
+        self.previousOffset = offset
+        let difference = offset - previousOffset
+        // A tab-bar visibility change can relayout the scroll view. Ignore jumps instead of treating them as scrolling.
+        guard abs(difference) < 100 else { return }
+        if difference > 1 {
+            distanceDown += difference
+            distanceUp = 0
+            if distanceDown >= 35 { collapsed = true; distanceDown = 0 }
+        } else if difference < -1 {
+            distanceUp -= difference
+            distanceDown = 0
+            if distanceUp >= 35 { collapsed = false; distanceUp = 0 }
+        }
+    }
+}
+
+private struct LandscapeTabScrollModifier: ViewModifier {
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
+
+    func body(content: Content) -> some View {
+        content.onScrollGeometryChange(for: CGFloat.self) {
+            max(0, $0.contentOffset.y + $0.contentInsets.top)
+        } action: { _, offset in
+            guard isPhoneLandscape, UIDevice.current.userInterfaceIdiom == .phone else { return }
+            landscapeTabs?.update(offset: offset)
+        }
+    }
+}
+
+extension View {
+    func trackLandscapeTabScroll() -> some View {
+        modifier(LandscapeTabScrollModifier())
+    }
+}
+
 /// A phone gets the plain tab bar, where Search always stands apart from the other tabs as a button of its own. The sidebar style, which
 /// an iPad and the Mac need, drew Search inside the bar with the rest on a phone whenever the bar was at full size.
 private struct TabBarStyle: ViewModifier {
@@ -198,10 +255,15 @@ private struct TabBarStyle: ViewModifier {
 public struct RootTabView: View {
     private let services: AppServices
     private let initialQuery: String?
+    private let initialRoute: LaunchRoute
     private let userStateRevision: Int
     @Binding private var addonLink: String?
     @Environment(\.scenePhase) private var scenePhase
     @State private var router: AppRouter
+    /// The app-level holder of the playback session on the air, so backgrounding or a rebuild of the player's screen never ends
+    /// playback (see `LivePlaybackSession`).
+    @State private var livePlayback = LivePlaybackSession()
+    @State private var landscapeTabs = LandscapeTabBarState()
     @State private var resume: ContinueWatchingModel
     @State private var titleActions: TitleActions
     @State private var failedHandoff: PlaybackHandoffReceipt?
@@ -211,6 +273,7 @@ public struct RootTabView: View {
     @State private var windowSafeArea = EdgeInsets()
     /// A phone turned sideways. A Mac window is never a phone, so `isPhoneLandscape` never governs its navigation bar, at any window shape.
     private var isPhoneLandscape: Bool { isLandscape && !Self.isMacCatalyst }
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
     private static var isMacCatalyst: Bool {
         #if targetEnvironment(macCatalyst)
         return true
@@ -226,6 +289,7 @@ public struct RootTabView: View {
         self.userStateRevision = userStateRevision
         _addonLink = addonLink
         initialQuery = route.searchQuery
+        initialRoute = route
         _router = State(initialValue: AppRouter(route: route))
         _resume = State(initialValue: ContinueWatchingModel(services: services))
         _titleActions = State(initialValue: TitleActions(services: services))
@@ -256,7 +320,9 @@ public struct RootTabView: View {
                         .appDestinations(services: services, path: \.homePath)
                         .navigationDestination(for: GalleryDestination.self) { DesignGalleryView(section: $0.section) }
                         .navigationDestination(for: PlayerRecovery.self) { recovery in
-                            StreamPickerView(request: recovery.request, services: services, allowsAutomaticStart: false)
+                            StreamPickerView(request: recovery.request, services: services,
+                                             forcesAutomaticStart: recovery.resumesSession,
+                                             allowsAutomaticStart: recovery.resumesSession)
                         }
                 }
                 .zoomTransitions()
@@ -334,9 +400,32 @@ public struct RootTabView: View {
         // Choosing Search goes straight to its field, with the keyboard up.
         .tabViewSearchActivation(.searchTabSelection)
         .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
+        .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
         .pageTopBar(hidden: isPhoneLandscape)
-        .tabBarMinimizeBehavior(.onScrollDown)
+        .tabBarMinimizeBehavior(isPhoneInLandscape ? .never : .onScrollDown)
+        .toolbar(isPhoneInLandscape && landscapeTabs.collapsed ? .hidden : .automatic, for: .tabBar)
         .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage))
+        .overlay(alignment: .bottomLeading) {
+            if isPhoneInLandscape && landscapeTabs.collapsed && !router.showsTitlePage {
+                Button {
+                    landscapeTabs.reset()
+                    router.tapTab(.home)
+                } label: {
+                    Image(systemName: "play.house.fill")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .accessibilityLabel("Home")
+                .accessibilityIdentifier("landscape.home")
+                .padding(.leading, max(windowSafeArea.leading, windowSafeArea.trailing) + 16)
+                .padding(.bottom, max(12, windowSafeArea.bottom + 8))
+            }
+        }
+        .onChange(of: router.tab) { _, _ in landscapeTabs.reset() }
+        .onChange(of: isPhoneInLandscape) { _, _ in landscapeTabs.reset() }
         .task(id: "\(router.tab)-\(userStateRevision)") {
             router.userStateRevision = userStateRevision
             await refreshUserState()
@@ -379,12 +468,15 @@ public struct RootTabView: View {
             await Task.yield()
             guard !Task.isCancelled else { return }
             router.presentLaunchRoute(includeHomeDestinations: false)
+            await reopenPreviousSession()
             #if canImport(UIKit)
             // The reviews page's rules and WebKit's process start now, after the first frame, so the first reviews page waits for neither.
             ReviewPageRules.prewarm()
             #endif
         }
         .environment(router)
+        .environment(livePlayback)
+        .environment(landscapeTabs)
         .environment(services.posterRatings)
         .environment(services.heroMeta)
         .environment(titleActions)
@@ -415,6 +507,23 @@ public struct RootTabView: View {
         .environment(\.symbolVariants, .none)
     }
 
+    /// The app was killed with a stream playing: opening it again walks back into that stream, at its position and choices. The picker
+    /// resolves the same file from a fresh listing; when it cannot, it shows the list and the position stays in progress. A launch route
+    /// (a deep link, a title, the gallery) is what the person asked for, so it is never displaced.
+    private func reopenPreviousSession() async {
+        #if DEBUG
+        // UI tests drive their own launches and must not inherit the device's saved session.
+        if ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1" { return }
+        #endif
+        guard initialRoute == .home, let snapshot = await PlaybackSession.load() else { return }
+        guard !snapshot.isEffectivelyFinished() else {
+            await PlaybackSession.clear()
+            return
+        }
+        router.tab = .home
+        router.homePath.append(PlayerRecovery(request: snapshot.request, resumesSession: true))
+    }
+
     private func refreshUserState() async {
         let progress = await services.progress.all()
         resume.update(from: progress)
@@ -435,6 +544,8 @@ public struct RootTabView: View {
 
 private struct PlayerRecovery: Hashable {
     let request: StreamRequest
+    /// True when reopening the app's saved session: the picker starts that session's own stream again, as a held poster does.
+    var resumesSession = false
 }
 
 private extension PlaybackPlan {

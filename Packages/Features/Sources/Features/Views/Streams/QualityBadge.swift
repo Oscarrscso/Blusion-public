@@ -87,6 +87,24 @@ extension QualityBadge {
         }
     }
 
+    /// A soft sky blue for a Usenet stream, so it tells apart from a debrid one at a glance.
+    static let usenetBlue = Color(red: 0.62, green: 0.80, blue: 0.99)
+
+    /// How the stream arrives: "Usenet" beside a newspaper, "Debrid" beside a cloud, as AIOStreams marks them. The symbol alone where
+    /// the row has no room for the word.
+    @ViewBuilder
+    static func delivery(_ delivery: StreamDelivery, titled: Bool) -> some View {
+        let symbol = delivery == .usenet ? "newspaper.fill" : "cloud.fill"
+        let tint: Color = delivery == .usenet ? usenetBlue : .white
+        if titled {
+            QualityBadge(delivery.title, symbol: symbol, tint: tint)
+        } else {
+            Image(systemName: symbol)
+                .qualityBadgeChrome(tint: tint)
+                .accessibilityLabel(Text(verbatim: delivery.title))
+        }
+    }
+
     static func resolution(_ label: String, is4K: Bool) -> QualityBadge {
         QualityBadge(label, symbol: is4K ? "4k.tv" : "tv", tint: is4K ? premium : .white)
     }

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import UIKit
 
 /// Design tokens. Screens take their spacing, radii and colours from here so every screen lines up on the same grid.
 /// Sizes that differ between a phone and a Mac window (page margin, poster width, shelf spacing) live in `LayoutMetrics`.
@@ -145,11 +146,19 @@ private struct ScreenBackgroundModifier: ViewModifier {
 
     /// On iPhone every page's top edge gets the system's soft scroll-edge blur, and hero pages (Home's spotlight, Detail) hide it so it never
     /// shows over their artwork at rest. Mac has no soft edge: over black it reads as a black band, so its top bar is a material blur instead.
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content.background { Theme.background.ignoresSafeArea() }
-            .scrollEdgeEffectStyle(.soft, for: .top)
-            .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
-            .pageTopBar(hidden: isPhoneLandscape)
+        if isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone {
+            // Landscape should never lay a system scroll-edge gradient over the page.
+            content.background { Theme.background.ignoresSafeArea() }
+                .scrollEdgeEffectHidden(true, for: .all)
+                .pageTopBar(hidden: true)
+        } else {
+            content.background { Theme.background.ignoresSafeArea() }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
+                .pageTopBar(hidden: isPhoneLandscape)
+        }
     }
 
     /// Mac builds take the top bar's material blur (see `pageTopBar`), with no soft edge.

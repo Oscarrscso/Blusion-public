@@ -135,6 +135,12 @@ public final class SettingsViewModel {
         await services.settings.save(settings)
     }
 
+    public func setAutoPickSource(_ value: StreamSourcePreference) async {
+        settings = await services.settings.load()
+        settings.autoPickSource = value
+        await services.settings.save(settings)
+    }
+
     public func setContinueWatchingRefreshSeconds(_ value: Int) async {
         settings = await services.settings.load()
         settings.continueWatchingRefreshSeconds = value

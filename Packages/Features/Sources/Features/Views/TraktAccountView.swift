@@ -48,8 +48,6 @@ struct TraktAccountView: View {
                 .accessibilityIdentifier("trakt.saveClientID")
         } header: {
             Text("API configuration")
-        } footer: {
-            Text("Use your own Trakt API application. Register blusion://trakt/callback as its redirect URI. This app does not include an API client ID.")
         }
     }
 
@@ -67,10 +65,6 @@ struct TraktAccountView: View {
             }
         } header: {
             Text("Account")
-        } footer: {
-            if !model.isSignedIn {
-                Text("Connect to sync your saved titles, watched marks and paused positions with Trakt.")
-            }
         }
     }
 
@@ -85,12 +79,6 @@ struct TraktAccountView: View {
             }
         } header: {
             Text("Your Trakt library")
-        } footer: {
-            Text("""
-                Saved titles, watched marks and paused positions sync both ways automatically. Removing a saved title or clearing a watched \
-                mark here does the same on Trakt, and what is removed on Trakt is removed here. Saved titles use your Trakt watchlist; \
-                your collection is only read. Sync reads everything from Trakt again.
-                """)
         }
     }
 

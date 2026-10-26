@@ -1,10 +1,13 @@
 #if canImport(UIKit)
 import SwiftUI
 import StremioKit
+import UIKit
 
 struct DiscoverView: View {
     @State private var model: DiscoverViewModel
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
     let onOpenAddons: () -> Void
@@ -33,8 +36,10 @@ struct DiscoverView: View {
                 .padding(.vertical, Theme.Spacing.l)
                 .id(Self.topID)
             }
+            .trackLandscapeTabScroll()
             .screenBackground()
             .navigationTitle("")
+            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)
@@ -48,15 +53,22 @@ struct DiscoverView: View {
         }
     }
 
-    /// The page's title, drawn in the content so the navigation bar stays free of text.
+    /// The page's title, drawn in the content so the navigation bar stays free of text. A phone in landscape has no room for a title
+    /// above the grid, so it is left out there; the tab bar still names the page.
+    @ViewBuilder
     private var pageTitle: some View {
-        Text("Discover")
-            .font(Theme.Typography.largeTitle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, metrics.pageMargin)
-            .padding(.bottom, metrics.headerSpacing)
-            .accessibilityAddTraits(.isHeader)
+        if !isPhoneInLandscape {
+            Text("Discover")
+                .font(Theme.Typography.largeTitle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, metrics.pageMargin)
+                .padding(.bottom, metrics.headerSpacing)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
+
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     /// The filter block the Library shares (see `BrowseFilterBar`): the type control, shown for Movies and Series when both exist,
     /// then the Year, Catalog and Genre menus, then a chip for the year span and one for the genre. Clearing them all reloads only

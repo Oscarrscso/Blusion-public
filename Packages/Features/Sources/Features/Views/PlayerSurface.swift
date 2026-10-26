@@ -141,8 +141,9 @@ final class PlayerLayerView: UIView {
     }
 
     func host(superResolution layer: AVSampleBufferDisplayLayer) {
-        guard superResolutionLayer !== layer else { return }
-        superResolutionLayer?.removeFromSuperlayer()
+        // The layer may have gone over AetherEngine's picture in the meantime: it is taken back.
+        guard layer.superlayer !== videoView.layer else { return }
+        if superResolutionLayer !== layer { superResolutionLayer?.removeFromSuperlayer() }
         videoView.layer.addSublayer(layer)
         superResolutionLayer = layer
         setNeedsLayout()
@@ -198,7 +199,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     var embeddedSubtitlesOn = false
     var ambientMode = false
     var superResolution: SuperResolutionRenderer?
-    var ambient: AmbientSampler?
+    var sampler: PictureSampler?
     var onFirstVideoFrame: () -> Void = {}
     #if DEBUG
     var onTestGeometry: ((String) -> Void)?
@@ -208,7 +209,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
         lhs.engine.map { ObjectIdentifier($0) } == rhs.engine.map { ObjectIdentifier($0) }
             && lhs.pip === rhs.pip && lhs.layout == rhs.layout && lhs.upscaling == rhs.upscaling
             && lhs.embeddedSubtitlesOn == rhs.embeddedSubtitlesOn && lhs.ambientMode == rhs.ambientMode
-            && lhs.superResolution === rhs.superResolution && lhs.ambient === rhs.ambient
+            && lhs.superResolution === rhs.superResolution && lhs.sampler === rhs.sampler
     }
 
     func makeUIView(context: Context) -> PlayerLayerView {
@@ -224,6 +225,8 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
         #if DEBUG
         view.onTestGeometry = onTestGeometry
         #endif
+        // Ambient mode's glow lies behind the picture: around it, the surface must let it through.
+        view.backgroundColor = ambientMode ? .clear : .black
         if let avEngine = engine as? AVEngine {
             view.embed(nil)
             if view.playerLayer.player !== avEngine.player {
@@ -234,26 +237,42 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             view.layout = layout
             if let superResolution {
                 view.host(superResolution: superResolution.displayLayer)
-                let scale = view.window?.screen.scale ?? view.traitCollection.displayScale
-                let size = CGSize(width: view.bounds.width * scale, height: view.bounds.height * scale)
-                superResolution.update(player: avEngine.player, wanted: upscaling == .ai, targetSize: size, gravity: view.videoGravity,
-                                       embeddedSubtitlesOn: embeddedSubtitlesOn)
+                // The size is read from the layer as it is laid out, not here: the first update comes before the view has a size.
+                superResolution.update(source: avEngine, wanted: upscaling == .ai, displayScale: Self.displayScale(of: view),
+                                       gravity: view.videoGravity, embeddedSubtitlesOn: embeddedSubtitlesOn)
             }
-            ambient?.update(player: avEngine.player, enabled: ambientMode)
+            sampler?.update(source: avEngine, ambient: ambientMode)
         } else if let provider = engine as? any VideoSurfaceProviding, let surface = provider.videoSurface as? UIView {
             view.playerLayer.player = nil
             view.watch(nil)
             view.layout = VideoLayout()
             view.embed(surface)
-            superResolution?.update(player: nil, wanted: false, targetSize: .zero, gravity: .resizeAspect, embeddedSubtitlesOn: false)
-            ambient?.update(player: nil, enabled: false)
+            surface.backgroundColor = ambientMode ? .clear : .black
+            if let superResolution {
+                // AetherEngine: the scaled frames go over its picture, under its own subtitles, so its subtitles never block it. mpv has
+                // no AVPlayer to read frames from, and the renderer says so.
+                let host = engine as? any PictureOverlayHosting
+                let wanted = upscaling == .ai
+                host?.hostPictureOverlay(wanted ? superResolution.displayLayer : nil)
+                superResolution.update(source: engine as? any AVPlayerFrameSource, wanted: wanted, displayScale: Self.displayScale(of: view),
+                                       gravity: host?.pictureGravity ?? .resizeAspect, embeddedSubtitlesOn: false)
+            }
+            // AetherEngine plays through an AVPlayer most of the time; mpv draws its own picture and has none.
+            sampler?.update(source: engine as? any AVPlayerFrameSource, ambient: ambientMode)
         } else {
             view.playerLayer.player = nil
             view.watch(nil)
             view.embed(nil)
-            superResolution?.update(player: nil, wanted: false, targetSize: .zero, gravity: .resizeAspect, embeddedSubtitlesOn: false)
-            ambient?.update(player: nil, enabled: false)
+            superResolution?.update(source: nil, wanted: false, displayScale: 1, gravity: .resizeAspect, embeddedSubtitlesOn: false)
+            sampler?.update(source: nil, ambient: false)
         }
+    }
+}
+
+extension PlayerSurface {
+    /// Pixels per point of the screen the picture is on.
+    fileprivate static func displayScale(of view: UIView) -> CGFloat {
+        view.window?.screen.scale ?? view.traitCollection.displayScale
     }
 }
 

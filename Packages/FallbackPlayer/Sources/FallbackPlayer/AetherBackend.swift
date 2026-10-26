@@ -1,5 +1,6 @@
 #if canImport(AetherPlayer) && canImport(UIKit)
 import AetherPlayer
+import AVFoundation
 import Foundation
 import PlayerKit
 import StremioKit
@@ -53,6 +54,12 @@ public final class AetherBackend: FallbackBackend {
 
     public func makeEventStream() -> AsyncStream<FallbackEvent> { events }
 
+    /// AetherEngine repackages a remux into segments as it downloads: the first start waits for a few of them in hand, or a
+    /// high-bitrate remux outruns its download and stops and starts.
+    public var startCushion: StartCushion? { .standard }
+    /// What AetherEngine holds ahead on its loopback route; nil on its software path and for live streams, where the start doesn't wait.
+    public var bufferedAhead: TimeInterval? { session.loopbackBufferedAhead }
+
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         session.load(url: url, headers: headers, startPosition: startPosition, options: options)
     }
@@ -92,8 +99,8 @@ public final class AetherBackend: FallbackBackend {
     public func statistics() -> PlaybackStatistics {
         let stats = session.statistics()
         var notes = stats.notes
-        if processing.upscaling != .off {
-            notes.append("AI super resolution and the high-quality scaler run in the native player and mpv only; AetherEngine shows the picture at its own size.")
+        if processing.upscaling == .quality {
+            notes.append("The high-quality scaler runs in mpv only; AetherEngine scales with the system's scaler. AI super resolution runs here.")
         }
         return PlaybackStatistics(engine: stats.engine, decoder: stats.decoder, videoCodec: stats.videoCodec, width: stats.width, height: stats.height,
                                   frameRate: stats.frameRate, videoBitrate: stats.videoBitrate, audioBitrate: stats.audioBitrate,
@@ -116,6 +123,7 @@ public final class AetherBackend: FallbackBackend {
         case .loaded(let duration, let audio, let subtitles, let selectedAudio, let selectedSubtitle):
             return .loaded(duration: duration, audio: audio.map(audioTrack), subtitles: subtitles.map(subtitleTrack),
                            selectedAudio: selectedAudio.map { "a\($0)" }, selectedSubtitle: selectedSubtitle.map { "s\($0)" })
+        case .duration(let duration): return .duration(duration)
         case .videoFrameReady: return .videoFrameReady
         case .position(let position): return .position(position)
         case .buffered(let until): return .buffered(until)
@@ -206,5 +214,17 @@ public final class AetherBackend: FallbackBackend {
         default: nil
         }
     }
+}
+
+/// AetherEngine plays most pictures through AVPlayer: Blusion reads small copies of its frames for ambient mode and a film's own bars.
+extension AetherBackend: AVPlayerFrameSource {
+    public var framePlayer: AVPlayer? { session.currentPlayer }
+}
+
+/// AI super resolution draws its scaled frames over AetherEngine's picture, under the subtitles.
+extension AetherBackend: PictureOverlayHosting {
+    public func hostPictureOverlay(_ layer: CALayer?) { session.hostPictureOverlay(layer) }
+    public var pictureGravity: AVLayerVideoGravity { session.pictureGravity }
+    public var pictureIsHDR: Bool { session.isHDRSource }
 }
 #endif

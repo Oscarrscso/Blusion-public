@@ -271,7 +271,7 @@ struct ContinueWatchingRow: View {
                     MediaRow(title, hideTitle: true) {
                         ForEach(shown) { item in
                             let artworkID = ContentID(item.request.id).baseID
-                            ProgressCard(title: item.request.title, subtitle: item.subtitle,
+                            ProgressCard(title: item.request.title, subtitle: item.subtitle, episodeName: item.episodeName,
                                          artwork: MetahubArtwork.background(imdbID: artworkID) ?? item.request.poster,
                                          logo: MetahubArtwork.logo(imdbID: artworkID), fraction: item.fraction,
                                          duration: item.request.expectedDuration)

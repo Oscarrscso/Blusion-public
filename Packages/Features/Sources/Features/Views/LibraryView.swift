@@ -2,12 +2,15 @@
 import SwiftUI
 import PlayerKit
 import StremioKit
+import UIKit
 
 struct LibraryView: View {
     @State private var model: LibraryViewModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(TitleActions.self) private var actions: TitleActions?
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
@@ -56,8 +59,10 @@ struct LibraryView: View {
                 .padding(.vertical, Theme.Spacing.l)
                 .id(Self.topID)
             }
+            .trackLandscapeTabScroll()
             .screenBackground()
             .navigationTitle("")
+            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)
@@ -85,15 +90,22 @@ struct LibraryView: View {
         }
     }
 
-    /// The page's title, drawn in the content so the navigation bar stays free of text.
+    /// The page's title, drawn in the content so the navigation bar stays free of text. A phone in landscape has no room for a title
+    /// above the grid, so it is left out there; the tab bar still names the page.
+    @ViewBuilder
     private var pageTitle: some View {
-        Text("Library")
-            .font(Theme.Typography.largeTitle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, metrics.pageMargin)
-            .padding(.bottom, metrics.headerSpacing)
-            .accessibilityAddTraits(.isHeader)
+        if !isPhoneInLandscape {
+            Text("Library")
+                .font(Theme.Typography.largeTitle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, metrics.pageMargin)
+                .padding(.bottom, metrics.headerSpacing)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
+
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     /// The Movies/Series selector, then the Year, Rating and Sort menus, then the chips: the filter block Discover shares (see
     /// `BrowseFilterBar`), so the two pages look the same.

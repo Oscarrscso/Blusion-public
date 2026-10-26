@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import Persistence
 import StremioKit
 import SwiftUI
 import UIKit
@@ -14,6 +15,19 @@ struct StreamPickerView: View {
     @State private var autoPickTask: Task<Void, Never>?
     @State private var hasSelectedManually = false
     @State private var isOpeningPlayer = false
+    /// The player readied for a stream before its screen opens (see `PlayerViewModel.prepare`), and which stream it is for. The first
+    /// stream listed starts loading here in the background as soon as it arrives, so playing it is quick; another stream tapped
+    /// replaces it.
+    @State private var prepared: PlayerViewModel?
+    @State private var preparedItemID: RankedStream.ID?
+    /// The stream whose play button is a spinner: Blusion is readying it, and its player opens once the film is ready to play.
+    @State private var preparingItemID: RankedStream.ID?
+    /// True while the stream Auto Pick chose is being readied, so Auto Pick's button spins until the player opens.
+    @State private var preparingViaAutoPick = false
+    /// The ready player the open player screen took over.
+    @State private var presentedPlayer: PlayerViewModel?
+    /// The first stream's background load has been started, once per picker.
+    @State private var hasStartedBackgroundLoad = false
     /// The Auto Pick button's height and the switch's own size, as laid out: the switch is scaled to the button's height.
     @State private var autoPickButtonHeight: CGFloat = 0
     /// The Auto Pick height last measured by any picker, for a picker that has not measured its own yet (see `episodeStepButton`).
@@ -21,6 +35,8 @@ struct StreamPickerView: View {
     @State private var autoPickSwitchSize: CGSize = .zero
     /// The sharpness the chips narrow the list to; nil shows every stream.
     @State private var resolutionFilter: Band?
+    /// The one addon whose streams are listed, or nil for every addon's.
+    @State private var addonFilter: UUID?
     /// A stream whose format Blusion can't play: the alert offers another player, or the next stream.
     @State private var unsupported: RankedStream?
     /// A hand-off whose player app is not installed: the alert offers its App Store page, or playing the stream in Blusion.
@@ -260,6 +276,8 @@ struct StreamPickerView: View {
                 }
                 BestEditionView(model: model, rowHeight: autoPickButtonHeight)
                     .padding(.horizontal, streamMargin)
+                addonChips
+                    .padding(.horizontal, streamMargin)
                 #if !targetEnvironment(macCatalyst)
                 // On a Mac the filter sits in Auto Pick's row instead (see `playBestButton`).
                 resolutionChips
@@ -292,6 +310,9 @@ struct StreamPickerView: View {
                 // Asked once, here: routing hands streams to these players only, and the menus offer only these.
                 model.setInstalledPlayers(Set(ExternalPlayer.allCases.filter(isInstalled)))
                 await model.loadAutoPlayPreference()
+                // The previous viewing session for this title, when the app was left or killed: its own stream resumes
+                // (`automaticStartCandidate`), and a stream another player played is handed its position and choices.
+                await model.loadSessionResume()
                 // A picker that is never shown is done once it has started a stream: shown again after the player closes, it does not load.
                 if !model.hasLoaded, !isHeadless || !hasSelectedManually {
                     let settings = await services.settings.load()
@@ -304,8 +325,8 @@ struct StreamPickerView: View {
                     if startsAutomatically, !hasSelectedManually {
                         // All automatic launches take the same ranked route as normal Play:
                         // Blusion by default, Infuse only when the saved preference calls for it.
-                        if let best = model.bestToPlay {
-                            select(best, automatically: true)
+                        if let candidate = model.automaticStartCandidate {
+                            select(candidate, automatically: true)
                         } else {
                             finishAutomaticStart(started: false)
                         }
@@ -322,7 +343,17 @@ struct StreamPickerView: View {
                 guard ready else { return }
                 onReady?(!model.addonSections.isEmpty)
             }
-            .onDisappear { autoPickTask?.cancel(); model.cancelLoading(); isOpeningPlayer = false }
+            .onDisappear {
+                autoPickTask?.cancel()
+                model.cancelLoading()
+                isOpeningPlayer = false
+                preparingItemID = nil
+                preparingViaAutoPick = false
+                // A player readied for a stream nobody played goes with the picker. One the player screen took is no longer held here.
+                discardPrepared()
+            }
+            // The first stream listed starts loading in the background the moment it arrives, in case it is the one played.
+            .onChange(of: model.addonSections.first?.streams.first?.id) { startBackgroundLoad() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { isOpeningPlayer = false }
             }
@@ -349,7 +380,9 @@ struct StreamPickerView: View {
                 }
                 .preferredColorScheme(.dark)
             }
-            .fullScreenCover(item: $plan) { PlayerScreen(plan: $0, services: services) }
+            .fullScreenCover(item: $plan, onDismiss: { presentedPlayer = nil }) {
+                PlayerScreen(plan: $0, services: services, prepared: presentedPlayer)
+            }
             .alert("Ghost mode is on", isPresented: $ghostBlocked) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -673,7 +706,11 @@ struct StreamPickerView: View {
                         autoPick()
                     } label: {
                         HStack(spacing: Theme.Spacing.xs) {
-                            if model.isAutoPicking { Spinner() } else { Image(systemName: "sparkles").foregroundStyle(.secondary) }
+                            if model.isAutoPicking || preparingViaAutoPick {
+                                Spinner()
+                            } else {
+                                Image(systemName: "sparkles").foregroundStyle(.secondary)
+                            }
                             Text("Auto Pick")
                             // The kind of stream it would start, always there once the addons have answered.
                             if let kind = model.recommendedStreamLabel {
@@ -691,7 +728,7 @@ struct StreamPickerView: View {
                     }
                     .buttonStyle(.primaryActionCompact)
                     .controlSize(.small)
-                    .disabled(model.isAutoPicking)
+                    .disabled(model.isAutoPicking || preparingViaAutoPick)
                     .accessibilityLabel(model.recommendedStreamLabel.map { "Auto Pick, \($0)" } ?? "Auto Pick")
                     .accessibilityIdentifier("streams.playBest")
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
@@ -748,16 +785,35 @@ struct StreamPickerView: View {
 
     private func band(of item: RankedStream) -> Band? { item.quality.resolution.map(Band.init) }
 
-    /// The bands the streams listed so far fall in, sharpest first.
+    /// The addons with streams listed so far, in the list's order, each once.
+    private var availableAddons: [AddonSummary] {
+        var seen = Set<UUID>()
+        return model.addonSections.map(\.addon).filter { seen.insert($0.id).inserted }
+    }
+
+    /// The chosen addon, while it still has streams listed. One that has gone falls back to all.
+    private var chosenAddon: UUID? {
+        guard let addonFilter, availableAddons.contains(where: { $0.id == addonFilter }) else { return nil }
+        return addonFilter
+    }
+
+    /// The sections of the chosen addon, or every section.
+    private var addonSections: [StreamPickerViewModel.AddonSection] {
+        guard let chosenAddon else { return model.addonSections }
+        return model.addonSections.filter { $0.addon.id == chosenAddon }
+    }
+
+    /// The bands the chosen addon's streams listed so far fall in, sharpest first.
     private var availableBands: [Band] {
-        let present = Set(model.addonSections.flatMap(\.streams).compactMap(band(of:)))
+        let present = Set(addonSections.flatMap(\.streams).compactMap(band(of:)))
         return Band.allCases.filter(present.contains)
     }
 
-    /// The sections with only the chosen band's streams. A band that has gone (a refresh found fewer streams) falls back to all.
+    /// The sections with only the chosen addon's and band's streams. A band that has gone (a refresh found fewer streams, or another
+    /// addon was chosen) falls back to all.
     private var visibleSections: [StreamPickerViewModel.AddonSection] {
-        guard let band = resolutionFilter, availableBands.contains(band) else { return model.addonSections }
-        return model.addonSections.compactMap { section in
+        guard let band = resolutionFilter, availableBands.contains(band) else { return addonSections }
+        return addonSections.compactMap { section in
             let streams = section.streams.filter { self.band(of: $0) == band }
             return streams.isEmpty ? nil : StreamPickerViewModel.AddonSection(addon: section.addon, streams: streams)
         }
@@ -772,6 +828,23 @@ struct StreamPickerView: View {
             } set: { index in
                 resolutionFilter = index > 0 && index <= availableBands.count ? availableBands[index - 1] : nil
             })
+        }
+    }
+
+    /// "All  Torrentio  Comet": shown once more than one addon has streams, so one addon's streams can be listed on their own.
+    @ViewBuilder
+    private var addonChips: some View {
+        let addons = availableAddons
+        if addons.count > 1 {
+            QualitySelector(titles: ["All"] + addons.map(\.name), selection: Binding {
+                chosenAddon.flatMap { id in addons.firstIndex { $0.id == id }.map { $0 + 1 } } ?? 0
+            } set: { index in
+                addonFilter = index > 0 && index <= addons.count ? addons[index - 1].id : nil
+            }, accessibilityID: "streams.addonFilter")
+            #if targetEnvironment(macCatalyst)
+            // On a Mac it keeps its own width at the leading edge, as the sharpness filter does in Auto Pick's row.
+            .fixedSize()
+            #endif
         }
     }
 
@@ -834,7 +907,8 @@ struct StreamPickerView: View {
                         .padding(.horizontal, streamMargin)
                 }
             } header: {
-                if model.addonSections.count > 1 { sectionTitle(section).padding(.horizontal, streamMargin) }
+                // One addon chosen: the filter above already names it.
+                if chosenAddon == nil, model.addonSections.count > 1 { sectionTitle(section).padding(.horizontal, streamMargin) }
             }
         }
     }
@@ -905,9 +979,12 @@ struct StreamPickerView: View {
                 guard !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
                 select(item)
             } label: {
+                // A stream Blusion plays has its one play button; saving it to another player is in its menu. A stream another app
+                // plays keeps the bookmark and download under its mark.
                 StreamRow(item: item, isBest: isRecommended, isRemux: item.quality.isRemux,
-                          savesToPlayer: model.savingPlayer(for: item) != nil,
-                          downloadsToPlayer: model.savingPlayer(for: item) != nil)
+                          savesToPlayer: savesUnderMark(item),
+                          downloadsToPlayer: savesUnderMark(item),
+                          isPreparing: preparingItemID == item.id)
             }
             // On a Mac one hover effect: the card's own highlight, without the system's on top of it. iPad keeps both, as before.
             .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight))
@@ -916,7 +993,7 @@ struct StreamPickerView: View {
             .accessibilityHint(hint(for: item))
             // A card that opens in another player has a bookmark under its mark, set in the room the card keeps for it.
             .overlayPreferenceValue(StreamSaveSlotKey.self) { slot in
-                if let slot, let player = model.savingPlayer(for: item) {
+                if let slot, savesUnderMark(item), let player = model.savingPlayer(for: item) {
                     GeometryReader { proxy in
                         StreamSaveButton(player: player, isSaved: savedStreams.contains(item.id)) { save(item, to: player) }
                             .position(x: proxy[slot].midX, y: proxy[slot].midY)
@@ -925,7 +1002,7 @@ struct StreamPickerView: View {
                 }
             }
             .overlayPreferenceValue(StreamDownloadSlotKey.self) { slot in
-                if let slot, let player = model.savingPlayer(for: item) {
+                if let slot, savesUnderMark(item), let player = model.savingPlayer(for: item) {
                     GeometryReader { proxy in
                         StreamSaveButton(player: player, isSaved: false, isDownload: true) {
                             save(item, to: player, download: true)
@@ -980,6 +1057,18 @@ struct StreamPickerView: View {
         if item.route.handoffTarget != nil, model.inAppChoice(for: item) != nil {
             Button("Play in Blusion", systemImage: "play.circle") { playInBlusion(item) }
         }
+        // The bookmark and download a stream Blusion plays no longer carry on its card.
+        if item.route.isPlayable, let player = model.savingPlayer(for: item) {
+            Button(savedStreams.contains(item.id) ? "Saved to \(player.displayName)" : "Save to \(player.displayName)",
+                   systemImage: savedStreams.contains(item.id) ? "bookmark.fill" : "bookmark") { save(item, to: player) }
+                .disabled(savedStreams.contains(item.id))
+            Button("Download in \(player.displayName)", systemImage: "arrow.down") { save(item, to: player, download: true) }
+        }
+    }
+
+    /// Whether the card carries the bookmark and download under its mark: only a stream another player app plays.
+    private func savesUnderMark(_ item: RankedStream) -> Bool {
+        !item.route.isPlayable && model.savingPlayer(for: item) != nil
     }
 
     @ViewBuilder
@@ -1009,8 +1098,14 @@ struct StreamPickerView: View {
 
     // MARK: choosing
 
-    /// Starts `item`. `automatically` is set for the start made when the streams open (see `finishAutomaticStart`).
+    /// Starts `item`. `automatically` is set for the start made when the streams open (see `finishAutomaticStart`). Tapping the stream
+    /// Blusion is readying again calls that off; tapping another stream moves to it.
     private func select(_ item: RankedStream, automatically: Bool = false) {
+        if preparingItemID != nil {
+            let isSame = preparingItemID == item.id
+            cancelPreparation()
+            if isSame, !automatically { return }
+        }
         guard !isOpeningPlayer else { return }
         isOpeningPlayer = true
         hasSelectedManually = true
@@ -1022,8 +1117,76 @@ struct StreamPickerView: View {
                 return
             }
             guard !Task.isCancelled else { isOpeningPlayer = false; return }
-            let started = present(choice, for: item)
+            let started = await present(choice, for: item)
+            // Called off while the film was readied: whoever called it off has already reset the picker.
+            guard !Task.isCancelled else { return }
             if automatically { finishAutomaticStart(started: started) }
+        }
+    }
+
+    /// Calls off readying a stream: its play button and Auto Pick stop spinning. The player keeps loading in the background, so playing
+    /// that stream after all is still quick.
+    private func cancelPreparation() {
+        autoPickTask?.cancel()
+        preparingItemID = nil
+        preparingViaAutoPick = false
+        isOpeningPlayer = false
+    }
+
+    /// Readies `next` (the plan for `item`) and opens the player once the film is ready to play: its first frame is in, held paused, and
+    /// it plays the moment the screen is up. The stream's play button spins meanwhile. A player already readied for this stream (the
+    /// first stream's background load) is used as it is. False when it was called off.
+    private func openWhenReady(_ next: PlaybackPlan, for item: RankedStream) async -> Bool {
+        let player = preparedPlayer(for: next, item: item)
+        // Walking back into the previous session (the app was left or killed, and this is its stream): the player takes its
+        // position, track choices and picture over, before it is readied to play.
+        if let snapshot = model.resumeHandoff(for: item), let resuming = player as? any PlaybackSnapshotResuming {
+            resuming.resumePlayback(from: snapshot)
+        }
+        preparingItemID = item.id
+        await player.prepare()
+        guard !Task.isCancelled, prepared === player else { return false }
+        preparingItemID = nil
+        preparingViaAutoPick = false
+        isOpeningPlayer = false
+        // The screen takes the player over. Every stream failing still opens it, to say why.
+        prepared = nil
+        preparedItemID = nil
+        presentedPlayer = player
+        plan = player.plan
+        return true
+    }
+
+    /// The player readied for `item`: the one already loading for it, or a new one, which replaces a player readied for another stream.
+    private func preparedPlayer(for next: PlaybackPlan, item: RankedStream) -> PlayerViewModel {
+        if let prepared, preparedItemID == item.id { return prepared }
+        discardPrepared()
+        let player = PlayerContent.makeModel(plan: next, services: services)
+        // The stream's opening bytes start downloading at once, where its engine can take them.
+        PlayerPreload.begin(next, services: services)
+        prepared = player
+        preparedItemID = item.id
+        return player
+    }
+
+    /// Closes a readied player nobody is going to watch.
+    private func discardPrepared() {
+        guard let player = prepared else { return }
+        prepared = nil
+        preparedItemID = nil
+        Task { await player.close() }
+    }
+
+    /// Starts loading the first stream listed in the background, once it is there, in case it is the one played: muted, held paused
+    /// on its first frame, with no progress saved. Only a stream Blusion plays, and not when a stream is starting by itself anyway.
+    private func startBackgroundLoad() {
+        guard !hasStartedBackgroundLoad, !hasSelectedManually, !awaitsAutomaticStart, !isHeadless, prepared == nil, plan == nil,
+              let first = model.automaticStartCandidate, first.route.isPlayable else { return }
+        hasStartedBackgroundLoad = true
+        Task {
+            guard case .play(let next)? = await model.choose(first), prepared == nil, plan == nil, !hasSelectedManually,
+                  !awaitsAutomaticStart else { return }
+            await preparedPlayer(for: next, item: first).prepare()
         }
     }
 
@@ -1045,7 +1208,8 @@ struct StreamPickerView: View {
                 isOpeningPlayer = false
                 return
             }
-            _ = present(choice, for: item)
+            if case .play = choice { preparingViaAutoPick = true }
+            _ = await present(choice, for: item)
         }
     }
 
@@ -1059,21 +1223,24 @@ struct StreamPickerView: View {
                 isOpeningPlayer = false
                 return
             }
-            present(choice, for: item)
+            await present(choice, for: item)
         }
     }
 
     private func playInBlusion(_ item: RankedStream) {
+        if preparingItemID != nil { cancelPreparation() }
         guard !isOpeningPlayer else { return }
         hasSelectedManually = true
         autoPickTask?.cancel()
         guard let choice = model.inAppChoice(for: item) else { return }
-        present(choice, for: item)
+        isOpeningPlayer = true
+        autoPickTask = Task { await present(choice, for: item) }
     }
 
-    /// Starts `choice`. True when a stream started here or went to another app; false when an alert asks the viewer to pick again.
+    /// Starts `choice`. True when a stream started here or went to another app; false when an alert asks the viewer to pick again, or
+    /// when readying the film was called off. A stream Blusion plays opens only once it is ready to play (see `openWhenReady`).
     @discardableResult
-    private func present(_ choice: StreamPickerViewModel.Choice, for item: RankedStream) -> Bool {
+    private func present(_ choice: StreamPickerViewModel.Choice, for item: RankedStream) async -> Bool {
         // In ghost mode nothing is handed to another player except Infuse, which the viewer allows: Infuse keeps its own history and its own
         // Trakt. Anything else that would leave Blusion plays here when Blusion can play it, and otherwise does not start.
         if GhostMode.isOn {
@@ -1082,9 +1249,7 @@ struct StreamPickerView: View {
                 break
             case .openInPlayer, .openExternal:
                 if case .play(let next)? = model.inAppChoice(for: item) {
-                    isOpeningPlayer = false
-                    plan = next
-                    return true
+                    return await openWhenReady(next, for: item)
                 }
                 ghostBlocked = true
                 isOpeningPlayer = false
@@ -1095,8 +1260,10 @@ struct StreamPickerView: View {
         }
         switch choice {
         case .play(let next):
-            isOpeningPlayer = false
-            plan = next
+            isOpeningPlayer = true
+            // The session this start becomes: where the app is left or killed from now until it is closed.
+            await model.saveResumeSnapshot(for: item)
+            return await openWhenReady(next, for: item)
         case .openExternal(let url):
             isOpeningPlayer = false
             openURL(url)

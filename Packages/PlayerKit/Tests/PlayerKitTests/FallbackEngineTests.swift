@@ -47,6 +47,23 @@ import PlayerKitTestSupport
         #expect(backend.loads.first?.url == item.url && backend.loads.first?.headers == ["X-A": "1"] && backend.loads.first?.start == 12)
     }
 
+    /// AetherEngine can learn the length a moment after its load finishes. Reported only with `loaded`, the film had no length:
+    /// no time left, no scrubbing and no swipe to seek.
+    @Test func aLengthReportedAfterLoadingReachesTheState() async throws {
+        let backend = MockBackend(autoLoad: (0, [], []))
+        let engine = FallbackEngine(backend: backend)
+        engine.load(item)
+        try await settle(engine) { $0.status == .ready }
+        #expect(engine.state.duration == nil)
+        backend.emit(.duration(1_440))
+        try await settle(engine) { $0.duration == 1_440 }
+        backend.emit(.duration(0))
+        backend.emit(.duration(.nan))
+        backend.emit(.position(3))
+        try await settle(engine) { $0.position == 3 }
+        #expect(engine.state.duration == 1_440, "no length, or a broken one, never replaces a known length")
+    }
+
     @Test func playStartsPlaybackAndPauseStopsIt() async throws {
         let (engine, backend) = make()
         engine.load(item)
@@ -212,5 +229,102 @@ import PlayerKitTestSupport
         try await settle(engine) { $0.chapters.count == 2 }
         #expect(engine.state.status == .playing, "track and chapter updates keep the status")
         #expect(engine.statistics().engine == "MockBackend")
+    }
+
+    // MARK: Start cushion
+
+    /// A high-bitrate remux started on its first segment outruns its download and stops and starts. A backend that can say how much
+    /// it holds gets its first start held until enough is in hand, with the first frame kept back so the startup spinner covers it.
+    @Test func aBackendThatAsksForACushionStartsOnceEnoughIsInHand() async throws {
+        let (engine, backend) = make()
+        backend.startCushion = StartCushion(seconds: 10, earlySeconds: 4, fastFill: 1000, maximumWait: 30, startBudget: 60)
+        backend.bufferedAhead = 2
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .buffering }
+        #expect(backend.pausedCalls.isEmpty, "the backend stays paused while it fills")
+        backend.emit(.videoFrameReady)
+        backend.emit(.position(12))
+        try await settle(engine) { $0.position == 12 }
+        #expect(!engine.state.hasVideoFrame, "the startup spinner stays up over the first frame")
+        backend.bufferedAhead = 10
+        try await settle(engine) { $0.status == .playing && $0.hasVideoFrame }
+        #expect(backend.pausedCalls == [false])
+        // Only the first start waits: a later pause and play with little in hand go straight through.
+        backend.bufferedAhead = 0
+        engine.pause()
+        try await settle(engine) { $0.status == .paused }
+        engine.play()
+        try await settle(engine) { $0.status == .playing }
+        #expect(backend.pausedCalls == [false, true, false])
+    }
+
+    @Test func theCushionWaitEndsAtItsLimit() async throws {
+        let (engine, backend) = make()
+        backend.startCushion = StartCushion(seconds: 10, earlySeconds: 4, fastFill: 1000, maximumWait: 0.3, startBudget: 60)
+        backend.bufferedAhead = 1
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .buffering }
+        try await settle(engine) { $0.status == .playing }
+        #expect(backend.pausedCalls == [false], "a slow download starts anyway once the wait is spent")
+    }
+
+    @Test func noWaitWhenEnoughIsInHandOrTheBackendCannotSay() async throws {
+        let (engine, backend) = make()
+        backend.startCushion = .standard
+        backend.bufferedAhead = nil
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .playing }
+        backend.bufferedAhead = 25
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .playing }
+        #expect(backend.pausedCalls == [false, false])
+    }
+
+    @Test func pausedDuringTheCushionItStaysPausedWhenItFills() async throws {
+        let (engine, backend) = make()
+        backend.startCushion = StartCushion(seconds: 10, earlySeconds: 4, fastFill: 1000, maximumWait: 30, startBudget: 60)
+        backend.bufferedAhead = 0
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .buffering }
+        backend.emit(.videoFrameReady)
+        engine.pause()
+        try await settle(engine) { $0.status == .ready }
+        backend.bufferedAhead = 12
+        try await settle(engine) { $0.hasVideoFrame }
+        #expect(engine.state.status == .ready && backend.pausedCalls == [true])
+    }
+
+    @Test func theCushionWaitStaysInsideTheStartBudget() {
+        let cushion = StartCushion.standard
+        #expect(cushion.wait(ahead: 2, loadTook: 1) == 6)
+        #expect(cushion.wait(ahead: 2, loadTook: 10) == 4, "load and wait stay inside 14 s")
+        #expect(cushion.wait(ahead: 2, loadTook: 15) == 0)
+        #expect(cushion.wait(ahead: 10, loadTook: 1) == 0)
+        #expect(cushion.wait(ahead: nil, loadTook: 1) == 0)
+        #expect(cushion.isMet(ahead: 10, startAhead: 0, waited: 5) && !cushion.isMet(ahead: 9.9, startAhead: 0, waited: 5))
+        #expect(cushion.isMet(ahead: nil, startAhead: 0, waited: 0))
+        // One segment in hand starts it while the film arrives at least 2.5 times faster than it plays.
+        #expect(cushion.isMet(ahead: 4, startAhead: 0, waited: 1.5))
+        #expect(!cushion.isMet(ahead: 4, startAhead: 0, waited: 2), "twice as fast is a marginal link: it waits for 10 s")
+        #expect(!cushion.isMet(ahead: 3.9, startAhead: 0, waited: 0.5), "less than a segment never starts early")
+        #expect(!cushion.isMet(ahead: 8, startAhead: 4, waited: 2))
+    }
+
+    /// A download well ahead of the film starts on one segment instead of waiting for the full cushion.
+    @Test func aFastDownloadStartsEarly() async throws {
+        let (engine, backend) = make()
+        backend.startCushion = StartCushion(seconds: 10, earlySeconds: 4, fastFill: 2.5, maximumWait: 30, startBudget: 60)
+        backend.bufferedAhead = 0
+        engine.load(item)
+        engine.play()
+        try await settle(engine) { $0.status == .buffering }
+        backend.bufferedAhead = 6
+        try await settle(engine) { $0.status == .playing }
+        #expect(backend.pausedCalls == [false])
     }
 }

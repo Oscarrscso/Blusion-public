@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import Persistence
 import PlayerKit
 import StremioKit
 import SwiftUI
@@ -7,16 +8,33 @@ import SwiftUI
 struct PlayerScreen: View {
     let services: AppServices
     @State private var plan: PlaybackPlan
+    @Environment(LivePlaybackSession.self) private var livePlayback
+    /// A player readied before its plan's screen showed (see `PlayerViewModel.prepare`): by the stream picker for the plan this screen
+    /// opened on, by Up Next for the next episode. Used only for its own plan.
+    @State private var prepared: PlayerViewModel?
 
-    init(plan: PlaybackPlan, services: AppServices) {
+    init(plan: PlaybackPlan, services: AppServices, prepared: PlayerViewModel? = nil) {
         self.services = services
+        _prepared = State(initialValue: prepared?.plan.id == plan.id ? prepared : nil)
         _plan = State(initialValue: plan)
     }
 
     var body: some View {
-        PlayerContent(plan: plan, services: services) { plan = $0 }
-            .id(plan.id)
+        // A screen starting over for a plan it already plays rejoins the live session for it, keeping the engine, stream, position and
+        // tracks the session holds rather than starting a second player.
+        let readied = (prepared?.plan.id == plan.id ? prepared : nil) ?? livePlayback.session(for: plan)
+        PlayerContent(plan: plan, services: services, prepared: readied) { next, readiedNext in
+            prepared = readiedNext
+            plan = next
+        }
+        .id(plan.id)
     }
+}
+
+/// The next episode and the player readied for it off screen, muted and paused on its first frame.
+private struct UpNextEpisode {
+    let plan: PlaybackPlan
+    let model: PlayerViewModel
 }
 
 struct PlayerContent: View {
@@ -25,44 +43,90 @@ struct PlayerContent: View {
     #if canImport(UIKit) && canImport(AVKit)
     @State private var pip = PiPProxy()
     @State private var superResolution = SuperResolutionRenderer()
-    @State private var ambient = AmbientSampler()
+    /// Small copies of the picture's frames: ambient mode's colours, and the film's own bars for the No Bars zoom.
+    @State private var picture = PictureSampler()
     #endif
     @State private var importsSubtitle = false
-    /// The options panel's open tab; nil when it is closed.
+    /// The open menu (it sits on the controls' menu bar); nil when none is open.
     @State private var panel: PlayerPanelTab?
+    @State private var noticeVisible = false
     @State private var importsAudio = false
     @State private var showsOpenSubtitles = false
+    /// The episode picker is up, over the player.
+    @State private var showsEpisodes = false
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
+    /// The timeline fraction a sideways swipe is seeking from; nil while no swipe seeks.
+    @State private var seekSwipeStart: Double?
+    /// A pinch is under way. A drag that is part of one neither seeks nor sets a level.
+    @GestureState private var isPinching = false
+    /// A pinch asked for No Bars before the film's bars were measured: it takes effect as soon as they are.
+    @State private var wantsNoBars = false
+    @State private var isDragging = false
+    @State private var dragDirection: Axis?
+    @State private var dragIsPinch = false
+    /// Resets when the drag ends or when the system takes the touch, which skips the drag's `onEnded`.
+    @GestureState private var isDragGestureActive = false
+    /// Ignore release taps from a pinch or swipe, including when one finger lifts before the other.
+    @State private var pictureGestureEndedAt: Date?
+    /// The picture is being pressed and held: double speed until the finger lifts.
+    @GestureState private var isHoldingFast = false
+    /// When the last hold ended: the tap its release makes does not toggle the controls.
+    @State private var holdEndedAt: Date?
+    /// The drag under way began as a hold: it neither seeks nor closes the player.
+    @State private var dragIsHold = false
     @State private var nativeFrameEngineID: ObjectIdentifier?
+    /// The next episode, readied during this one's last minute (`UpNextTiming`).
+    @State private var upNext: UpNextEpisode?
+    @State private var upNextTask: Task<Void, Never>?
+    /// How far Next Episode's countdown has run, 0...1; nil while the button is not up.
+    @State private var upNextProgress: Double?
+    @State private var upNextCountdown: Task<Void, Never>?
+    /// Watch Credits was chosen: the button stays away until the end comes up again. The episode still moves on when it ends.
+    @State private var watchesCredits = false
+    /// The readied player went to the next episode's screen: leaving this one must not close it.
+    @State private var handedOverUpNext = false
+    /// This screen handed its plan to another player screen (Up Next or a chosen episode): leaving it must not set the new
+    /// session aside.
+    @State private var handedOverPlan = false
+    /// A stall has lasted half a second (`stallSpinnerDelay`): only then does a spinner show, so a momentary wait never flashes one.
+    @State private var showsStall = false
     #if DEBUG
     @State private var testVideoGeometry = ""
     #endif
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(LivePlaybackSession.self) private var livePlayback
     let services: AppServices
-    let onNextPlan: (PlaybackPlan) -> Void
+    /// Moves to the next episode's plan, with the player readied for it when there is one.
+    let onNextPlan: (PlaybackPlan, PlayerViewModel?) -> Void
 
-    init(plan: PlaybackPlan, services: AppServices, onNextPlan: @escaping (PlaybackPlan) -> Void) {
+    init(plan: PlaybackPlan, services: AppServices, prepared: PlayerViewModel? = nil,
+         onNextPlan: @escaping (PlaybackPlan, PlayerViewModel?) -> Void) {
         self.services = services
         self.onNextPlan = onNextPlan
+        _model = State(initialValue: prepared ?? Self.makeModel(plan: plan, services: services))
+        PlayerPreload.begin(plan, services: services)
+    }
+
+    /// The player's model, made here or by the stream picker that readies a player before opening this screen.
+    static func makeModel(plan: PlaybackPlan, services: AppServices) -> PlayerViewModel {
         #if DEBUG
         // Automation round trips can exceed the normal controls idle window.
         // Freeze only its injected interaction clock; playback and gestures stay live.
         let isUITesting = ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1"
-        _model = State(initialValue: PlayerViewModel(plan: plan, services: services,
-                                                   now: { isUITesting ? Date.distantPast : Date() }))
+        return PlayerViewModel(plan: plan, services: services, now: { isUITesting ? Date.distantPast : Date() })
         #else
-        _model = State(initialValue: PlayerViewModel(plan: plan, services: services))
+        return PlayerViewModel(plan: plan, services: services)
         #endif
-        PlayerPreload.begin(plan, services: services)
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             #if canImport(UIKit) && canImport(AVKit)
-            if model.preferences.ambientMode { AmbientGlow(colours: ambient.colours) }
+            if model.preferences.ambientMode { AmbientGlow(colours: picture.colours) }
             #endif
             // Keep the video at a fixed full-screen size while controls come and go.
             GeometryReader { viewport in
@@ -72,44 +136,79 @@ struct PlayerContent: View {
             }
             .ignoresSafeArea()
             ZStack {
-                if !hasVideoFrame && model.failureMessage == nil {
-                    startupArtwork.transition(.opacity)
+                if !isVideoReady && model.failureMessage == nil {
+                    startupSpinner.transition(.opacity)
                 }
             }
-            .animation(.easeOut(duration: 0.15), value: hasVideoFrame)
+            .animation(.easeOut(duration: 0.15), value: isVideoReady)
             SubtitleOverlay(cues: model.activeCues, bitmap: model.activeBitmapCue, style: model.subtitleStyle, controlsVisible: model.controlsVisible)
-            if model.showsBufferingIndicator {
-                Spinner().controlSize(.large)
-                    .frame(width: 64, height: 64).glassEffect(.regular, in: .circle)
-                    .accessibilityIdentifier("player.buffering")
+                .opacity(isVideoReady ? 1 : 0)
+            ZStack {
+                if showsStall && model.showsBufferingIndicator && isVideoReady {
+                    spinner.accessibilityIdentifier("player.buffering").transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.2), value: showsStall && model.showsBufferingIndicator)
+            .allowsHitTesting(false)
             gestureLayer
+            // With a menu open, a tap anywhere but the menu and its bar closes it.
+            ZStack {
+                if panel != nil && model.failureMessage == nil {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .contentShape(.rect)
+                        .onTapGesture { panel = nil }
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: panel != nil)
             // Retain the controls (and native scrubber) while hidden. Their local
             // fade cannot change the video viewport or animate the renderer.
             PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
-                           openPanel: openPanel)
+                           onShowEpisodes: { showsEpisodes = true },
+                           panel: $panel, actions: controlActions, barsCrop: picture.barsCrop, upscaling: upscalingRenderer,
+                           onSelectStream: { index in Task { await model.selectStream(at: index) } },
+                           isVideoReady: isVideoReady, isStalled: showsStall && model.isStalled)
                 .opacity(controlsAreVisible ? 1 : 0)
                 .allowsHitTesting(controlsAreVisible)
                 .accessibilityHidden(!controlsAreVisible)
                 .disabled(!controlsAreVisible)
                 .animation(.easeInOut(duration: 0.18), value: controlsAreVisible)
-            if let marker = model.activeSkipMarker, model.failureMessage == nil {
-                skipButton(marker)
+            ZStack {
+                if let progress = upNextProgress, upNext != nil, model.failureMessage == nil {
+                    upNextPrompt(progress: progress)
+                } else if let marker = model.activeSkipMarker, model.failureMessage == nil, isVideoReady {
+                    skipButton(marker)
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: upNextProgress != nil)
             if let swipeLevel { SwipeLevelIndicator(level: swipeLevel) }
             ZStack {
-                if panel != nil && model.failureMessage == nil {
-                    PlayerOptionsPanel(model: model, tab: $panel, actions: controlActions)
-                        .transition(.opacity)
-                }
+                if model.heldRate != nil { doubleSpeedBadge.transition(.opacity) }
             }
-            .animation(.easeInOut(duration: 0.18), value: panel != nil)
-            if let notice = model.notice, model.failureMessage == nil, !model.isPlaying || model.coordinator?.failedAttempts.isEmpty == false {
+            .animation(.easeInOut(duration: 0.15), value: model.heldRate != nil)
+            if let notice = model.notice, noticeVisible, model.failureMessage == nil {
                 VStack {
                     Spacer()
-                    Text(notice).font(.footnote.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 10).glassEffect(.regular, in: .capsule)
-                        .foregroundStyle(.white).padding(.bottom, 200)
+                    HStack(spacing: 7) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.65))
+                        Text(notice.contains("didn't work") ? "Stream unavailable · Trying another…" : notice)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.84))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: .capsule)
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    .frame(maxWidth: 320)
+                    .padding(.bottom, 150)
                 }
+                .allowsHitTesting(false)
                 .accessibilityIdentifier("player.notice")
             }
             if let message = model.failureMessage {
@@ -117,13 +216,61 @@ struct PlayerContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: panel) { old, new in
+            // A closed menu leaves the controls up, with a fresh idle delay, whichever way it was closed.
+            if old != nil && new == nil { model.showControls() }
+        }
+        .onChange(of: isHoldingFast) { _, holding in
+            if !holding { holdEndedAt = Date() }
+            model.holdDoubleSpeed(holding)
+            if holding && model.heldRate != nil { Haptics.tap() }
+        }
+        #if !targetEnvironment(macCatalyst)
+        .onChange(of: isPinching) { _, pinching in
+            if pinching { pinchBegan() } else { pictureGestureEndedAt = Date() }
+        }
+        .onChange(of: picture.barsCrop) { _, crop in
+            guard wantsNoBars, let crop, model.pictureZoom == .fill else { return }
+            wantsNoBars = false
+            model.setPictureZoom(.noBars, barsCrop: crop)
+        }
+        .onChange(of: isDragGestureActive) { _, active in
+            if !active {
+                pictureGestureEndedAt = Date()
+                Task { dragFinished() }
+            }
+        }
+        #endif
+        .onChange(of: model.notice, initial: true) { _, notice in
+            withAnimation(.easeInOut(duration: 0.2)) { noticeVisible = notice != nil }
+        }
+        .task(id: model.notice) {
+            guard model.notice != nil else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { noticeVisible = false }
+        }
         .task { await model.start() }
+        .task(id: model.isStalled) {
+            guard model.isStalled else {
+                showsStall = false
+                return
+            }
+            try? await Task.sleep(for: Self.stallSpinnerDelay)
+            if !Task.isCancelled { showsStall = true }
+        }
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 if panel == nil { model.hideControlsIfIdle() }
                 await model.skipAutomaticallyIfNeeded()
+                await model.recordSessionSnapshot()
+                updateUpNext()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Leaving the front keeps the session on the air, but its snapshot should already say where it is if the app is killed.
+            if phase != .active { Task { await model.recordSessionSnapshot(force: true) } }
         }
         .fileImporter(isPresented: $importsSubtitle, allowedContentTypes: SubtitleFileTypes.subtitles) { result in
             if case .success(let url) = result { Task { await model.loadSubtitleFile(at: url) } }
@@ -135,10 +282,32 @@ struct PlayerContent: View {
             }
         }
         .sheet(isPresented: $showsOpenSubtitles) { OpenSubtitlesSheet(model: model) }
+        .sheet(isPresented: $showsEpisodes) {
+            PlayerEpisodePicker(current: model.plan.request, services: services,
+                                prepare: { await model.prepareEpisode($0) }, onPlay: playChosenEpisode)
+        }
         .onChange(of: model.hasFinished) { _, finished in
             if finished { Task { await handleEnd() } }
         }
-        .onDisappear { Task { await model.close() } }
+        .onAppear {
+            // The screen is up: its session is the app's live one. A session the screen itself handed over and rebuilt (Up Next) sits
+            // in `prepared`, so what presents here is already this plan's player.
+            livePlayback.present(model)
+        }
+        .onDisappear {
+            leaveUpNext()
+            // An actual dismissal releases the session (a closed one forgets itself idempotently). A disappearance that comes with
+            // the app leaving the front — backgrounding, a lock — does not: the session stays on the air at the app level, and this
+            // screen or a rebuilt one reattaches to it when it comes back.
+            if LivePlaybackSession.closesOnDisappear(scenePhase: scenePhase) {
+                Task {
+                    await model.close()
+                    livePlayback.forget(model)
+                    // A dismissal sets the session aside; a hand-over has already saved the next one.
+                    if !handedOverPlan { await PlaybackSession.clear() }
+                }
+            }
+        }
         .modifier(PlayerChrome(model: model))
         #if os(iOS)
         .statusBarHidden(true)
@@ -155,13 +324,18 @@ struct PlayerContent: View {
         #endif
     }
 
-    private func openPanel(_ tab: PlayerPanelTab) {
-        Haptics.tap()
-        panel = tab
+    /// AI upscaling, for the Info menu. Passed as the object, so its status and frame count redraw Info alone.
+    private var upscalingRenderer: SuperResolutionRenderer? {
+        #if canImport(UIKit) && canImport(AVKit)
+        superResolution
+        #else
+        nil
+        #endif
     }
 
+    /// An open menu keeps the controls up: the menu stands on their bar.
     private var controlsAreVisible: Bool {
-        model.controlsVisible && panel == nil && model.failureMessage == nil
+        (model.controlsVisible || panel != nil) && model.failureMessage == nil
     }
 
     private var hasVideoFrame: Bool {
@@ -172,33 +346,48 @@ struct PlayerContent: View {
         return model.state.hasVideoFrame
     }
 
-    /// Display the title's existing poster rather than an empty black screen
-    /// until the video renderer has its actual first frame.
-    private var startupArtwork: some View {
-        GeometryReader { viewport in
-            ZStack {
-                Color.black
-                if let poster = PosterQuality.smallest(model.plan.request.poster) {
-                    // Reuse Blusion's downsampled/cached image instead of downloading
-                    // and decoding the original poster again at video startup.
-                    ArtworkImage(url: poster, maxPixelSize: 600, contentMode: .fill,
-                                 acceptsAnyCachedSize: true)
-                        .frame(width: viewport.size.width, height: viewport.size.height)
-                        .overlay(.black.opacity(0.65))
-                }
-                VStack(spacing: 14) {
-                    ProgressView().controlSize(.large).tint(.white)
-                    Text("Preparing video")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-            }
-            .frame(width: viewport.size.width, height: viewport.size.height)
-            .clipped()
+    /// The picture is on screen, or the film plays on another screen over AirPlay. Until then the player shows only its spinner and Close:
+    /// no poster, no play button, no timeline. A new stream (next episode, another stream) waits for its own first frame the same way.
+    private var isVideoReady: Bool {
+        hasVideoFrame || model.state.isExternalPlaybackActive
+    }
+
+    /// How long a stall lasts before a spinner shows.
+    static let stallSpinnerDelay = Duration.milliseconds(500)
+
+    /// The player's spinner, at start-up and for a stall.
+    private var spinner: some View {
+        Spinner().controlSize(.large)
+            .frame(width: 64, height: 64).glassEffect(.regular, in: .circle)
+    }
+
+    /// At the top while a hold plays at double speed.
+    private var doubleSpeedBadge: some View {
+        VStack {
+            Label("2×", systemImage: "forward.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .glassEffect(.regular, in: .capsule)
+                .padding(.top, 16)
+            Spacer()
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playing at double speed")
+        .accessibilityIdentifier("player.doubleSpeed")
+    }
+
+    /// Covers the renderer with black until its first frame, with the spinner in the middle.
+    private var startupSpinner: some View {
+        ZStack {
+            Color.black
+            spinner
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
-        .accessibilityLabel("Preparing video")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading video")
         .accessibilityIdentifier("player.preparing")
     }
 
@@ -262,7 +451,7 @@ struct PlayerContent: View {
             .transaction { $0.animation = nil }
             .onDisappear {
                 superResolution.tearDown()
-                ambient.stop()
+                picture.stop()
             }
         #else
         Color.black
@@ -274,7 +463,7 @@ struct PlayerContent: View {
         let engine = model.coordinator?.engine
         var picture = PlayerSurface(engine: engine, pip: pip, layout: model.videoLayout, upscaling: model.processing.upscaling,
                       embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
-                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, ambient: ambient,
+                      ambientMode: model.preferences.ambientMode, superResolution: superResolution, sampler: picture,
                       onFirstVideoFrame: {
                           guard let engine, model.coordinator?.engine === engine else { return }
                           nativeFrameEngineID = ObjectIdentifier(engine)
@@ -300,14 +489,23 @@ struct PlayerContent: View {
         #endif
     }
 
-    /// Tap toggles the controls; double-tap on the left or right third skips back or forward 10 s. On iPhone and iPad a vertical swipe on
-    /// the left third sets the brightness, on the right third the volume (Settings can turn that off), a swipe down in the middle closes,
-    /// and a pinch zooms.
+    private var acceptsPictureTap: Bool {
+        !isPinching && !isDragGestureActive && !isDragging
+            && (pictureGestureEndedAt.map { Date().timeIntervalSince($0) >= 0.25 } ?? true)
+    }
+
+    /// Tap toggles the controls; double-tap on the left or right third skips back or forward 10 s; press and hold plays at double speed
+    /// until the finger lifts (the Mac: click and hold). On iPhone and iPad a sideways swipe
+    /// anywhere on the picture seeks, right forward and left back (`SwipeSeek`), a vertical swipe on the left third sets the brightness
+    /// and on the right third the volume (Settings can turn those two off), a swipe down in the middle closes, and a pinch zooms.
+    /// The layer covers the whole screen, edges included, under the controls: a drag that starts on a control (the timeline, the menu
+    /// bar, a button) stays that control's own, so the system slider and segmented control keep their native touch handling.
     private var gestureLayer: some View {
         GeometryReader { proxy in
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { location in
+                    guard acceptsPictureTap else { return }
                     let third = proxy.size.width / 3
                     if location.x < third {
                         Task { await model.skip(by: -10) }
@@ -317,30 +515,88 @@ struct PlayerContent: View {
                         model.togglePlayPause()
                     }
                 }
-                .onTapGesture { model.toggleControls() }
+                .onTapGesture {
+                    guard acceptsPictureTap else { return }
+                    // The release that ends a hold at double speed is not a tap.
+                    if model.heldRate != nil || holdEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true { return }
+                    model.toggleControls()
+                }
+                .simultaneousGesture(LongPressGesture(minimumDuration: 0.4, maximumDistance: 10)
+                    .sequenced(before: DragGesture(minimumDistance: 0))
+                    .updating($isHoldingFast) { value, holding, _ in
+                        if case .second(true, _) = value { holding = true }
+                    })
                 #if !targetEnvironment(macCatalyst)
-                .gesture(DragGesture(minimumDistance: 16).onChanged { value in swipeChanged(value, in: proxy.size) }
-                    .onEnded { value in swipeEnded(value, in: proxy.size) })
-                .simultaneousGesture(MagnifyGesture().onEnded { value in
-                    // Pinch out to fill the display with a centred crop, pinch in
-                    // to show the whole original frame. Never distort the ratio.
-                    if value.magnification > 1.08 {
-                        model.setVideoFit(.fill)
-                    } else if value.magnification < 0.92 {
-                        model.setVideoFit(.fit)
-                    }
-                })
+                .simultaneousGesture(DragGesture(minimumDistance: 12)
+                    .updating($isDragGestureActive) { _, active, _ in active = true }
+                    .onChanged { swipeChanged($0, in: proxy.size) }
+                    .onEnded { swipeEnded($0, in: proxy.size) })
+                .simultaneousGesture(MagnifyGesture()
+                    .updating($isPinching) { _, pinching, _ in pinching = true }
+                    .onEnded { value in
+                        pictureGestureEndedAt = Date()
+                        // Each pinch out is one step, Original → Fill → No Bars (when the film has bars of its own), and each pinch
+                        // in one step back. Never distort the ratio.
+                        if value.magnification > 1.08 {
+                            // The bars take a few seconds of picture to measure: a pinch for No Bars before then is kept for when they are.
+                            if model.pictureZoom == .fill, picture.barsCrop == nil { wantsNoBars = true }
+                            model.zoomPicture(in: true, barsCrop: picture.barsCrop)
+                        } else if value.magnification < 0.92 {
+                            wantsNoBars = false
+                            model.zoomPicture(in: false, barsCrop: picture.barsCrop)
+                        }
+                    })
                 #endif
         }
+        .ignoresSafeArea()
         .accessibilityHidden(true)
     }
 
     #if !targetEnvironment(macCatalyst)
+    /// A sideways swipe seeks once the film plays on screen and has a length, with no panel open.
+    private var canSwipeSeek: Bool {
+        model.hasStartedPlayback && isVideoReady && (model.duration ?? 0) > 0 && model.failureMessage == nil && panel == nil
+    }
+
     private func swipeChanged(_ value: DragGesture.Value, in size: CGSize) {
-        guard model.preferences.swipeGestures else { return }
+        // An open menu owns its own scrolling.
+        guard panel == nil else { return }
+        // A finger that moves on after a hold at double speed is still holding.
+        if model.heldRate != nil { dragIsHold = true }
+        guard !dragIsHold else { return }
+        if !isDragging {
+            isDragging = true
+            if isPinching { dragIsPinch = true }
+        }
+        guard !dragIsPinch else { return }
+        if dragDirection == nil {
+            // Wait for a clear axis instead of permanently classifying a slightly
+            // diagonal first movement as vertical. The user's starting point can
+            // be anywhere, even over the visible transport controls.
+            let dx = abs(value.translation.width)
+            let dy = abs(value.translation.height)
+            if dx >= 14 && dx > dy * 1.2 {
+                dragDirection = .horizontal
+                if canSwipeSeek {
+                    let startingFraction = model.fraction
+                    model.beginScrub()
+                    seekSwipeStart = startingFraction
+                }
+            } else if dy >= 14 && dy > dx * 1.2 {
+                dragDirection = .vertical
+            } else {
+                return
+            }
+        }
+        if let start = seekSwipeStart {
+            model.updateScrub(fraction: SwipeSeek.fraction(from: start, translation: value.translation.width, width: size.width,
+                                                           duration: model.duration ?? 0))
+            return
+        }
+        guard dragDirection == .vertical, model.preferences.swipeGestures else { return }
         let third = size.width / 3
         if swipeStart == nil {
-            // Vertical swipes only: a sideways one is left alone.
+            // Up or down at the sides: brightness or volume.
             guard abs(value.translation.height) > abs(value.translation.width) * 1.5 else { return }
             if value.startLocation.x < third {
                 swipeStart = (.brightness, Double(ScreenBrightness.value))
@@ -360,38 +616,233 @@ struct PlayerContent: View {
     }
 
     private func swipeEnded(_ value: DragGesture.Value, in size: CGSize) {
+        pictureGestureEndedAt = Date()
+        guard panel == nil else { return }
+        if dragIsHold {
+            dragIsHold = false
+            return
+        }
+        let wasPinch = dragIsPinch
+        isDragging = false
+        dragIsPinch = false
+        dragDirection = nil
+        if seekSwipeStart != nil {
+            // Lifting the finger seeks, once, to where the swipe took the timeline.
+            seekSwipeStart = nil
+            Task { await model.endScrub() }
+            return
+        }
         let wasLevel = swipeStart != nil
         swipeStart = nil
         withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
+        guard !wasPinch else { return }
         let third = size.width / 3
         let inMiddle = value.startLocation.x >= third && value.startLocation.x <= 2 * third
         if !wasLevel, value.translation.height > 140, inMiddle || !model.preferences.swipeGestures { close() }
+    }
+
+    /// A pinch began. A drag under way is part of it: a seek it started is dropped without seeking, and the rest of it does nothing.
+    private func pinchBegan() {
+        guard isDragging else { return }
+        dragIsPinch = true
+        if seekSwipeStart != nil {
+            seekSwipeStart = nil
+            model.cancelScrub()
+        }
+    }
+
+    /// The drag is over, ended or cancelled (the system can take the touch and skip `onEnded`). After a normal end there is nothing left
+    /// to do. Otherwise a seek still open is made where the swipe left the timeline, whichever of the two runs first, and a level indicator
+    /// fades, so the next drag starts clean.
+    private func dragFinished() {
+        if seekSwipeStart != nil {
+            seekSwipeStart = nil
+            Task { await model.endScrub() }
+        }
+        if swipeStart != nil {
+            swipeStart = nil
+            withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
+        }
+        isDragging = false
+        dragIsPinch = false
+        dragDirection = nil
+        dragIsHold = false
     }
     #endif
 
     private func close() {
         Task {
             await model.close()
+            await PlaybackSession.clear()
+            livePlayback.forget(model)
             dismiss()
         }
     }
 
+    /// Moves to the next episode: with the player Up Next readied, which then plays at once, or else by finding its stream now.
     private func playNextEpisode() {
         guard !isPreparingNext else { return }
         isPreparingNext = true
+        stopCountdown()
         Task {
             await model.close()
-            if let next = await model.prepareNextEpisode() {
-                onNextPlan(next)
+            livePlayback.forget(model)
+            if upNext == nil { await upNextTask?.value }   // a readying under way finishes first: it is the quicker start
+            handedOverPlan = true
+            if let ready = upNext {
+                handedOverUpNext = true
+                await model.saveSessionSnapshot(for: ready.plan, candidateIndex: ready.model.currentStreamIndex)
+                onNextPlan(ready.plan, ready.model)
+            } else if let next = await model.prepareNextEpisode() {
+                await model.saveSessionSnapshot(for: next)
+                onNextPlan(next, nil)
             } else {
-                dismiss()   // no auto-selectable stream: back to the picker
+                // No auto-selectable stream: back to the picker, with no session for the episode that just ended.
+                await PlaybackSession.clear()
+                dismiss()
             }
             isPreparingNext = false
         }
     }
 
     private func handleEnd() async {
-        if model.hasNextEpisode { playNextEpisode() } else { model.showControls() }
+        if model.hasNextEpisode {
+            playNextEpisode()
+        } else {
+            // Watched through: there is nothing to walk back into.
+            await PlaybackSession.clear()
+            model.showControls()
+        }
+    }
+
+    /// Moves to the episode chosen in the picker, whose plan is ready: its sheet leaves first, then this player gives way to the new one,
+    /// so the sheet is never left over a player that is being replaced.
+    private func playChosenEpisode(_ plan: PlaybackPlan) {
+        leaveUpNext()
+        showsEpisodes = false
+        handedOverPlan = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            await model.close()
+            await model.saveSessionSnapshot(for: plan)
+            livePlayback.forget(model)
+            onNextPlan(plan, nil)
+        }
+    }
+
+    // MARK: Up Next
+
+    /// Called every half second. When the end comes up (`UpNextTiming`) the next episode starts loading off screen; once it is ready,
+    /// Next Episode shows and counts down. Seeking back out of the end takes the button away again.
+    private func updateUpNext() {
+        guard model.hasNextEpisode, model.failureMessage == nil, !isPreparingNext else { return }
+        let creditsToEnd = model.activeSkipMarker.map { $0.kind == .credits && model.skipEndsMedia($0) } ?? false
+        let nearEnd = UpNextTiming.isNearEnd(position: model.state.position, duration: model.duration, creditsToEnd: creditsToEnd)
+        if !nearEnd { watchesCredits = false }
+        if nearEnd, upNext == nil, upNextTask == nil { readyNextEpisode() }
+        let shows = nearEnd && upNext != nil && !watchesCredits
+        if shows && upNextCountdown == nil {
+            startCountdown()
+        } else if !shows && upNextCountdown != nil {
+            stopCountdown()
+        }
+    }
+
+    /// The next episode's stream, chosen as the end of an episode chooses it, starts muted and holds on its first frame.
+    private func readyNextEpisode() {
+        upNextTask = Task {
+            guard let plan = await model.prepareNextEpisode(), !Task.isCancelled else { return }
+            let next = Self.makeModel(plan: plan, services: services)
+            PlayerPreload.begin(plan, services: services)
+            await next.prepare()
+            guard !Task.isCancelled, !handedOverUpNext, next.coordinator?.phase == .playing else {
+                await next.close()   // nothing to play in it, or this screen has gone
+                return
+            }
+            upNext = UpNextEpisode(plan: plan, model: next)
+        }
+    }
+
+    /// Counts five seconds of playback (a pause holds the count), then plays the next episode.
+    private func startCountdown() {
+        upNextProgress = 0
+        upNextCountdown = Task {
+            let clock = ContinuousClock()
+            var last = clock.now
+            var elapsed = Duration.zero
+            while elapsed < UpNextTiming.countdown {
+                try? await Task.sleep(for: .milliseconds(33))
+                guard !Task.isCancelled else { return }
+                let now = clock.now
+                if model.isPlaying { elapsed += now - last }
+                last = now
+                upNextProgress = min(1, elapsed / UpNextTiming.countdown)
+            }
+            playNextEpisode()
+        }
+    }
+
+    private func stopCountdown() {
+        upNextCountdown?.cancel()
+        upNextCountdown = nil
+        upNextProgress = nil
+    }
+
+    /// This screen is going: a readied next episode it did not hand on is closed, so its stream stops.
+    private func leaveUpNext() {
+        upNextTask?.cancel()
+        stopCountdown()
+        if !handedOverUpNext, let next = upNext?.model {
+            upNext = nil
+            Task { await next.close() }
+        }
+    }
+
+    /// Netflix's choice at the end of an episode, in the player's glass: Watch Credits, and Next Episode filling as its five seconds run.
+    private func upNextPrompt(progress: Double) -> some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 10) {
+                Spacer()
+                Button {
+                    Haptics.tap()
+                    watchesCredits = true
+                    stopCountdown()
+                } label: {
+                    Text("Watch Credits")
+                        .font(.headline)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .pointerInteraction(cornerRadius: 22)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("player.upNext.credits")
+                Button {
+                    Haptics.tap()
+                    playNextEpisode()
+                } label: {
+                    Label("Next Episode", systemImage: "play.fill")
+                        .font(.headline)
+                        .padding(.horizontal, 18).padding(.vertical, 12)
+                        .background(alignment: .leading) {
+                            GeometryReader { proxy in
+                                Rectangle().fill(.white.opacity(0.3)).frame(width: proxy.size.width * progress)
+                            }
+                        }
+                        .clipShape(.capsule)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .pointerInteraction(cornerRadius: 22)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("n", modifiers: [])
+                .accessibilityIdentifier("player.upNext.play")
+                .accessibilityValue("Plays in \(Int((5 * (1 - progress)).rounded(.up))) seconds")
+            }
+            .foregroundStyle(.white)
+            .padding(.trailing, 24)
+            .padding(.bottom, model.controlsVisible ? 190 : 40)
+        }
+        .transition(.opacity)
     }
 }
 
@@ -432,6 +883,7 @@ private struct PlayerChrome: ViewModifier {
     let model: PlayerViewModel
     #if os(iOS)
     @State private var nowPlaying: NowPlayingController?
+    @Environment(\.scenePhase) private var scenePhase
     #endif
 
     func body(content: Content) -> some View {
@@ -447,8 +899,11 @@ private struct PlayerChrome: ViewModifier {
             }
             .onChange(of: model.state) { _, state in nowPlaying?.update(state) }
             .onDisappear {
-                nowPlaying?.tearDown()
-                nowPlaying = nil
+                // Backgrounding can report the surface as gone without a dismissal: lock-screen controls stay then, as playback does.
+                if LivePlaybackSession.closesOnDisappear(scenePhase: scenePhase) {
+                    nowPlaying?.tearDown()
+                    nowPlaying = nil
+                }
             }
         #else
         content

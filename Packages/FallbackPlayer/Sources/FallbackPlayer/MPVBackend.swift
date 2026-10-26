@@ -30,7 +30,16 @@ final class MPVHostView: UIView {
         // Lets mpv hand HDR frames to the display as HDR (EDR) when it is asked to (target-colorspace-hint).
         metalLayer.wantsExtendedDynamicRangeContent = true
         layer.addSublayer(metalLayer)
+        // A player can be readied before its screen shows (the stream picker holds it on its first frame), so the picture layer has a
+        // size of its own from the start: mpv makes its video output on a layer with none and could turn the video off. The screen's
+        // layout replaces it.
+        metalLayer.frame = bounds
+        metalLayer.contentsScale = 2
+        metalLayer.drawableSize = CGSize(width: bounds.width * 2, height: bounds.height * 2)
     }
+
+    /// The size the view starts at, before the player screen lays it out.
+    static let initialFrame = CGRect(x: 0, y: 0, width: 1280, height: 720)
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
@@ -291,7 +300,7 @@ private final class MPVEventPump: @unchecked Sendable {
 /// libplacebo tone mapping and Dolby Vision (profiles 5 and 8, and 7's base layer with its RPU), and libass for styled subtitles.
 @MainActor
 public final class MPVBackend: FallbackBackend {
-    private let host = MPVHostView()
+    private let host = MPVHostView(frame: MPVHostView.initialFrame)
     private var handle: OpaquePointer?
     private var pump: MPVEventPump?
     private let events: AsyncStream<FallbackEvent>
@@ -561,7 +570,7 @@ public final class MPVBackend: FallbackBackend {
             stats.notes.append("Object audio (Atmos, DTS:X) is decoded to its PCM channel bed; the objects are not rendered.")
         }
         if processing.upscaling == .ai {
-            stats.notes.append("AI super resolution runs in the native player only; this player uses its sharpest conventional scaler (EWA Lanczos).")
+            stats.notes.append("AI super resolution needs the native player or AetherEngine; mpv uses its sharpest conventional scaler (EWA Lanczos) instead.")
         }
         return stats
     }

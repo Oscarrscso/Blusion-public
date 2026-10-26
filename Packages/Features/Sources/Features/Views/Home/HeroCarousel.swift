@@ -37,8 +37,8 @@ struct HeroSection: View {
 }
 
 extension EnvironmentValues {
-    /// How far Home has been pulled down past its top while the spotlight is its first section. The portrait spotlight stretches by this
-    /// much, like a refresh.
+    /// How far Home has been pulled down past its top while the spotlight is its first section. The spotlight stretches by this much, like
+    /// a refresh.
     @Entry var heroPull: CGFloat = 0
 }
 
@@ -126,8 +126,9 @@ struct HeroCarousel: View {
             .frame(height: isLandscape ? min(containerHeight, preferred) : portrait)
             .overlay {
                 GeometryReader { geometry in
-                    // In portrait the spotlight stretches downward when pulled past the top; its top stays at the top of the screen.
-                    let pull = isLandscape ? 0 : heroPull
+                    // Pulled past the top, the spotlight stretches with the pull, in both orientations, so no black shows above it; its
+                    // caption stays where it was. Landscape used to keep its height and left a black gap.
+                    let pull = heroPull
                     let height = geometry.size.height + pull
                     TabView(selection: $pageID) {
                         ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in

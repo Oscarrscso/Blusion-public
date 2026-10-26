@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import StremioKit
+import UIKit
 
 struct SearchView: View {
     @State private var model: SearchViewModel
@@ -8,6 +9,8 @@ struct SearchView: View {
     @FocusState private var isSearchFocused: Bool
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     private let initialQuery: String?
     /// The id of the page's content, which its scroll goes back to when its tab's item is tapped.
     private static let topID = "search.top"
@@ -47,9 +50,11 @@ struct SearchView: View {
                 .id(Self.topID)
             }
             // Any scroll of the page puts the keyboard away, so a swipe down clears the view of the results.
+            .trackLandscapeTabScroll()
             .scrollDismissesKeyboard(.immediately)
             .screenBackground()
-            .navigationTitle("Search")
+            .navigationTitle(isPhoneInLandscape ? "" : "Search")
+            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
             .searchable(text: $model.query, isPresented: $isSearchPresented,
                         placement: .navigationBarDrawer(displayMode: .always), prompt: "Shows, Movies, and More")
             .searchFocused($isSearchFocused)
@@ -81,6 +86,10 @@ struct SearchView: View {
             }
         }
     }
+
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well. A phone in landscape shows the
+    /// search field without a title above it.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     /// Puts the cursor in the field. The field is not there in the frame the tab changes, so the focus is asked for again a moment later.
     private func focusField() {

@@ -26,6 +26,8 @@ public final class AetherSession {
     private var isMuted = false
     private var lastPosition = -1.0
     private var lastBuffered = -1.0
+    /// The length last reported, in `loaded` or a later `duration`; 0 while unknown.
+    private var lastDuration = 0.0
     private var lastTracks: (audio: [AetherTrack], subtitles: [AetherTrack], audioID: Int?, subtitleID: Int?)?
     private var lastChapters: [AetherChapter] = []
     private var pausedState: Bool?
@@ -41,6 +43,28 @@ public final class AetherSession {
     private var pendingSubtitle: Int??
 
     public var view: UIView { host }
+    /// The AVPlayer AetherEngine plays the picture through now; nil on its software path or before a load. It changes as AetherEngine
+    /// rebuilds its session (a track switch, a seam), so readers ask again rather than keep it.
+    public var currentPlayer: AVPlayer? { engine.currentAVPlayer }
+
+    /// Shows `layer` over the picture, placed and sized with it (AI super resolution's scaled frames); nil removes it. Subtitles stay
+    /// above it.
+    public func hostPictureOverlay(_ layer: CALayer?) { host.hostPictureOverlay(layer) }
+    /// How the picture is drawn into its frame, for a layer drawn over it.
+    public var pictureGravity: AVLayerVideoGravity { host.currentGravity }
+    /// The stream is HDR or Dolby Vision (not what reaches the display).
+    public var isHDRSource: Bool { isLoaded && engine.sourceVideoFormat != .sdr }
+    /// Seconds of the film AetherEngine holds ahead of the playhead on its loopback route, where it repackages the remux for AVPlayer
+    /// as it downloads (what AVPlayer has, plus the segments made ahead of it). nil before the load, on its software path and for a
+    /// live stream. It moves about once a second while paused.
+    public var loopbackBufferedAhead: TimeInterval? {
+        guard isLoaded, engine.videoRoute == .loopback, !engine.isLive else { return nil }
+        let ahead = engine.clock.bufferedPosition - engine.clock.currentTime
+        return ahead.isFinite ? max(0, ahead) : nil
+    }
+    #if DEBUG
+    private let trace = PlaybackTrace()
+    #endif
 
     public init() throws {
         engine = try AetherEngine()
@@ -60,6 +84,8 @@ public final class AetherSession {
         self.options = options
         isLoaded = false
         hasEnded = false
+        lastDuration = 0
+        lastBuffered = -1
         lastTracks = nil
         lastChapters = []
         pausedState = nil
@@ -68,6 +94,9 @@ public final class AetherSession {
         pendingSubtitle = nil
         host.overlay.show(cues: [], at: 0)
         Self.activateAudioSession()
+        #if DEBUG
+        trace.begin(name: url.lastPathComponent, start: startPosition, engine: engine)
+        #endif
         var loadOptions = LoadOptions(
             httpHeaders: headers,
             preferDualLayerDolbyVision: options.composesFEL,
@@ -97,10 +126,16 @@ public final class AetherSession {
 
     private func didLoad() {
         isLoaded = true
+        #if DEBUG
+        trace.note("loaded route=\(engine.videoRoute.rawValue) \(engine.sourceVideoWidth)x\(engine.sourceVideoHeight) "
+                   + "\(engine.sourceVideoCodecName ?? "-") \(engine.sourceVideoBitrate / 1_000_000) Mbit/s wantsPlay=\(wantsPlaying)")
+        #endif
         if wantsPlaying { engine.play() }
         let tracks = currentTracks()
         lastTracks = tracks
-        continuation.yield(.loaded(duration: engine.duration > 0 ? engine.duration : nil, audio: tracks.audio, subtitles: tracks.subtitles,
+        let duration = engine.duration.isFinite && engine.duration > 0 ? engine.duration : nil
+        lastDuration = duration ?? 0
+        continuation.yield(.loaded(duration: duration, audio: tracks.audio, subtitles: tracks.subtitles,
                                    selectedAudio: tracks.audioID, selectedSubtitle: tracks.subtitleID))
         publishChapters()
         publishTransport()
@@ -119,6 +154,9 @@ public final class AetherSession {
 
     public func setPaused(_ paused: Bool) {
         wantsPlaying = !paused
+        #if DEBUG
+        trace.note(paused ? "pause" : "play ahead=\(loopbackBufferedAhead.map { String(format: "%.1f", $0) } ?? "-")")
+        #endif
         guard isLoaded else { return }   // applied in didLoad
         if paused { engine.pause() } else { engine.play() }
     }
@@ -249,6 +287,9 @@ public final class AetherSession {
     }
 
     public func shutdown() {
+        #if DEBUG
+        trace.end()
+        #endif
         generation += 1
         loadTask?.cancel()
         loadTask = nil
@@ -269,6 +310,11 @@ public final class AetherSession {
         }.store(in: &subscriptions)
         engine.clock.$currentTime.receive(on: RunLoop.main).sink { [weak self] time in
             MainActor.assumeIsolated { self?.publishPosition(time) }
+        }.store(in: &subscriptions)
+        // AetherEngine's player often publishes the length a moment after the load has finished. Reported only at load, the
+        // timeline had no length for the whole film: no time left, no scrubbing and no swipe to seek.
+        engine.$duration.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] duration in
+            MainActor.assumeIsolated { self?.publishDuration(duration) }
         }.store(in: &subscriptions)
         engine.clock.$bufferedPosition.receive(on: RunLoop.main).sink { [weak self] until in
             MainActor.assumeIsolated {
@@ -340,6 +386,9 @@ public final class AetherSession {
         }
         if buffering != bufferingState {
             bufferingState = buffering
+            #if DEBUG
+            trace.note("buffering=\(buffering) phase=\(engine.playbackPhase)")
+            #endif
             continuation.yield(.buffering(buffering))
         }
     }
@@ -348,6 +397,12 @@ public final class AetherSession {
         guard pausedState != paused else { return }
         pausedState = paused
         continuation.yield(.paused(paused))
+    }
+
+    private func publishDuration(_ duration: Double) {
+        guard isLoaded, duration.isFinite, duration > 0, duration != lastDuration else { return }
+        lastDuration = duration
+        continuation.yield(.duration(duration))
     }
 
     private func publishPosition(_ time: Double) {
@@ -510,6 +565,9 @@ final class AetherHostView: UIView {
     let overlay = AetherSubtitleOverlay()
     /// Clips the picture to its visible part, so a crop hides the bars.
     private let clipView = UIView()
+    /// Over the picture and the same size: carries a layer drawn over it (`hostPictureOverlay`).
+    private let pictureOverlayView = UIView()
+    private weak var pictureOverlay: CALayer?
     var fit = AetherFit.fit { didSet { if fit != oldValue { setNeedsLayout() } } }
     var zoom = 1.0 { didSet { if zoom != oldValue { setNeedsLayout() } } }
     /// Width over height replacing the file's; nil keeps it.
@@ -521,6 +579,7 @@ final class AetherHostView: UIView {
     /// Tells the engine how to draw into the player view: stretched into the frame laid out here, or by fit before the size is known.
     var onGravity: (@MainActor (AVLayerVideoGravity) -> Void)?
     private var lastGravity: AVLayerVideoGravity?
+    var currentGravity: AVLayerVideoGravity { lastGravity ?? .resizeAspect }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -530,6 +589,9 @@ final class AetherHostView: UIView {
         clipView.clipsToBounds = true
         clipView.isUserInteractionEnabled = false
         clipView.addSubview(playerView)
+        pictureOverlayView.isUserInteractionEnabled = false
+        pictureOverlayView.backgroundColor = .clear
+        clipView.addSubview(pictureOverlayView)
         addSubview(clipView)
         addSubview(overlay)
     }
@@ -569,6 +631,19 @@ final class AetherHostView: UIView {
             lastGravity = gravity
             onGravity?(gravity)
         }
+        // The frame the picture shows in, transform included.
+        pictureOverlayView.frame = playerView.frame
+        pictureOverlay?.frame = pictureOverlayView.bounds
+        (pictureOverlay as? AVSampleBufferDisplayLayer)?.videoGravity = gravity
+    }
+
+    func hostPictureOverlay(_ layer: CALayer?) {
+        if layer == nil && pictureOverlay == nil { return }
+        guard layer !== pictureOverlay || layer?.superlayer !== pictureOverlayView.layer else { return }
+        if pictureOverlay?.superlayer === pictureOverlayView.layer { pictureOverlay?.removeFromSuperlayer() }
+        pictureOverlay = layer
+        if let layer { pictureOverlayView.layer.addSublayer(layer) }
+        setNeedsLayout()
     }
 
     /// The whole picture's frame and the part of it that shows. Blusion's `VideoGeometry` (PlayerKit) does the same; this framework

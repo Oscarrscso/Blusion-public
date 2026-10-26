@@ -16,6 +16,8 @@ enum TitleHero {
     static let fadeOverscan: CGFloat = 2
     /// The tallest logo, bottom-aligned above the gap to the text.
     static let logoMaxHeight: CGFloat = 150
+    /// Cap portrait logos even when an overlay proposes an unconstrained width.
+    static let logoMaxWidth: CGFloat = 360
     /// The gap between the bottom of the logo and the text under it (the metadata line), on the title page and on Home's spotlight alike.
     /// The text starts `portraitDrop` below the picture's bottom edge on both, so the logo stops this far above that.
     static let logoTextGap = Theme.Spacing.s
@@ -454,7 +456,7 @@ struct HeroTitleArt: View {
             if hidden {
                 Color.clear.frame(height: 0)
             } else if case .ready(let image) = slot {
-                LogoLayout(imageSize: image.size, maxWidth: logoBox?.width ?? (compact ? TitleHero.landscapeLogoMaxWidth : .infinity),
+                LogoLayout(imageSize: image.size, maxWidth: logoBox?.width ?? (compact ? TitleHero.landscapeLogoMaxWidth : TitleHero.logoMaxWidth),
                            maxHeight: logoHeight) {
                     Image(uiImage: image)
                         .resizable()
@@ -490,7 +492,7 @@ struct LogoLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
-        let width = min(proposal.width ?? imageSize.width, maxWidth)
+        let width = max(0, min(proposal.width ?? maxWidth, maxWidth))
         let scale = min(width / imageSize.width, maxHeight / imageSize.height)
         return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     }

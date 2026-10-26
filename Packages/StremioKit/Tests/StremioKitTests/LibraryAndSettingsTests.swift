@@ -54,7 +54,7 @@ import Testing
         let settings = PlaybackSettings(preferredResolution: 1080, subtitleLanguage: "eng", streamingServerURL: "http://user:pw@192.168.1.9:11470",
                                         fallbackEngineEnabled: false, traktClientID: "client-abc", playerPreference: .infuse,
                                         showsPosterRatings: false, autoPlayBestStream: true, tmdbReadToken: "tmdb-test-token",
-                                        matchesEpisodeWidthToText: true)
+                                        matchesEpisodeWidthToText: true, autoPickSource: .usenet)
         await store.save(settings)
         #expect(await store.load() == settings)
         #expect(await secrets.snapshot[DefaultsSettingsStore.Keys.serverSecret] == "http://user:pw@192.168.1.9:11470")
@@ -150,8 +150,19 @@ import Testing
     @Test func playerPreferencesSavedBeforeTheAdvancedEngineFieldsDecodeToTheDefaults() throws {
         let saved = Data(#"{"subtitleMode":"off","prefersSDH":true}"#.utf8)
         let decoded = try JSONDecoder().decode(PlayerPreferences.self, from: saved)
-        #expect(decoded.advancedEngine == .aether && decoded.composesDolbyVisionFEL && decoded.rendersObjectAudio)
+        #expect(decoded.advancedEngine == .aether && !decoded.composesDolbyVisionFEL && decoded.rendersObjectAudio)
         #expect(decoded.subtitleMode == .off && decoded.prefersSDH, "the saved values are kept")
+    }
+
+    @Test func theOldDefaultOfComposingFELIsDroppedOnce() throws {
+        let saved = Data(#"{"composesDolbyVisionFEL":true,"rendersObjectAudio":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(PlayerPreferences.self, from: saved)
+        #expect(!decoded.composesDolbyVisionFEL, "the old key's value was the old default, not a choice")
+        #expect(!decoded.rendersObjectAudio, "the other saved values are kept")
+        var chosen = decoded
+        chosen.composesDolbyVisionFEL = true
+        #expect(try JSONDecoder().decode(PlayerPreferences.self, from: JSONEncoder().encode(chosen)).composesDolbyVisionFEL,
+                "a choice made from now on is kept")
     }
 
     @Test func theAdvancedEngineFieldsRoundTrip() throws {

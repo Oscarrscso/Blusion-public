@@ -15,7 +15,12 @@ while [[ -n "$CURSOR" && "$CURSOR" != / ]]; do
   [[ -z "$DEST" ]] || break
   CURSOR="$(dirname "$CURSOR")"
 done
-[[ -n "$DEST" ]] || { echo "prepare-aether: Xcode's resolved AetherEngine checkout was not found" >&2; exit 1; }
+if [[ -z "$DEST" ]]; then
+  # Scheme pre-actions run before SwiftPM resolves packages. On a clean checkout
+  # there is nothing to patch yet, so allow dependency resolution to proceed.
+  echo "prepare-aether: AetherEngine is not resolved yet; skipping compatibility patch" >&2
+  exit 0
+fi
 [[ "$(git -C "$DEST" rev-parse HEAD)" == "$REVISION" ]] || {
   echo "prepare-aether: unexpected dependency revision; preserving $DEST unchanged" >&2; exit 1;
 }

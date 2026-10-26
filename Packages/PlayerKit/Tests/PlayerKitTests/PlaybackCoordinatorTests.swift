@@ -402,6 +402,19 @@ import PlayerKitTestSupport
         #expect(coordinator.notice == "There are no other streams to try.")
     }
 
+    /// A stall is still playing to the viewer: the play button shows Pause there, so the toggle pauses rather than asking to play again.
+    @Test func togglingDuringAStallPauses() async throws {
+        let (coordinator, rig) = coordinator(["a"], ["a": .plays(duration: 100)])
+        await coordinator.start()
+        let engine = try #require(rig.engines["a"])
+        engine.simulateBuffering()
+        try await waitUntil { coordinator.state.status == .buffering }
+        coordinator.togglePlayPause()
+        try await waitUntil { coordinator.state.status == .paused }
+        coordinator.togglePlayPause()
+        try await waitUntil { coordinator.state.isPlaying }
+    }
+
     @Test func transportCommandsReachTheEngine() async throws {
         let (coordinator, rig) = coordinator(["a"], ["a": .plays(duration: 100)])
         await coordinator.start()

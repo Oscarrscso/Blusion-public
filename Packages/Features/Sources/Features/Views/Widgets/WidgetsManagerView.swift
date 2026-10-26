@@ -118,20 +118,42 @@ struct WidgetsManagerView: View {
         .accessibilityIdentifier("widgets.hiddenRows")
     }
 
-    /// The import, export and sharing actions, under the cards.
+    /// The import, export and sharing actions, under the cards: one group of rows, each with its symbol.
     private var importAndExport: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import & export").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-            Button("Import Widgets…") { showsImport = true }
-                .accessibilityIdentifier("widgets.import")
-            Button(copied ? "Copied" : "Copy as JSON") {
+        WidgetsPageGroup("Import & Export") {
+            Button { showsImport = true } label: {
+                WidgetsPageRow("Import Widgets", systemImage: "square.and.arrow.down") {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }
+            .accessibilityIdentifier("widgets.import")
+            Divider().padding(.leading, WidgetsPageRow<EmptyView>.textInset)
+            Button {
                 UIPasteboard.general.string = model.exportJSON()
                 copied = true
+            } label: {
+                WidgetsPageRow(copied ? "Copied" : "Copy as JSON", systemImage: copied ? "checkmark" : "doc.on.doc") { EmptyView() }
             }
             .accessibilityIdentifier("widgets.export")
-            if let text = model.exportJSON() { ShareLink("Share JSON", item: text) }
+            if let text = model.exportJSON() {
+                Divider().padding(.leading, WidgetsPageRow<EmptyView>.textInset)
+                ShareLink(item: text) {
+                    WidgetsPageRow("Share JSON", systemImage: "square.and.arrow.up") { EmptyView() }
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Back to the layout that follows the addons, asked for in a dialog.
+    private var resetRow: some View {
+        WidgetsPageGroup(nil) {
+            Button(role: .destructive) { showsReset = true } label: {
+                WidgetsPageRow("Use Automatic Layout", systemImage: "arrow.counterclockwise") { EmptyView() }
+                    .foregroundStyle(.red)
+                    .tint(.red)
+            }
+            .accessibilityIdentifier("widgets.reset")
+        }
     }
 
     // MARK: Order
@@ -284,11 +306,9 @@ struct WidgetsManagerView: View {
 
     /// Shuffle for every widget without its own (see a widget's Shuffle setting), and for the order of Home's widgets.
     private var shuffleSettings: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack {
-                Text("Shuffle").font(.title3.weight(.semibold))
-                Spacer(minLength: 0)
-                Picker("Shuffle", selection: Binding(get: { model.shuffle.schedule }, set: { schedule in
+        WidgetsPageGroup("Shuffle") {
+            WidgetsPageRow("Shuffle titles", systemImage: "shuffle") {
+                Picker("Shuffle titles", selection: Binding(get: { model.shuffle.schedule }, set: { schedule in
                     var settings = model.shuffle
                     settings.schedule = schedule
                     Task { await model.setShuffle(settings) }
@@ -299,19 +319,17 @@ struct WidgetsManagerView: View {
                 .labelsHidden()
                 .accessibilityIdentifier("widgets.shuffle")
             }
-            Toggle("Shuffle widget order too", isOn: Binding(get: { model.shuffle.shufflesOrder }, set: { on in
-                var settings = model.shuffle
-                settings.shufflesOrder = on
-                Task { await model.setShuffle(settings) }
-            }))
+            Divider().padding(.leading, WidgetsPageRow<EmptyView>.textInset)
+            WidgetsPageRow("Shuffle widget order", systemImage: "arrow.up.arrow.down") {
+                Toggle("Shuffle widget order", isOn: Binding(get: { model.shuffle.shufflesOrder }, set: { on in
+                    var settings = model.shuffle
+                    settings.shufflesOrder = on
+                    Task { await model.setShuffle(settings) }
+                }))
+                .labelsHidden()
+                .accessibilityIdentifier("widgets.shuffleOrder")
+            }
             .disabled(model.shuffle.schedule == .off)
-            .accessibilityIdentifier("widgets.shuffleOrder")
-            Text("""
-                Shuffles the titles in every widget that has no shuffle of its own, and with Shuffle widget order, the order of Home's \
-                widgets; the showcase and Continue Watching keep their places. An order stays until its next shuffle.
-                """)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -385,21 +403,12 @@ struct WidgetsManagerView: View {
                     grid
                         .accessibilityIdentifier("widgets.list")
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Home rows").font(.title3.weight(.semibold))
-                    Text(model.isCustomised ? "Your own layout." : "Home follows your addons. Change anything here to make it yours.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
                 if model.catalogChoices.isEmpty {
                     Text("Install an addon with catalogs, or use a Trakt list, to add more rows.").font(.footnote).foregroundStyle(.secondary)
                 }
                 shuffleSettings
                 importAndExport
-                if model.isCustomised {
-                    Button("Use Automatic Layout", role: .destructive) { showsReset = true }
-                        .accessibilityIdentifier("widgets.reset")
-                }
+                if model.isCustomised { resetRow }
                 if let message = model.message {
                     Text(message).font(.footnote).foregroundStyle(model.messageIsError ? Color.orange : Color.secondary)
                         .accessibilityIdentifier("widgets.message")
@@ -873,5 +882,58 @@ private struct WidgetCard: View {
 private enum NewWidgetRoute: Hashable, Identifiable {
     case widget
     var id: Self { self }
+}
+/// A group of rows on the widgets page: an optional heading over rows on one rounded surface, as a settings list draws them.
+private struct WidgetsPageGroup<Content: View>: View {
+    let title: String?
+    @ViewBuilder let content: Content
+
+    init(_ title: String?, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            if let title {
+                Text(title).font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            }
+            VStack(spacing: 0) { content }
+                .buttonStyle(.plain)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One row of a `WidgetsPageGroup`: a symbol, a title and an optional control at the trailing edge. The whole row takes taps.
+private struct WidgetsPageRow<Trailing: View>: View {
+    let title: String
+    let systemImage: String
+    @ViewBuilder let trailing: Trailing
+
+    /// Where the title starts, which the dividers between rows line up with.
+    static var textInset: CGFloat { Theme.Spacing.l + 28 + Theme.Spacing.m }
+
+    init(_ title: String, systemImage: String, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.systemImage = systemImage
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.medium))
+                .frame(width: 28)
+                .foregroundStyle(.tint)
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            trailing
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .frame(minHeight: 50)
+        .contentShape(Rectangle())
+    }
 }
 #endif

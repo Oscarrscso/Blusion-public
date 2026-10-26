@@ -395,6 +395,71 @@ private let savedContinueWatching = HomeWidget(id: "cw", title: "Continue", cont
         #expect(model.sections[0].state.value?.count == 2)
     }
 
+    // MARK: Loading order
+
+    /// Six genre rows of one catalog, each its own source.
+    private static let genreRows = ["Action", "Drama", "Comedy", "Horror", "Thriller", "Western"].map { genre in
+        HomeWidget(id: genre, title: genre, content: .row(RowConfiguration(source: .addonCatalog(
+            AddonCatalogReference(manifestID: "test.cinemeta", catalogType: "movie", catalogID: "top", genre: genre)))))
+    }
+
+    @Test func rowsLoadOneAtATimeFromTheTop() async throws {
+        let counter = InFlight()
+        let transport = StubTransport { request, _ in
+            await counter.begin()
+            try? await Task.sleep(for: .milliseconds(30))
+            await counter.end()
+            return StubTransport.response(twoMovies, for: request)
+        }
+        let model = HomeViewModel(services: try await services([cinemeta], transport: transport, widgets: Self.genreRows))
+        await model.load()
+        let genres = transport.requests.compactMap { request in
+            Self.genreRows.map(\.id).first { request.url?.absoluteString.contains("genre=\($0)") == true }
+        }
+        #expect(genres == Self.genreRows.map(\.id), "each row asks in layout order")
+        #expect(await counter.most == 1, "a row that answers within its head start has the connection to itself")
+        #expect(model.sections.filter { $0.state.value?.count == 2 }.count == Self.genreRows.count)
+    }
+
+    @Test func aSlowRowLetsTheNextOneStartBesideIt() async throws {
+        let gate = Gate()
+        let transport = StubTransport { request, _ in
+            if request.url?.absoluteString.contains("genre=Action") == true { await gate.wait() }
+            return StubTransport.response(twoMovies, for: request)
+        }
+        let model = HomeViewModel(services: try await services([cinemeta], transport: transport, widgets: Self.genreRows))
+        let loading = Task { await model.load() }
+        try await waitUntil { model.sections.first(where: { $0.id == "Drama" })?.state.value?.count == 2 }
+        #expect(model.sections.first?.state.isLoading == true, "the first row is still waiting for its addon")
+        await gate.open()
+        await loading.value
+        #expect(model.sections.filter { $0.state.value?.count == 2 }.count == Self.genreRows.count)
+    }
+
+    @Test func rowsBelowTheFirstScreenfulShowTheirLastKnownItemsBeforeAnyAddonAnswers() async throws {
+        let snapshots = InMemoryWidgetSnapshotStore()
+        let lastLaunch = StubTransport { request, _ in StubTransport.response(oneOldMovie, for: request) }
+        let before = HomeViewModel(services: try await services([cinemeta], transport: lastLaunch, widgets: Self.genreRows,
+                                                               snapshots: snapshots))
+        await before.load()
+
+        let gate = Gate()
+        let transport = StubTransport { request, _ in
+            await gate.wait()
+            return StubTransport.response(twoMovies, for: request)
+        }
+        let relaunch = HomeViewModel(services: try await services([cinemeta], transport: transport, widgets: Self.genreRows,
+                                                                 snapshots: snapshots))
+        let loading = Task { await relaunch.load() }
+        try await waitUntil { relaunch.sections.first(where: { $0.id == "Western" })?.state.value != nil }
+        for genre in Self.genreRows.map(\.id) {
+            #expect(relaunch.sections.first(where: { $0.id == genre })?.state.value?.map(\.id) == ["old"], "\(genre) shows its last items")
+        }
+        await gate.open()
+        await loading.value
+        #expect(relaunch.sections.first(where: { $0.id == "Western" })?.state.value?.map(\.id) == ["tt1", "tt2"])
+    }
+
     // MARK: Last-known items
 
     @Test func aRelaunchShowsTheLastKnownItemsBeforeAnyAddonAnswers() async throws {
@@ -571,4 +636,17 @@ private let savedContinueWatching = HomeWidget(id: "cw", title: "Continue", cont
         #expect(model.sections[0].state.value?.map(\.id) == ["tt1", "tt2"])
         #expect(transport.callCount == 3)
     }
+}
+
+/// Counts the requests in flight, and the most there ever were at once.
+private actor InFlight {
+    private var now = 0
+    private(set) var most = 0
+
+    func begin() {
+        now += 1
+        most = max(most, now)
+    }
+
+    func end() { now -= 1 }
 }

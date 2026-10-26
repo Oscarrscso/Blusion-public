@@ -87,18 +87,26 @@ public final class HomeViewModel {
         guard !addons.isEmpty else {
             sections = []
             phase = .noAddons
+            HomeStartup.shared.markSettled()
             return
         }
         let laidOut = saved ?? DefaultWidgets.make(for: addons)
         layoutWidgets = Dictionary(laidOut.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let widgets = await shuffled(laidOut, addons: addons)
-        let known = await lastKnownItems(for: widgets)
+        // Only the first rows' saved items are read before Home shows, so a long layout does not wait for every row's file; the rest
+        // fill in afterwards, top to bottom.
+        let rows = HomeViewModel.loadingRows(of: widgets)
+        let leading = Array(rows.prefix(HomeViewModel.rowsReadBeforeShowing))
+        let known = await lastKnownItems(for: leading)
         guard current == generation, !Task.isCancelled else { return }
         let previous = sections
         sections = widgets.map { HomeViewModel.startingSection(for: $0, previous: previous, known: known) }
         phase = (saved == nil && widgets.isEmpty) ? .noCatalogs : .ready
         let missingPhotos = await showKnownTilePhotos(for: widgets, generation: current)
+        await showLastKnownItems(for: Array(rows.dropFirst(leading.count)), generation: current)
         await loadRows(generation: current)
+        guard current == generation, !Task.isCancelled else { return }
+        HomeStartup.shared.markSettled()
         await loadTilePhotos(missingPhotos, widgets: widgets, generation: current)
     }
 
@@ -305,49 +313,88 @@ public final class HomeViewModel {
 
     // MARK: Loading
 
-    /// Start at the top, with three requests at a time, so lower widgets do not flood the connection before the first posters arrive.
+    /// The heroes and rows read before Home first shows: about a screenful.
+    static let rowsReadBeforeShowing = 4
+    /// How long a row's load has to itself before the next row starts beside it.
+    static let rowHeadStart: Duration = .seconds(1)
+    /// The most rows loading at once, when each takes longer than its head start.
+    static let rowsLoadingAtOnce = 3
+
+    /// The widgets that load items, in layout order.
+    private static func loadingRows(of widgets: [HomeWidget]) -> [(id: String, row: RowConfiguration)] {
+        widgets.compactMap { widget in loadingConfiguration(widget.content).map { (widget.id, $0) } }
+    }
+
+    /// One row at a time, from the top, so a long layout fills in top to bottom and the first posters are not held up by rows far below.
+    /// A row that takes longer than `rowHeadStart` lets the next one start beside it (a slow addon does not hold up the rest), up to
+    /// `rowsLoadingAtOnce` at once.
     private func loadRows(generation current: Int) async {
         let content = services.widgetContent
         let seeds = itemSeeds
-        var rows: [(id: String, row: RowConfiguration)] = []
-        for section in sections {
-            if let row = loadingConfiguration(section.widget.content) { rows.append((section.id, row)) }
-        }
-        await withTaskGroup(of: RowResult.self) { group in
+        let rows = HomeViewModel.loadingRows(of: sections.map(\.widget))
+        guard !rows.isEmpty else { return }
+        let headStart = HomeViewModel.rowHeadStart
+        // nil is the head-start timer going off.
+        await withTaskGroup(of: RowResult?.self) { group in
             var next = 0
-            for (id, row) in rows.prefix(3) {
-                group.addTask { await HomeViewModel.fetch(id: id, row: row, from: content, seed: seeds[id]) }
+            var loading = 0
+            var timerRunning = false
+            func startNext() {
+                guard next < rows.count else { return }
+                let (id, row) = rows[next]
                 next += 1
+                loading += 1
+                group.addTask { await HomeViewModel.fetch(id: id, row: row, from: content, seed: seeds[id]) }
             }
+            func startTimer() {
+                guard next < rows.count, !timerRunning else { return }
+                timerRunning = true
+                group.addTask {
+                    try? await Task.sleep(for: headStart)
+                    return nil
+                }
+            }
+            startNext()
+            startTimer()
             for await result in group {
                 guard current == generation, !Task.isCancelled else { group.cancelAll(); return }
-                apply(result)
-                if next < rows.count {
-                    let (id, row) = rows[next]
-                    next += 1
-                    group.addTask { await HomeViewModel.fetch(id: id, row: row, from: content, seed: seeds[id]) }
+                if let result {
+                    apply(result)
+                    loading -= 1
+                    if loading == 0 { startNext() }
+                } else {
+                    timerRunning = false
+                    if loading < HomeViewModel.rowsLoadingAtOnce { startNext() }
                 }
+                startTimer()
+                // Every row has answered: the timer's wait is cut short, so Home settles at once.
+                if next == rows.count, loading == 0 { group.cancelAll() }
             }
         }
     }
 
-    /// The last items of every hero and row, looked up concurrently before any network load starts. Rows with nothing known are left out.
-    private func lastKnownItems(for widgets: [HomeWidget]) async -> [String: [MetaPreview]] {
+    /// The last items of `rows`, read one at a time in order. Rows with nothing known are left out.
+    private func lastKnownItems(for rows: [(id: String, row: RowConfiguration)]) async -> [String: [MetaPreview]] {
         let content = services.widgetContent
-        let seeds = itemSeeds
-        var rows: [(id: String, row: RowConfiguration)] = []
-        for widget in widgets {
-            if let row = loadingConfiguration(widget.content) { rows.append((widget.id, row)) }
+        var known: [String: [MetaPreview]] = [:]
+        for (id, row) in rows {
+            guard !Task.isCancelled else { break }
+            if let items = await HomeViewModel.knownItems(for: row, from: content, seed: itemSeeds[id]), !items.isEmpty { known[id] = items }
         }
-        return await withTaskGroup(of: (String, [MetaPreview]?).self, returning: [String: [MetaPreview]].self) { group in
-            for (id, row) in rows {
-                group.addTask { (id, await HomeViewModel.knownItems(for: row, from: content, seed: seeds[id])) }
-            }
-            var known: [String: [MetaPreview]] = [:]
-            for await (id, items) in group {
-                if let items, !items.isEmpty { known[id] = items }
-            }
-            return known
+        return known
+    }
+
+    /// Fills the rows still waiting for their first items with their last-known ones, one row at a time from the top, each as soon as it
+    /// is read. A row that already shows items keeps them.
+    private func showLastKnownItems(for rows: [(id: String, row: RowConfiguration)], generation current: Int) async {
+        let content = services.widgetContent
+        for (id, row) in rows {
+            guard current == generation, !Task.isCancelled else { return }
+            guard let items = await HomeViewModel.knownItems(for: row, from: content, seed: itemSeeds[id]), !items.isEmpty else { continue }
+            guard current == generation, !Task.isCancelled,
+                  let index = sections.firstIndex(where: { $0.id == id }), sections[index].state.isLoading else { continue }
+            sections[index].state = .loaded(items)
+            sections[index].isRefreshing = true
         }
     }
 

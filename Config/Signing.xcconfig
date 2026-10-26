@@ -1,0 +1,10 @@
+// Signing for builds from Xcode and xcodebuild. project.yml attaches this file to every configuration.
+//
+// No developer identity is tracked. Put yours in Config/Signing.xcconfig.local, next to this file (ignored by Git):
+//
+//     DEVELOPMENT_TEAM = <your Apple Developer Team ID>
+//
+// Unlike a team picked in Xcode's Signing & Capabilities editor, the local file survives regenerating the project
+// (xcodegen generate, scripts/enable-fallback.sh). Without it, signed device builds need DEVELOPMENT_TEAM on the
+// xcodebuild command line (scripts/install-iphone.sh passes BLUSION_DEVELOPMENT_TEAM that way when it is set).
+#include? "Signing.xcconfig.local"

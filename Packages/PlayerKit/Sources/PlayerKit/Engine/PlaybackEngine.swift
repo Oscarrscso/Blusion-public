@@ -180,6 +180,8 @@ public struct PlaybackState: Sendable, Equatable {
     public init() {}
 
     public var isPlaying: Bool { status == .playing }
+    /// Playing, or stalled waiting for data while meant to play: either way Pause is the transport's next step.
+    public var isPlayingOrBuffering: Bool { status == .playing || status == .buffering }
 
     public var failure: PlaybackFailure? {
         if case .failed(let failure) = status { return failure }

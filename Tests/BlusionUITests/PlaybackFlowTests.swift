@@ -150,50 +150,100 @@ final class PlaybackFlowTests: XCTestCase {
         showControls(app)
         XCTAssertEqual(video.value as? String, originalSurface, "control taps must not resize or recreate the picture")
         XCTAssertEqual(video.frame, originalFrame)
-        app.buttons["player.pictureMenu"].tap()
-        let segments = app.segmentedControls["player.panel.tabs"]
-        XCTAssertTrue(segments.waitForExistence(timeout: 5), "options must use a real UIKit segmented control")
-        XCTAssertEqual(segments.buttons.count, 5)
-        let segmentFrame = segments.frame
+        let bar = app.segmentedControls["player.menuBar"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "the menu bar must be a real UIKit segmented control")
+        let count = bar.buttons.count
+        XCTAssertGreaterThanOrEqual(count, 4, "Subtitles, Speed, Picture and Info at least")
+        XCTAssertFalse((0..<count).contains { bar.buttons.element(boundBy: $0).isSelected }, "no menu is open yet")
+        bar.buttons["Picture"].tap()
         let panel = app.otherElements["player.panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        XCTAssertTrue(bar.isHittable, "the bar stays while its menu is open")
+        let barFrame = bar.frame
         let panelFrame = panel.frame
+        XCTAssertLessThanOrEqual(panelFrame.maxY, barFrame.minY, "the menu stands on the bar")
+        XCTAssertEqual(panelFrame.minX, barFrame.minX, accuracy: 8, "the menu's left edge is the bar's")
         XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: -1, dy: -1).contains(panelFrame))
-        for index in [0, 1, 2, 3, 4, 0, 2] {
-            let segment = segments.buttons.element(boundBy: index)
+        for index in [0, count - 1, 1, 0, 2] {
+            let segment = bar.buttons.element(boundBy: index)
             segment.tap()
             XCTAssertTrue(segment.isSelected)
-            XCTAssertEqual(segments.frame, segmentFrame, "tab selection must not move the system control")
-            XCTAssertEqual(panel.frame, panelFrame, "short and long tabs must keep one panel viewport")
-            XCTAssertEqual(video.value as? String, originalSurface, "switching tabs must preserve renderer identity and video geometry")
-            captureScreenshot(app, named: "player-tab-\(index)-portrait")
+            XCTAssertEqual(bar.frame, barFrame, "choosing a menu must not move the bar")
+            XCTAssertEqual(panel.frame, panelFrame, "short and long menus must keep one panel viewport")
+            XCTAssertEqual(video.value as? String, originalSurface, "switching menus must preserve renderer identity and video geometry")
         }
-        captureScreenshot(app, named: "player-native-segments-portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        let rotated = NSPredicate { _, _ in segments.frame != segmentFrame && panel.frame != panelFrame }
-        wait(for: [XCTNSPredicateExpectation(predicate: rotated, object: segments)], timeout: 10)
-        XCTAssertEqual(segments.buttons.count, 5)
+        let rotated = NSPredicate { _, _ in bar.frame != barFrame && panel.frame != panelFrame }
+        wait(for: [XCTNSPredicateExpectation(predicate: rotated, object: bar)], timeout: 10)
+        XCTAssertEqual(bar.buttons.count, count)
         XCTAssertEqual((video.value as? String)?.split(separator: "|").first,
                        originalSurface?.split(separator: "|").first, "rotation must retain the renderer")
-        let landscapeFrame = segments.frame
-        captureScreenshot(app, named: "player-landscape-viewport")
+        let landscapeFrame = bar.frame
         let window = app.windows.firstMatch.frame
         XCTAssertEqual(video.frame.size, window.size, "controls must not expand the video beyond the display")
         XCTAssertTrue(window.insetBy(dx: -1, dy: -1).contains(panel.frame),
                       "landscape window \(window) must contain panel \(panel.frame)")
+        XCTAssertLessThanOrEqual(panel.frame.maxY, landscapeFrame.minY, "the menu stands on the bar in landscape too")
         XCTAssertTrue(window.insetBy(dx: -1, dy: -1).contains(landscapeFrame))
-        for index in [4, 3, 2, 1, 0] {
-            segments.buttons.element(boundBy: index).tap()
-            XCTAssertTrue(segments.buttons.element(boundBy: index).isSelected)
-            XCTAssertEqual(segments.frame, landscapeFrame)
-            XCTAssertTrue(segments.isHittable)
+        for index in (0..<count).reversed() {
+            bar.buttons.element(boundBy: index).tap()
+            XCTAssertTrue(bar.buttons.element(boundBy: index).isSelected)
+            XCTAssertEqual(bar.frame, landscapeFrame)
+            XCTAssertTrue(bar.isHittable)
         }
-        // Exercise UIKit's own tracking of a drag between segments.
-        segments.buttons.element(boundBy: 0).press(forDuration: 0.1, thenDragTo: segments.buttons.element(boundBy: 4))
-        XCTAssertTrue(segments.buttons.element(boundBy: 4).isSelected)
-        captureScreenshot(app, named: "player-native-segments-landscape")
+        // Exercise UIKit's own tracking of a drag along the bar.
+        bar.buttons.element(boundBy: 0).press(forDuration: 0.1, thenDragTo: bar.buttons.element(boundBy: count - 1))
+        XCTAssertTrue(bar.buttons.element(boundBy: count - 1).isSelected)
+        // Tapping the open menu's segment closes it, and so does the menu's close button.
+        bar.buttons.element(boundBy: count - 1).tap()
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: panel)], timeout: 5)
+        XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 5))
+        bar.buttons["Picture"].tap()
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
         app.buttons["player.panel.close"].tap()
         XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testPinchesAndSwipesLeaveControlsHiddenUntilATap() throws {
+        let app = launchAndOpenStreams()
+        let row = app.buttons["stream.row.Mock MP4"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        waitForTime(app, atLeast: 0.5)
+        pausePlayback(app)
+        let preparing = app.descendants(matching: .any)["player.preparing"].firstMatch
+        wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: preparing)], timeout: 30)
+        let tap = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        tap.tap()
+
+        func assertControlsHidden() {
+            // Allow the fade and any release tap to finish before checking both controls.
+            Thread.sleep(forTimeInterval: 0.4)
+            let button = app.buttons["player.playPause"]
+            let scrubber = app.sliders["player.scrubber"]
+            XCTAssertTrue(!button.exists || !button.isEnabled)
+            XCTAssertTrue(!scrubber.exists || !scrubber.isEnabled)
+        }
+
+        assertControlsHidden()
+        let screen = app.otherElements["player.screen"]
+        screen.pinch(withScale: 1.5, velocity: 1)
+        assertControlsHidden()
+        screen.pinch(withScale: 0.6, velocity: -1)
+        assertControlsHidden()
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.4))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.4))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        assertControlsHidden()
+        end.press(forDuration: 0.05, thenDragTo: start)
+        assertControlsHidden()
+        let side = app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.6))
+        side.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.4)))
+        assertControlsHidden()
+        showControls(app)
+        XCTAssertTrue(app.sliders["player.scrubber"].isHittable)
     }
 
     @MainActor
@@ -217,7 +267,7 @@ final class PlaybackFlowTests: XCTestCase {
         pausePlayback(app)   // place the playhead precisely while paused
 
         showControls(app)
-        app.buttons["player.subtitlesMenu"].tap()
+        app.segmentedControls["player.menuBar"].buttons["Subtitles"].tap()
         let english = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@",
                                                        "player.subtitle.external.", "English · Mock Streams")).firstMatch
         XCTAssertTrue(english.waitForExistence(timeout: 20))

@@ -85,7 +85,7 @@ public final class MockEngine: PlaybackEngine {
     public func pause() {
         pauseCalls += 1
         wantsPlay = false
-        if state.status == .playing { update { $0.status = .paused } }
+        if state.status == .playing || state.status == .buffering { update { $0.status = .paused } }
     }
 
     public func seek(to position: TimeInterval) async {

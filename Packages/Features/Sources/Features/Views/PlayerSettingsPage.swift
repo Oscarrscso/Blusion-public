@@ -34,8 +34,6 @@ struct PlayerSettingsPage: View {
                     .accessibilityIdentifier("settings.player.sdh")
             } header: {
                 Text("Subtitles")
-            } footer: {
-                Text("Forced only shows the subtitles that translate signs and foreign-language lines. SDH subtitles also describe sounds.")
             }
 
             Section("Subtitle style") {
@@ -85,23 +83,12 @@ struct PlayerSettingsPage: View {
                 Picker("Deinterlacing", selection: binding(\.processing.deinterlace)) {
                     ForEach(DeinterlaceMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                Picker("Upscaling", selection: binding(\.processing.upscaling)) {
-                    ForEach(UpscalingMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .accessibilityIdentifier("settings.player.upscaling")
                 Toggle("Ambient mode", isOn: binding(\.ambientMode))
             } header: {
                 Text("Picture")
-            } footer: {
-                Text("""
-                    Dolby Vision off plays the HDR10 picture underneath instead, for a release whose Dolby Vision looks wrong; it applies \
-                    to MKV files (AetherEngine and the advanced player), and profile 5 always keeps its Dolby Vision. Fit keeps the full \
-                    original picture; Fill crops centrally without stretching. Tone mapping, HDR and deinterlacing apply in the advanced player; the \
-                    system handles them for MP4 and HLS. AI super \
-                    resolution uses this device's machine-learning video scaler for SDR video below the screen's resolution, where the chip \
-                    supports it, and a sharp conventional scaler otherwise.
-                    """)
             }
+
+            upscalingSection
 
             Section("Controls") {
                 Toggle("Skip Intro and Credits buttons", isOn: binding(\.showsSkipButtons))
@@ -128,14 +115,55 @@ struct PlayerSettingsPage: View {
                 if let message = model.lastMessage { Text(message).font(.footnote).foregroundStyle(.secondary) }
             } header: {
                 Text("OpenSubtitles")
-            } footer: {
-                Text("""
-                    Search and download subtitles from OpenSubtitles.com in the player. Create a free API consumer at \
-                    opensubtitles.com/consumers for the key; signing in raises the daily download limit. Kept in the Keychain.
-                    """)
             }
         }
         .settingsPage("Player")
+    }
+
+    /// The upscaling choice, what it does, whether this device can run AI upscaling, and what it did on the last video played with it.
+    private var upscalingSection: some View {
+        Section {
+            Picker("Upscaling", selection: binding(\.processing.upscaling)) {
+                ForEach(UpscalingMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .accessibilityIdentifier("settings.player.upscaling")
+            if player.processing.upscaling == .ai {
+                LabeledContent(Self.deviceName) {
+                    Text(SuperResolutionRenderer.isSupportedOnThisDevice ? "AI scaler available" : "No AI scaler")
+                        .foregroundStyle(SuperResolutionRenderer.isSupportedOnThisDevice ? Color.secondary : Color.orange)
+                }
+                .accessibilityIdentifier("settings.player.upscaling.device")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Last video")
+                        Spacer()
+                        if lastReportDate > 0 {
+                            Text(Date(timeIntervalSince1970: lastReportDate), format: .relative(presentation: .named))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(lastReport.isEmpty ? "Nothing played with AI upscaling yet." : lastReport)
+                        .font(.footnote)
+                        .foregroundStyle(lastReport.hasPrefix("Ran") ? Color.green : Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.player.upscaling.last")
+            }
+        } header: {
+            Text("Upscaling")
+        }
+    }
+
+    @AppStorage(UpscalingReport.summaryKey) private var lastReport = ""
+    @AppStorage(UpscalingReport.dateKey) private var lastReportDate: Double = 0
+
+    private static var deviceName: String {
+        #if targetEnvironment(macCatalyst)
+        "This Mac"
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad ? "This iPad" : "This iPhone"
+        #endif
     }
 }
 #endif

@@ -29,6 +29,8 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var matchesEpisodeWidthToText: Bool
     /// What Auto Pick waits for before it chooses: every addon by default (see `AutoPickWait`).
     public var autoPickWait: AutoPickWait
+    /// Whether Auto Pick goes for Usenet streams, debrid streams, or lets quality decide (see `StreamSourcePreference`).
+    public var autoPickSource: StreamSourcePreference
     /// Subtitle, audio, picture and gesture preferences for the built-in player.
     public var player: PlayerPreferences
     /// OpenSubtitles.com: an API key from the user's own (free) developer account, and optionally their login, which raises the
@@ -41,7 +43,7 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
                 traktClientID: String? = nil, playerPreference: PlayerPreference = .infuseWhenNeeded, showsPosterRatings: Bool = true,
                 autoPlayBestStream: Bool = false, omdbAPIKey: String? = nil, tmdbReadToken: String? = nil,
                 continueWatchingRefreshSeconds: Int? = 300, showsColouredRatingLogos: Bool = false, matchesEpisodeWidthToText: Bool = false,
-                autoPickWait: AutoPickWait = .allAddons, player: PlayerPreferences = PlayerPreferences(),
+                autoPickWait: AutoPickWait = .allAddons, autoPickSource: StreamSourcePreference = .balanced, player: PlayerPreferences = PlayerPreferences(),
                 openSubtitlesAPIKey: String? = nil, openSubtitlesUsername: String? = nil, openSubtitlesPassword: String? = nil) {
         self.player = player
         self.openSubtitlesAPIKey = openSubtitlesAPIKey
@@ -49,6 +51,7 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
         self.openSubtitlesPassword = openSubtitlesPassword
         self.matchesEpisodeWidthToText = matchesEpisodeWidthToText
         self.autoPickWait = autoPickWait
+        self.autoPickSource = autoPickSource
         self.preferredResolution = preferredResolution
         self.subtitleLanguage = subtitleLanguage
         self.streamingServerURL = streamingServerURL

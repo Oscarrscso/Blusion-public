@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Persistence
 import PlayerKit
 import StremioKit
 
@@ -42,6 +43,10 @@ public final class StreamPickerViewModel {
     public private(set) var bestToPlay: RankedStream?
 
     private let services: AppServices
+    /// The previous viewing session's store. The app's file store unless one is handed over (tests, previews).
+    private let snapshotStore: any PlaybackSnapshotStore
+    /// Set by `loadSessionResume`: the session the player last left open for this request, to walk back into.
+    public private(set) var resumeSnapshot: PlaybackSnapshot?
     private var sniffTasks: [Task<Void, Never>] = []
     private var loadingTask: Task<Void, Never>?
     private var loadGeneration = 0
@@ -59,9 +64,10 @@ public final class StreamPickerViewModel {
     /// count as the file's extension.
     private static let videoExtensions: Set<String> = ["mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "flv", "mpg", "mpeg"]
 
-    public init(request: StreamRequest, services: AppServices) {
+    public init(request: StreamRequest, services: AppServices, snapshotStore: (any PlaybackSnapshotStore)? = nil) {
         self.request = request
         self.services = services
+        self.snapshotStore = snapshotStore ?? PlaybackSession.store
         self.listing = StreamListing(asking: [])
     }
 
@@ -233,6 +239,59 @@ public final class StreamPickerViewModel {
         sniffTasks.forEach { $0.cancel() }
     }
 
+    // MARK: the previous session
+
+    /// Reads the previous viewing session for this request, to walk back into: after the app was left or killed (a backgrounding keeps
+    /// the live session alive instead). A session watched through is set aside at once, so it never comes back.
+    public func loadSessionResume() async {
+        guard let snapshot = await snapshotStore.load(), snapshot.request.identity == request.identity else { return }
+        if snapshot.isEffectivelyFinished() {
+            await snapshotStore.clear()
+            return
+        }
+        resumeSnapshot = snapshot
+    }
+
+    /// The stream among the answered ones that continues the previous session: the same file again, from the same addon where it still
+    /// answers. nil when none does (its addon is gone or the file is not on offer), when this request is not the session's, or when
+    /// the stream cannot be started again.
+    public func matchedResumeStream() -> RankedStream? {
+        guard let snapshot = resumeSnapshot else { return nil }
+        let candidates = listing.items.filter { $0.route.isWatchable && StreamAvailability.canStartAutomatically($0) }
+        return snapshot.match(in: candidates)
+    }
+
+    /// What the start made when the streams open begins with: the previous session's own stream, and someone else's stream never.
+    /// Without a session to resume, the best stream, as always.
+    public var automaticStartCandidate: RankedStream? {
+        resumeSnapshot != nil ? matchedResumeStream() : bestToPlay
+    }
+
+    /// The saved session to hand to the player when it opens `item`, if `item` is the session's stream.
+    public func resumeHandoff(for item: RankedStream) -> PlaybackSnapshot? {
+        guard resumeSnapshot != nil, item.id == matchedResumeStream()?.id else { return nil }
+        return resumeSnapshot
+    }
+
+    /// Saves the session the viewer was handed over into by starting `item`, so leaving or killing the app lands back in it. Progress
+    /// goes on its own store as it always has; this is only for walking back into the same stream. A stream handed to another player
+    /// has no session to come back to.
+    public func saveResumeSnapshot(for item: RankedStream) async {
+        guard item.route.isPlayable else { return }
+        let saved = await services.progress.progress(for: request.identity)
+        let state = PlaybackSaveState(position: ProgressRecorder.resumePosition(for: saved), duration: saved?.duration, isPaused: false,
+                                      layout: settings.player.videoLayout, processing: settings.player.processing)
+        guard let snapshot = PlaybackSnapshot(ranked: item, request: request, state: state) else { return }
+        try? await snapshotStore.save(snapshot)
+    }
+
+    /// Sets a session aside: the player's explicit close reports it here until the live player's own loop calls
+    /// `PlaybackSession.clear()`. Also used by tests.
+    public func clearSessionResume() async {
+        resumeSnapshot = nil
+        await snapshotStore.clear()
+    }
+
     /// What happens when the user taps a stream.
     public func choose(_ item: RankedStream) async -> Choice? {
         switch item.route {
@@ -291,13 +350,29 @@ public final class StreamPickerViewModel {
     public var recommendedStreamLabel: String? {
         guard !isLoading, let pick = bestAssessment else { return nil }
         let sharpness = pick.item.quality.resolutionLabel ?? "stream"
-        return "\(sharpness) · \(pick.isRemux ? "REMUX" : pick.item.quality.source?.rawValue ?? "release")"
+        let kind = "\(sharpness) · \(pick.isRemux ? "REMUX" : pick.item.quality.source?.rawValue ?? "release")"
+        guard let delivery = StreamDelivery.detect(in: pick.item.stream) else { return kind }
+        return "\(kind) · \(delivery.title)"
     }
+
+    /// What Auto Pick goes for, from Settings, said under its button: "Auto Pick prefers Usenet streams".
+    public var autoPickSourceNote: String {
+        switch settings.autoPickSource {
+        case .usenet, .debrid: "Auto Pick prefers \(settings.autoPickSource.title) streams"
+        case .balanced: "Auto Pick balances Usenet and Debrid by quality"
+        }
+    }
+
+    /// The saved Auto Pick source, for the picker's note.
+    public var autoPickSource: StreamSourcePreference { settings.autoPickSource }
 
     /// Auto Pick and the recommendation use the same set of routes as ordinary Play.
     /// Respect an explicit resolution preference and avoid mixing lower-ranked route classes.
     private var automaticCandidates: [RankedStream] {
-        let watchable = StreamAvailability.automaticCandidates(from: listing.items.filter { $0.route.isWatchable })
+        // The Usenet, Debrid or Balanced choice narrows the streams first, so quality and resolution then decide within that kind.
+        // Streams marked as still downloading are left out before the choice, so it never picks a kind only they offer.
+        let startable = listing.items.filter { $0.route.isWatchable && StreamAvailability.canStartAutomatically($0) }
+        let watchable = StreamAvailability.automaticCandidates(from: settings.autoPickSource.candidates(from: startable))
         if settings.rankingPreferences.preferredResolution != nil { return Array(watchable.prefix(1)) }
         guard let first = watchable.first else { return [] }
         return watchable.filter { $0.route.sortClass == first.route.sortClass }

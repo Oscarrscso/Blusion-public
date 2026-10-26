@@ -1,3 +1,6 @@
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 import Foundation
 import StremioKit
 
@@ -10,6 +13,8 @@ public protocol VideoSurfaceProviding: AnyObject {
 
 public enum FallbackEvent: Sendable, Equatable {
     case loaded(duration: TimeInterval?, audio: [MediaTrack], subtitles: [MediaTrack], selectedAudio: String?, selectedSubtitle: String?)
+    /// The length became known (or changed) after `loaded`. A player can learn it a moment after the load finishes.
+    case duration(TimeInterval)
     /// The video output has presented its first frame for this load.
     case videoFrameReady
     case position(TimeInterval)
@@ -53,6 +58,10 @@ public protocol FallbackBackend: AnyObject {
     func apply(processing: VideoProcessing)
     func apply(subtitleStyle: SubtitleStyle)
     func statistics() -> PlaybackStatistics
+    /// The first start of each load waits for this much in hand (`StartCushion`), measured by `bufferedAhead`. nil starts at once.
+    var startCushion: StartCushion? { get }
+    /// Seconds buffered ahead of the playhead, for the start cushion; nil when the backend cannot say, and then the start does not wait.
+    var bufferedAhead: TimeInterval? { get }
 }
 
 public extension FallbackBackend {
@@ -65,6 +74,8 @@ public extension FallbackBackend {
     func apply(processing: VideoProcessing) {}
     func apply(subtitleStyle: SubtitleStyle) {}
     func statistics() -> PlaybackStatistics { PlaybackStatistics(engine: "Fallback") }
+    var startCushion: StartCushion? { nil }
+    var bufferedAhead: TimeInterval? { nil }
 }
 
 /// `PlaybackEngine` for MKV, AVI, DTS and everything else AVPlayer cannot open (PLAN §4, M6).
@@ -82,6 +93,15 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     private var hasPlayed = false
     private var isStopped = false
     private var failure: PlaybackFailure?
+    /// The first start of a load (`FallbackBackend.startCushion`): not decided yet, waiting for data in hand, or let through.
+    private enum StartGate { case closed, holding, open }
+    private var startGate = StartGate.open
+    private var startHold: Task<Void, Never>?
+    /// Play was asked for and pause has not been since: what the start does once it is let through.
+    private var wantsPlay = false
+    /// The first frame came while the start was held. It is shown when playback starts, so the startup spinner covers the wait.
+    private var heldFirstFrame = false
+    private var loadBegan = ContinuousClock.now
 
     public init(backend: any FallbackBackend) {
         self.backend = backend
@@ -107,6 +127,12 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         hasEnded = false
         hasPlayed = false
         failure = nil
+        startHold?.cancel()
+        startHold = nil
+        startGate = backend.startCushion == nil ? .open : .closed
+        wantsPlay = false
+        heldFirstFrame = false
+        loadBegan = .now
         var fresh = PlaybackState()
         fresh.status = .loading
         publish(fresh)
@@ -114,6 +140,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     }
 
     public func play() {
+        wantsPlay = true
         if hasEnded {
             hasEnded = false
             Task {
@@ -122,11 +149,17 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
             }
             return
         }
-        backend.setPaused(false)
+        switch startGate {
+        case .open: backend.setPaused(false)
+        case .holding: update { _ in }
+        case .closed: if isLoaded { beginStart() }   // otherwise decided once it has loaded
+        }
     }
 
     public func pause() {
+        wantsPlay = false
         backend.setPaused(true)
+        if startGate == .holding { update { _ in } }
     }
 
     public func seek(to position: TimeInterval) async {
@@ -175,6 +208,8 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     public func stop() {
         isStopped = true
+        startHold?.cancel()
+        startHold = nil
         eventTask?.cancel()
         eventTask = nil
         backend.shutdown()
@@ -195,8 +230,11 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
                 $0.selectedAudioTrackID = selectedAudio
                 $0.selectedEmbeddedSubtitleID = selectedSubtitle
             }
+            if startGate == .closed, wantsPlay { beginStart() }
+        case .duration(let duration):
+            if isLoaded, duration.isFinite, duration > 0 { update { $0.duration = duration } }
         case .videoFrameReady:
-            update { $0.hasVideoFrame = true }
+            if startGate == .holding { heldFirstFrame = true } else { update { $0.hasVideoFrame = true } }
         case .position(let position):
             update { $0.position = max(0, position) }
         case .buffered(let until):
@@ -222,11 +260,52 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         update { _ in }   // re-derive status
     }
 
+    // MARK: Start cushion
+
+    /// Decides the first start of the load: at once, or once the backend holds its `startCushion` (or the wait for it runs out).
+    private func beginStart() {
+        guard startGate == .closed, let cushion = backend.startCushion else { return openStart() }
+        let loadTook = Self.seconds(loadBegan.duration(to: .now))
+        let wait = cushion.wait(ahead: backend.bufferedAhead, loadTook: loadTook)
+        guard wait > 0 else { return openStart() }
+        startGate = .holding
+        update { _ in }
+        let startAhead = backend.bufferedAhead ?? 0
+        startHold = Task { [weak self] in
+            let began = ContinuousClock.now
+            let deadline = began + .seconds(wait)
+            while ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self, !Task.isCancelled, self.failure == nil else { return }
+                let waited = Self.seconds(began.duration(to: .now))
+                if cushion.isMet(ahead: self.backend.bufferedAhead, startAhead: startAhead, waited: waited) { break }
+            }
+            guard let self, !Task.isCancelled, self.failure == nil else { return }
+            self.openStart()
+        }
+    }
+
+    /// Lets the first start through: playback starts if it is still wanted, and a first frame held back is shown.
+    private func openStart() {
+        startHold = nil
+        startGate = .open
+        if wantsPlay { backend.setPaused(false) }
+        let frame = heldFirstFrame
+        heldFirstFrame = false
+        update { if frame { $0.hasVideoFrame = true } }
+    }
+
+    private static func seconds(_ duration: Duration) -> TimeInterval {
+        let parts = duration.components
+        return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
+    }
+
     /// Derives our status from the backend's flags.
     private func deriveStatus() -> PlaybackState.Status {
         if let failure { return .failed(failure) }
         if hasEnded { return .ended }
         if !isLoaded { return .loading }
+        if startGate == .holding { return wantsPlay ? .buffering : .ready }
         if isPaused { return hasPlayed ? .paused : .ready }
         hasPlayed = true
         return isBuffering ? .buffering : .playing
@@ -245,3 +324,17 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         broadcaster.yield(next)
     }
 }
+
+#if canImport(AVFoundation)
+/// The backend's AVPlayer, when its picture plays through one (AetherEngine's usual path; mpv draws its own).
+extension FallbackEngine: AVPlayerFrameSource {
+    public var framePlayer: AVPlayer? { (backend as? AVPlayerFrameSource)?.framePlayer }
+}
+
+/// The backend's room for a layer over its picture (AetherEngine); mpv has none and ignores it.
+extension FallbackEngine: PictureOverlayHosting {
+    public func hostPictureOverlay(_ layer: CALayer?) { (backend as? PictureOverlayHosting)?.hostPictureOverlay(layer) }
+    public var pictureGravity: AVLayerVideoGravity { (backend as? PictureOverlayHosting)?.pictureGravity ?? .resizeAspect }
+    public var pictureIsHDR: Bool { (backend as? PictureOverlayHosting)?.pictureIsHDR ?? false }
+}
+#endif

@@ -100,8 +100,15 @@ struct LayoutMetrics: Equatable, Sendable {
 
     func gridColumns(for aspect: CardAspect, inLandscape: Bool = false) -> [GridItem] {
         if inLandscape && aspect == .poster {
-            return [GridItem(.adaptive(minimum: landscapePosterWidth, maximum: landscapePosterWidth * 1.25),
-                             spacing: cardSpacing, alignment: .top)]
+            // On a phone or iPad turned sideways the columns share the whole width: a capped column stopped short of it and left a
+            // wider gap on the right than the page margin on the left (Library, Discover, See All). The Mac keeps its cap; its Discover
+            // fills through `GridFill` instead.
+            #if targetEnvironment(macCatalyst)
+            let maximum = landscapePosterWidth * 1.25
+            #else
+            let maximum = CGFloat.infinity
+            #endif
+            return [GridItem(.adaptive(minimum: landscapePosterWidth, maximum: maximum), spacing: cardSpacing, alignment: .top)]
         }
         return switch aspect {
         case .poster: posterGridColumns

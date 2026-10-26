@@ -120,6 +120,55 @@ import StremioKitTestSupport
         #expect(saved?.position == 64 && saved?.duration == 200 && saved?.title == "Movie")
     }
 
+    // MARK: readied before the screen shows
+
+    @Test func aPreparedPlayerHoldsMutedAndPausedThenPlaysWhenItsScreenStarts() async throws {
+        let engines = Engines(["a": .plays(duration: 120)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        #expect(!model.hasStartedPlayback)
+        await model.prepare()
+        let engine = try #require(engines.made["a"])
+        #expect(model.isPrepared && model.hasStartedPlayback)
+        #expect(engine.mutes.first == true, "muted before it made a sound")
+        #expect(engine.state.status == .paused, "held on its first frame")
+        await model.start()
+        #expect(engine.state.status == .playing && engine.mutes.last == false)
+        #expect(engines.made.count == 1, "the screen does not start it again")
+        await model.close()
+    }
+
+    @Test func aPreparedPlayerNobodyWatchesSavesNoProgress() async throws {
+        let store = InMemoryProgressStore()
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(progress: store, engines: engines))
+        await model.prepare()
+        engines.made["a"]?.simulate(position: 64)
+        try await waitUntil { model.position == 64 }
+        await model.close()
+        #expect(await store.progress(for: request.identity) == nil)
+    }
+
+    @Test func aPreparedPlayerSavesProgressOnceItsScreenStarts() async throws {
+        let store = InMemoryProgressStore()
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(progress: store, engines: engines))
+        await model.prepare()
+        await model.start()
+        engines.made["a"]?.simulate(position: 64)
+        try await waitUntil { model.position == 64 }
+        await model.close()
+        #expect(await store.progress(for: request.identity)?.position == 64)
+    }
+
+    @Test func closingBeforeAPreparedPlayerHasLoadedMakesNoEngine() async throws {
+        let engines = Engines(["a": .plays(duration: 120)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        let preparing = Task { await model.prepare() }
+        await model.close()
+        await preparing.value
+        #expect(engines.made.isEmpty, "closed while it read its settings, so it made no player")
+    }
+
     @Test func failureMessagesExplainWhenNothingPlays() async throws {
         let engines = Engines(["a": .failsToLoad(PlaybackFailure(.network, "Connection refused"))])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
@@ -274,6 +323,65 @@ import StremioKitTestSupport
         await model.close()
     }
 
+    /// A stall is still playing to the viewer: the controls go away on their own so the spinner stands alone, the play button offers
+    /// Pause, and pressing it pauses.
+    @Test func duringAStallTheControlsHideAndThePlayButtonPauses() async throws {
+        let clock = ClockBox2(Date(timeIntervalSince1970: 1000))
+        let engines = Engines(["a": .plays(duration: 100)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
+            services: try await services(engines: engines), now: { clock.now })
+        await model.start()
+        engines.made["a"]?.simulateBuffering()
+        try await waitUntil { model.isStalled }
+        #expect(model.wantsPlayback && model.controlsVisible && !model.showsBufferingIndicator)
+        clock.now = clock.now.addingTimeInterval(3.1)
+        model.hideControlsIfIdle()
+        #expect(!model.controlsVisible && model.showsBufferingIndicator)
+        model.togglePlayPause()
+        try await waitUntil { model.state.status == .paused }
+        #expect(!model.wantsPlayback && !model.isStalled && model.controlsVisible)
+        await model.close()
+    }
+
+    @Test func pictureGesturesKeepControlsHiddenUntilTapped() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        engines.made["a"]?.simulate(position: 40)
+        try await waitUntil { model.position == 40 }
+        model.toggleControls()
+        #expect(!model.controlsVisible)
+
+        model.beginScrub()
+        #expect(!model.controlsVisible)
+        model.updateScrub(fraction: 0.5)
+        #expect(!model.controlsVisible && model.position == 100)
+        await model.endScrub()
+        #expect(!model.controlsVisible && engines.made["a"]?.seeks == [100])
+
+        model.zoomPicture(in: true, barsCrop: nil)
+        #expect(!model.controlsVisible && model.pictureZoom == .fill)
+        // The film's bars can be measured after the pinch has ended.
+        model.setPictureZoom(.noBars, barsCrop: .ratio240)
+        #expect(!model.controlsVisible && model.pictureZoom == .noBars)
+        model.zoomPicture(in: false, barsCrop: .ratio240)
+        #expect(!model.controlsVisible && model.pictureZoom == .fill)
+        model.zoomPicture(in: false, barsCrop: nil)
+        #expect(!model.controlsVisible && model.pictureZoom == .original)
+
+        model.beginScrub()
+        model.updateScrub(fraction: 0.75)
+        model.cancelScrub()
+        #expect(!model.controlsVisible && engines.made["a"]?.seeks == [100])
+        model.toggleControls()
+        #expect(model.controlsVisible, "an explicit tap still reveals controls")
+        model.beginScrub()
+        model.updateScrub(fraction: 0.6)
+        #expect(model.controlsVisible, "the visible timeline keeps working")
+        model.cancelScrub()
+        await model.close()
+    }
+
     @Test func scrubbingSeeksOnReleaseToTheRightPosition() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
@@ -293,6 +401,82 @@ import StremioKitTestSupport
         #expect(!model.isScrubbing)
         await model.endScrub()   // a second release is a no-op
         #expect(engines.made["a"]?.seeks == [100])
+        await model.close()
+    }
+
+    @Test func cancellingAScrubSeeksNowhereAndTheTimelineFollowsTheFilmAgain() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        engines.made["a"]?.simulate(position: 40)
+        try await waitUntil { model.position == 40 }
+        model.beginScrub()
+        model.updateScrub(fraction: 0.75)
+        #expect(model.isScrubbing && model.position == 150)
+        model.cancelScrub()   // a sideways swipe that turned out to be a pinch
+        #expect(!model.isScrubbing && model.position == 40 && model.fraction == 0.2)
+        #expect(engines.made["a"]?.seeks.isEmpty == true, "a cancelled scrub does not seek")
+        await model.endScrub()   // a release after the cancel is a no-op
+        #expect(engines.made["a"]?.seeks.isEmpty == true)
+        await model.close()
+    }
+
+    /// AetherEngine left films without a length, and letting go of the timeline then sent the film back to its start.
+    @Test func aScrubWithNoLengthKnownSeeksNowhere() async throws {
+        let engines = Engines(["a": .plays(duration: 0)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        engines.made["a"]?.simulate(position: 40)
+        try await waitUntil { model.position == 40 }
+        model.beginScrub()
+        model.updateScrub(fraction: 0.5)
+        await model.endScrub()
+        #expect(engines.made["a"]?.seeks.isEmpty == true, "no length, no time to seek to: never back to the start")
+        #expect(!model.isScrubbing && model.position == 40)
+        await model.close()
+    }
+
+    /// Holding the picture plays at double speed; letting go returns to the speed before. A paused film is not started.
+    @Test func holdingPlaysAtDoubleSpeedUntilLetGo() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        model.holdDoubleSpeed(true)
+        #expect(model.heldRate == 1.25)
+        model.holdDoubleSpeed(true)   // a second report while held changes nothing
+        model.holdDoubleSpeed(false)
+        #expect(model.heldRate == nil)
+        #expect(engines.made["a"]?.rates.suffix(3) == [1.25, 2, 1.25])
+        model.togglePlayPause()
+        try await waitUntil { !model.isPlaying }
+        model.holdDoubleSpeed(true)
+        #expect(model.heldRate == nil, "a paused film is not sped up")
+        await model.close()
+    }
+
+    /// The pinch's steps: Original → Fill → No Bars (only for a film with bars of its own), and back.
+    @Test func pinchingStepsThroughOriginalFillAndNoBars() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        model.setPictureZoom(.original, barsCrop: nil)
+        #expect(model.pictureZoom == .original)
+        model.zoomPicture(in: true, barsCrop: nil)
+        #expect(model.pictureZoom == .fill && model.videoLayout.crop == .off)
+        model.zoomPicture(in: true, barsCrop: nil)
+        #expect(model.pictureZoom == .fill, "no bars of its own: Fill is the last step")
+        model.zoomPicture(in: true, barsCrop: .ratio240)
+        #expect(model.pictureZoom == .noBars && model.videoLayout.crop == .ratio240 && model.videoLayout.fit == .fill)
+        model.zoomPicture(in: true, barsCrop: .ratio240)
+        #expect(model.pictureZoom == .noBars)
+        model.zoomPicture(in: false, barsCrop: .ratio240)
+        #expect(model.pictureZoom == .fill && model.videoLayout.crop == .off)
+        model.zoomPicture(in: false, barsCrop: .ratio240)
+        #expect(model.pictureZoom == .original)
+        model.zoomPicture(in: false, barsCrop: .ratio240)
+        #expect(model.pictureZoom == .original)
         await model.close()
     }
 

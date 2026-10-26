@@ -15,6 +15,8 @@ struct SettingsView: View {
     let fallbackEngineLinked: Bool
     let aetherEngineLinked: Bool
     @Environment(AppRouter.self) private var router
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     /// The id of the first section, which the list's scroll goes back to when the Settings tab's item is tapped.
     private static let topID = "settings.top"
     /// Ghost mode, kept between launches (see `GhostMode`). Pulling the page down and holding it for two seconds switches it.
@@ -41,12 +43,7 @@ struct SettingsView: View {
                     Section {
                         HStack(spacing: Theme.Spacing.m) {
                             Text("👻").font(.title2).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Ghost mode is on").font(.subheadline.weight(.semibold))
-                                Text("Nothing you watch is saved to Continue Watching or sent to Trakt.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Ghost mode is on").font(.subheadline.weight(.semibold))
                             Spacer(minLength: 0)
                             Button("Turn Off") { setGhost(false) }
                                 .buttonStyle(.glassCapsule)
@@ -127,7 +124,7 @@ struct SettingsView: View {
                         SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
                     }
                     .accessibilityIdentifier("settings.section.imageCache")
-                    NavigationLink { DataSettingsPage(model: model, services: services) } label: {
+                    NavigationLink { DataSettingsPage(model: model) } label: {
                         SettingsRow(title: "Clear data", summary: "History, library, settings", systemImage: "trash")
                     }
                     .accessibilityIdentifier("settings.section.data")
@@ -142,8 +139,10 @@ struct SettingsView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .readableColumn()
+            .trackLandscapeTabScroll()
             .screenBackground()
             .navigationTitle("Settings")
+            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await model.load()
@@ -179,6 +178,8 @@ struct SettingsView: View {
             }
         }
     }
+
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     private func setGhost(_ isOn: Bool) {
         Haptics.tap()
@@ -216,7 +217,7 @@ struct SettingsView: View {
 
     private var playbackSummary: String {
         let quality = SettingsViewModel.resolutionOptions.first { $0.value == model.settings.preferredResolution }?.label ?? "Best available"
-        return "\(model.settings.playerPreference.title) · \(quality)"
+        return "\(model.settings.playerPreference.title) · \(quality) · \(model.settings.autoPickSource.title)"
     }
 
     private var appearanceSummary: String {
@@ -301,6 +302,18 @@ private struct PlaybackSettingsPage: View {
                     Task { await model.setAutoPlayBestStream(value) }
                 }))
                 .accessibilityIdentifier("settings.autoPlay")
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Auto Pick source")
+                    Picker("Auto Pick source", selection: Binding(get: { model.settings.autoPickSource }, set: { value in
+                        Haptics.selection()
+                        Task { await model.setAutoPickSource(value) }
+                    })) {
+                        ForEach(StreamSourcePreference.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityIdentifier("settings.autoPickSource")
+                }
                 Picker("Preferred quality",
                        selection: Binding(get: { model.settings.preferredResolution },
                                           set: { value in Haptics.selection(); Task { await model.setPreferredResolution(value) } })) {
@@ -314,11 +327,6 @@ private struct PlaybackSettingsPage: View {
                     ForEach(SettingsViewModel.languageOptions) { Text($0.label).tag($0.value) }
                 }
                 .accessibilityIdentifier("settings.subtitleLanguage")
-            } footer: {
-                Text("""
-                    If no stream matches your quality preference, the best available is used. Infuse plays formats Blusion can’t, such as \
-                    MKV and DTS, and returns your progress when you come back.
-                    """)
             }
         }
         .settingsPage("Playback")
@@ -371,11 +379,6 @@ private struct LazyLoadSettingsPage: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("""
-                    How many posters stay loaded off screen above and below what you see in a long list: 12 on Near, 24 on Balanced, 48 on \
-                    Far. Posters further away are unloaded. Further uses more data and memory.
-                    """)
             }
         }
         .settingsPage("Lazy load")
@@ -405,11 +408,6 @@ private struct ReviewServicesPage: View {
                 if let url = URL(string: "https://www.omdbapi.com/apikey.aspx") { Link("Get an OMDb key", destination: url) }
             } header: {
                 Text("OMDb")
-            } footer: {
-                Text("""
-                    A key adds the IMDb score of each episode, one request per season. The free key allows 1,000 requests a day, counted on \
-                    this device and reset at midnight UTC.
-                    """)
             }
             Section {
                 SecureField("TMDB Read Access Token", text: $model.tmdbReadTokenText)
@@ -418,8 +416,6 @@ private struct ReviewServicesPage: View {
                 if let url = URL(string: "https://www.themoviedb.org/settings/api") { Link("TMDB API settings", destination: url) }
             } header: {
                 Text("TMDB")
-            } footer: {
-                Text("TMDB provides reviews, cast and artwork. It uses a Read Access Token.")
             }
             Section {
                 Button("Save Review Services") { Task { await model.commitReviewCredentials() } }
@@ -432,11 +428,6 @@ private struct ReviewServicesPage: View {
                         .foregroundStyle(.orange)
                         .accessibilityIdentifier("settings.reviews.error")
                 }
-            } footer: {
-                Text("""
-                    Title scores come from the IMDb file on this device, with no key. Credentials stay in the Keychain. Site links work \
-                    without keys.
-                    """)
             }
         }
         .settingsPage("Review services")
@@ -481,10 +472,8 @@ private struct IMDbRatingsPage: View {
                 }
                 if let url = IMDbAttribution.termsURL { Link("IMDb data terms", destination: url) }
             } footer: {
-                Text("""
-                    \(IMDbAttribution.notice) Scores come from IMDb's public ratings file, which Blusion updates once a day in the background \
-                    and keeps on this device. \(IMDbAttribution.terms)
-                    """)
+                // IMDb's credit and terms, which its non-commercial datasets require.
+                Text("\(IMDbAttribution.notice) \(IMDbAttribution.terms)")
             }
         }
         .settingsPage("IMDb ratings")
@@ -503,8 +492,6 @@ private struct AccountsSettingsPage: View {
                     ForEach(SettingsViewModel.continueWatchingRefreshOptions) { Text($0.label).tag($0.value) }
                 }
                 .accessibilityIdentifier("settings.continueWatchingRefresh")
-            } footer: {
-                Text("How often Continue Watching checks for newer progress.")
             }
         }
         .settingsPage("Continue refresh")
@@ -535,11 +522,6 @@ private struct ServerSettingsPage: View {
                 Button("Save address") { Task { await model.commitServerURL() } }
                     .disabled(model.serverURLMessage != nil)
                     .accessibilityIdentifier("settings.serverURL.save")
-            } footer: {
-                Text("""
-                    Optional. Torrent and other non-direct streams need a streaming server on your network that you run yourself. Blusion \
-                    doesn't include one. Leave this empty if you don't use any.
-                    """)
             }
         }
         .settingsPage("Streaming server")
@@ -570,8 +552,6 @@ private struct FallbackSettingsPage: View {
                 Toggle("Use the fallback player", isOn: Binding(get: { model.settings.fallbackEngineEnabled },
                                         set: { value in Haptics.selection(); Task { await model.setFallbackEngineEnabled(value) } }))
                     .accessibilityIdentifier("settings.fallbackToggle")
-            } footer: {
-                Text("Plays formats the system player can't, such as MKV and some audio tracks. Turn it off to use only the system player.")
             }
             if aetherEngineLinked, model.settings.fallbackEngineEnabled {
                 Section {
@@ -580,28 +560,13 @@ private struct FallbackSettingsPage: View {
                         Text("mpv").tag(AdvancedEngine.mpv)
                     }
                     .accessibilityIdentifier("settings.fallbackEngine")
-                } footer: {
-                    Text(model.settings.player.advancedEngine == .aether
-                         ? "AetherEngine keeps the system's Dolby Vision, HDR and Atmos for MKV files. If it can't play a stream, mpv tries it. "
-                            + "\"Show Full Styling\" still opens styled subtitles in mpv."
-                         : "mpv draws subtitles with full styling and has audio files, deinterlacing and tone-mapping controls, "
-                            + "but plays Dolby Vision profile 7 without its enhancement layer and Atmos without its height channels.")
                 }
                 if model.settings.player.advancedEngine == .aether {
                     Section {
                         Toggle("Compose Dolby Vision FEL", isOn: binding(\.composesDolbyVisionFEL))
                             .accessibilityIdentifier("settings.aether.fel")
-                    } footer: {
-                        Text("Profile 7 FEL titles (UHD Blu-ray remuxes) decode both layers and combine them for the full picture. "
-                            + "Off, they play as profile 8.1 without the enhancement layer, which keeps Picture in Picture, AirPlay video "
-                            + "and Dolby Digital Plus Atmos objects.")
-                    }
-                    Section {
                         Toggle("Spatial audio for TrueHD and DTS:X", isOn: binding(\.rendersObjectAudio))
                             .accessibilityIdentifier("settings.aether.objectAudio")
-                    } footer: {
-                        Text("Renders TrueHD Atmos and DTS:X with their height channels as spatial audio (7.1.4). "
-                            + "Off, they play as lossless 7.1 without heights.")
                     }
                 }
             }
@@ -612,7 +577,6 @@ private struct FallbackSettingsPage: View {
 
 private struct DataSettingsPage: View {
     let model: SettingsViewModel
-    let services: AppServices
     @State private var pendingScope: DataResetService.Scope?
 
     var body: some View {
@@ -627,16 +591,6 @@ private struct DataSettingsPage: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("settings.clearMessage")
-                }
-            } footer: {
-                if services.secretsInKeychain {
-                    Text("Addon links and account credentials are kept in the Keychain. Trakt sync sends only the items you choose to share.")
-                } else {
-                    // A Mac build signed without a provisioning profile: the other screens still say Keychain.
-                    Text("""
-                        This build may not use the Keychain: addon links and account credentials are kept in a private file in your Library \
-                        folder instead. Trakt sync sends only the items you choose to share.
-                        """)
                 }
             }
         }
@@ -683,18 +637,10 @@ private struct ImageCacheSettingsPage: View {
                         .accessibilityLabel(inUse.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "Measuring")
                 }
                 .accessibilityIdentifier("settings.imageCache.inUse")
-            } footer: {
-                Text("""
-                    Posters and backdrops stay on this device until the cache is full; then the ones not seen for longest make room. Nothing \
-                    is downloaded again just because it is old: one kept a while is checked quietly for a newer copy, which is used the next \
-                    time it is loaded.
-                    """)
             }
             Section {
                 Button("Clear Image Cache", role: .destructive) { confirmsClear = true }
                     .accessibilityIdentifier("settings.imageCache.clear")
-            } footer: {
-                Text("Removes the posters and backdrops kept on this device. Those already on screen stay; others download again as you browse.")
             }
         }
         .settingsPage("Image cache")
@@ -767,14 +713,7 @@ private struct AddonSpeedSettingsPage: View {
                     .accessibilityIdentifier("settings.addonSpeed.row.\(row.id.uuidString)")
                 }
             } footer: {
-                if isOnline {
-                    Text("""
-                        Every addon is asked at the same time, as when you press Play, each for three films and three episodes in turn. \
-                        Every request is a real lookup, so the test only runs when you start it. Your own loads keep the times up to date.
-                        """)
-                } else {
-                    Text("You're offline. Connect to test your addons.")
-                }
+                if !isOnline { Text("You're offline. Connect to test your addons.") }
             }
             Section {
                 waitChoice("All addons", .allAddons)
@@ -782,13 +721,6 @@ private struct AddonSpeedSettingsPage: View {
                 ForEach(model.rows) { row in waitChoice(row.addon.name, .addon(row.id)) }
             } header: {
                 Text("Auto Pick waits for")
-            } footer: {
-                Text("""
-                    With an addon chosen, Auto Pick starts as soon as that addon has a stream it can play, from everything that has \
-                    arrived by then. If that addon fails, has nothing to play, or doesn't cover the title, Auto Pick waits for every addon, as \
-                    before. Auto waits for the fastest addon that answers reliably and finds the sharpest streams; with nothing tested yet, it \
-                    waits for every addon.
-                    """)
             }
         }
         .settingsPage("Addon Speed")

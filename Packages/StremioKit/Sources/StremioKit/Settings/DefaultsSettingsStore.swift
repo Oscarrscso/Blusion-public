@@ -13,6 +13,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         public static let matchesEpisodeWidthToText = "settings.matchesEpisodeWidthToText"
         public static let autoPlayBestStream = "settings.autoPlayBestStream"
         public static let autoPickWait = "settings.autoPickWait"
+        public static let autoPickSource = "settings.autoPickSource"
         public static let continueWatchingRefreshSeconds = "settings.continueWatchingRefreshSeconds"
         public static let serverSecret = "settings.streamingServerURL"
         public static let traktClientSecret = "settings.traktClientID"
@@ -70,7 +71,9 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 continueWatchingRefreshSeconds: defaults.object(forKey: Keys.continueWatchingRefreshSeconds) as? Int ?? 300,
                                 showsColouredRatingLogos: defaults.bool(forKey: Keys.showsColouredRatingLogos),
                                 matchesEpisodeWidthToText: defaults.bool(forKey: Keys.matchesEpisodeWidthToText),
-                                autoPickWait: AutoPickWait(storedValue: defaults.string(forKey: Keys.autoPickWait)), player: player,
+                                autoPickWait: AutoPickWait(storedValue: defaults.string(forKey: Keys.autoPickWait)),
+                                autoPickSource: defaults.string(forKey: Keys.autoPickSource).flatMap(StreamSourcePreference.init(rawValue:)) ?? .balanced,
+                                player: player,
                                 openSubtitlesAPIKey: openSubtitlesAPIKey, openSubtitlesUsername: openSubtitlesUsername,
                                 openSubtitlesPassword: openSubtitlesPassword)
     }
@@ -93,6 +96,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         defaults.set(settings.matchesEpisodeWidthToText, forKey: Keys.matchesEpisodeWidthToText)
         defaults.set(settings.autoPlayBestStream, forKey: Keys.autoPlayBestStream)
         defaults.set(settings.autoPickWait.storedValue, forKey: Keys.autoPickWait)
+        defaults.set(settings.autoPickSource.rawValue, forKey: Keys.autoPickSource)
         defaults.set(settings.continueWatchingRefreshSeconds ?? 300, forKey: Keys.continueWatchingRefreshSeconds)
         if let data = try? JSONEncoder().encode(settings.player) { defaults.set(data, forKey: Keys.player) }
         for (value, key) in [(settings.openSubtitlesAPIKey, Keys.openSubtitlesAPIKey), (settings.openSubtitlesUsername, Keys.openSubtitlesUsername),

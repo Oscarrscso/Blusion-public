@@ -51,6 +51,17 @@ import StremioKit
         #expect(abs(geometry.picture.width - 393 * 16 / 9) < 0.5)
     }
 
+    /// The precise crop the player measured (a 1.85:1 film's thin bars, say) keeps its exact shape: No Bars shows the picture as
+    /// measured, not the standard ratio nearest it.
+    @Test func preciseCropKeepsTheMeasuredShape() throws {
+        let geometry = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fit, crop: .precise(1.869))))
+        // Shape 1.869 is narrower than the 2.169 screen: it fits by height, so the gap is at the sides now.
+        #expect(abs(geometry.visible.height - 393) < 0.5 && abs(geometry.visible.width - 393 * 1.869) < 0.5)
+        #expect(abs(geometry.picture.width - 393 * 1.869) < 0.5 && abs(geometry.picture.height - 393 * 1.869 / (16.0 / 9.0)) < 0.5)
+        let measured = VideoGeometry.keptFraction(aspect: 16.0 / 9.0, crop: 1.869)
+        #expect(measured.width == 1 && abs(measured.height - 16.0 / (9.0 * 1.869)) < 1e-9 && abs(measured.midY - 0.5) < 1e-9)
+    }
+
     @Test func aspectOverrideReshapesThePicture() throws {
         let dvd = CGSize(width: 720, height: 480)
         let geometry = try #require(VideoGeometry(bounds: phone, source: dvd, layout: VideoLayout(fit: .fit, aspect: .ratio16x9)))

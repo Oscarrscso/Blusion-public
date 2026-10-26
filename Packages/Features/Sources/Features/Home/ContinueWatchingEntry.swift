@@ -13,6 +13,22 @@ public struct ContinueWatchingEntry: Identifiable, Equatable, Sendable {
         return "S\(season) E\(episode)"
     }
 
+    /// An episode's own name: an episode's title is "Series · Episode". nil for a film, or a title without the episode's name.
+    public var episodeName: String? {
+        guard request.episode != nil else { return nil }
+        let title = request.title
+        let name: Substring
+        if let series = request.seriesName, !series.isEmpty, title.hasPrefix(series + " · ") {
+            name = title.dropFirst(series.count + 3)
+        } else if let separator = title.range(of: " · ") {
+            name = title[separator.upperBound...]
+        } else {
+            return nil
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     static func merge(local: [WatchProgress], remote: [TraktPlaybackItem]) -> [ContinueWatchingEntry] {
         var entries: [String: ContinueWatchingEntry] = [:]
         let localByID = Dictionary(local.map { ($0.id, $0) }, uniquingKeysWith: { $0.updatedAt > $1.updatedAt ? $0 : $1 })

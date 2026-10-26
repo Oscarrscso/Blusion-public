@@ -6,20 +6,28 @@ import StremioKit
 
 @MainActor
 @Suite struct PlayerPresentationTests {
-    @Test func realSegmentedControlRetainsAllTabsAndSelectionWhileResizing() {
-        let control = PlayerTabSegmentedControl(tabs: PlayerPanelTab.allCases)
-        control.selectedSegmentIndex = 3
-        for width in [CGFloat(260), 600, 320, 440] {
-            control.frame = CGRect(x: 0, y: 0, width: width, height: 44)
-            control.setNeedsLayout()
-            control.layoutIfNeeded()
-            #expect(control.numberOfSegments == 5)
-            #expect(control.selectedSegmentIndex == 3)
-            for (index, tab) in PlayerPanelTab.allCases.enumerated() {
-                let label = control.titleForSegment(at: index) ?? control.imageForSegment(at: index)?.accessibilityLabel
-                #expect(label == tab.title)
-            }
+    /// The bar under the timeline is the system segmented control: a segment per menu, none selected until one opens.
+    @Test func menuBarHasASegmentPerMenuAndKeepsTheOpenOneWhileItsContentChanges() {
+        let control = PlayerMenuSegmentedControl(frame: .zero)
+        let tabs: [PlayerPanelTab] = [.subtitles, .speed, .picture, .info]
+        control.configure(tabs: tabs, speedLabel: nil, subtitlesOn: false)
+        #expect(control.numberOfSegments == 4)
+        #expect(control.selectedSegmentIndex == UISegmentedControl.noSegment)
+        for (index, tab) in tabs.enumerated() {
+            #expect(control.imageForSegment(at: index)?.accessibilityLabel == tab.title)
         }
+        control.selectedSegmentIndex = 1
+        control.configure(tabs: tabs, speedLabel: "1.5×", subtitlesOn: true)
+        #expect(control.titleForSegment(at: 1) == "1.5×")
+        #expect(control.imageForSegment(at: 1) == nil)
+        #expect(control.selectedSegmentIndex == 1, "a changing rate keeps the open menu selected")
+        control.configure(tabs: tabs, speedLabel: nil, subtitlesOn: true)
+        #expect(control.titleForSegment(at: 1) == nil)
+        #expect(control.imageForSegment(at: 1)?.accessibilityLabel == "Speed")
+        let withChapters: [PlayerPanelTab] = [.subtitles, .speed, .chapters, .picture, .info]
+        control.configure(tabs: withChapters, speedLabel: nil, subtitlesOn: true)
+        #expect(control.numberOfSegments == 5)
+        #expect(control.imageForSegment(at: 2)?.accessibilityLabel == "Chapters")
     }
 
     @Test func videoSurfaceInputsChangeOnlyForPlaybackConfiguration() {

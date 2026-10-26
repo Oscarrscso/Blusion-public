@@ -46,27 +46,74 @@ public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, Case
 }
 
 /// Crops the picture to a shape, centred: takes off black bars that are part of the video itself (a 2.39:1 film in a 16:9 file, a
-/// 4:3 show pillarboxed in 16:9), so Fit fills the screen with the picture alone and Fill crops less. The shape is the picture's as shown,
-/// after any aspect override.
-public enum VideoCrop: String, Sendable, Equatable, Hashable, Codable, CaseIterable {
-    case off
-    case ratio4x3 = "4:3"
-    case ratio3x2 = "3:2"
-    case ratio166 = "1.66:1"
-    case ratio16x9 = "16:9"
-    case ratio185 = "1.85:1"
-    case ratio190 = "1.90:1"
-    case ratio2x1 = "2:1"
-    case ratio220 = "2.20:1"
-    case ratio235 = "2.35:1"
-    case ratio239 = "2.39:1"
-    case ratio240 = "2.40:1"
-    case ratio276 = "2.76:1"
-
-    public var label: String { self == .off ? "No Crop" : rawValue }
-
+/// 4:3 show pillarboxed in 16:9), so Fit fills the screen with the picture alone and Fill crops less. The shape is the picture's as
+/// shown, after any aspect override. The standard shapes are the ones the crop panel offers; `precise` carries the picture a film
+/// carries inside its own bars, measured by the player and kept to three decimals. Coded as the old raw strings ("4:3", "off") so
+/// saved layouts from earlier versions still load, and as a decimal for a measured shape.
+public struct VideoCrop: Sendable, Equatable, Hashable, Codable {
     /// Width over height of what is kept; nil keeps the whole picture.
-    public var ratio: Double? { self == .off ? nil : PictureRatio.parse(rawValue) }
+    public var ratio: Double?
+    public var label: String
+
+    private init(ratio: Double?, label: String) {
+        self.ratio = ratio
+        self.label = label
+    }
+
+    public static let off = VideoCrop(ratio: nil, label: "No Crop")
+    public static let ratio4x3 = VideoCrop(ratio: 4.0 / 3.0, label: "4:3")
+    public static let ratio3x2 = VideoCrop(ratio: 3.0 / 2.0, label: "3:2")
+    public static let ratio166 = VideoCrop(ratio: 1.66, label: "1.66:1")
+    public static let ratio16x9 = VideoCrop(ratio: 16.0 / 9.0, label: "16:9")
+    public static let ratio185 = VideoCrop(ratio: 1.85, label: "1.85:1")
+    public static let ratio190 = VideoCrop(ratio: 1.90, label: "1.90:1")
+    public static let ratio2x1 = VideoCrop(ratio: 2.0, label: "2:1")
+    public static let ratio220 = VideoCrop(ratio: 2.20, label: "2.20:1")
+    public static let ratio235 = VideoCrop(ratio: 2.35, label: "2.35:1")
+    public static let ratio239 = VideoCrop(ratio: 2.39, label: "2.39:1")
+    public static let ratio240 = VideoCrop(ratio: 2.40, label: "2.40:1")
+    public static let ratio276 = VideoCrop(ratio: 2.76, label: "2.76:1")
+
+    /// Every shape the crop panel offers, in that order.
+    public static let allCases: [VideoCrop] = [.off, .ratio4x3, .ratio3x2, .ratio166, .ratio16x9, .ratio185, .ratio190, .ratio2x1,
+                                               .ratio220, .ratio235, .ratio239, .ratio240, .ratio276]
+
+    /// The picture inside a film's own bars, as measured, to three decimals; a shape that lands on a standard one is that one.
+    public static func precise(_ ratio: Double) -> VideoCrop {
+        if let named = allCases.first(where: { abs(($0.ratio ?? -1) - ratio) < 0.0005 }) { return named }
+        return VideoCrop(ratio: ratio, label: String(format: "%.2f:1", ratio))
+    }
+
+    /// Codec of the saved choice: the raw string an earlier version kept.
+    private static let named: [String: Double] = ["4:3": 4.0 / 3.0, "3:2": 3.0 / 2.0, "1.66:1": 1.66, "16:9": 16.0 / 9.0,
+                                                  "1.85:1": 1.85, "1.90:1": 1.90, "2:1": 2.0, "2.20:1": 2.20, "2.35:1": 2.35,
+                                                  "2.39:1": 2.39, "2.40:1": 2.40, "2.76:1": 2.76]
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let ratio = Self.named[raw] {
+            self = .precise(ratio)
+        } else if let ratio = Double(raw), ratio > 0 {
+            self = .precise(ratio)
+        } else {
+            self = .off
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let ratio = ratio, let raw = Self.named.first(where: { abs($0.value - ratio) < 0.0005 })?.key {
+            try container.encode(raw)
+        } else if let ratio = ratio {
+            try container.encode(String(format: "%.4f", ratio))
+        } else {
+            try container.encode("off")
+        }
+    }
+}
+
+extension VideoCrop: CustomStringConvertible {
+    public var description: String { label }
 }
 
 enum PictureRatio {
@@ -295,7 +342,9 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     public var ambientMode: Bool
     /// The engine for files the built-in player cannot play natively (see `AdvancedEngine`).
     public var advancedEngine: AdvancedEngine
-    /// AetherEngine composes Dolby Vision profile 7 FEL pictures.
+    /// AetherEngine composes Dolby Vision profile 7 FEL pictures: both layers decoded and joined on the GPU every frame, on its software
+    /// path. Off by default since 25 October 2026: on a phone a UHD remux could stutter there, and that path has no AVPlayer, so No Bars,
+    /// AI upscaling and Picture in Picture cannot work. Off plays the same stream on AVPlayer's hardware route (Dolby Vision 8.1).
     public var composesDolbyVisionFEL: Bool
     /// AetherEngine renders TrueHD and DTS:X object audio as spatial audio.
     public var rendersObjectAudio: Bool
@@ -303,7 +352,7 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     public init(subtitleMode: SubtitleMode = .always, prefersSDH: Bool = false, subtitleStyle: SubtitleStyle = SubtitleStyle(),
                 audioLanguage: String? = nil, videoLayout: VideoLayout = VideoLayout(), processing: VideoProcessing = VideoProcessing(),
                 showsSkipButtons: Bool = true, skipsIntrosAutomatically: Bool = false, swipeGestures: Bool = true, ambientMode: Bool = false,
-                advancedEngine: AdvancedEngine = .aether, composesDolbyVisionFEL: Bool = true, rendersObjectAudio: Bool = true) {
+                advancedEngine: AdvancedEngine = .aether, composesDolbyVisionFEL: Bool = false, rendersObjectAudio: Bool = true) {
         self.subtitleMode = subtitleMode
         self.prefersSDH = prefersSDH
         self.subtitleStyle = subtitleStyle
@@ -335,5 +384,13 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
                   advancedEngine: (try? container.decode(AdvancedEngine.self, forKey: .advancedEngine)) ?? defaults.advancedEngine,
                   composesDolbyVisionFEL: (try? container.decode(Bool.self, forKey: .composesDolbyVisionFEL)) ?? defaults.composesDolbyVisionFEL,
                   rendersObjectAudio: (try? container.decode(Bool.self, forKey: .rendersObjectAudio)) ?? defaults.rendersObjectAudio)
+    }
+
+    /// The FEL choice is saved under a new name: the old one held the old default (on), which nobody chose, so every saved copy starts
+    /// with the new default (off) once.
+    private enum CodingKeys: String, CodingKey {
+        case subtitleMode, prefersSDH, subtitleStyle, audioLanguage, videoLayout, processing, showsSkipButtons, skipsIntrosAutomatically,
+             swipeGestures, ambientMode, advancedEngine, rendersObjectAudio
+        case composesDolbyVisionFEL = "composesDolbyVisionFEL2"
     }
 }

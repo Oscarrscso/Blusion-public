@@ -49,6 +49,8 @@ public struct AetherFailure: Error, Sendable, Equatable {
 
 public enum AetherEvent: Sendable, Equatable {
     case loaded(duration: TimeInterval?, audio: [AetherTrack], subtitles: [AetherTrack], selectedAudio: Int?, selectedSubtitle: Int?)
+    /// The length AetherEngine reported after `loaded`: its player can publish the duration a moment after the load finishes.
+    case duration(TimeInterval)
     case videoFrameReady
     case position(TimeInterval)
     case buffered(TimeInterval)

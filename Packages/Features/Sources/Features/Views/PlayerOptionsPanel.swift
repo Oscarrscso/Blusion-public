@@ -4,9 +4,9 @@ import StremioKit
 import SwiftUI
 import UIKit
 
-/// The player's options, one tab per kind, opened from the bar under the timeline.
+/// The player's options, one menu per kind, chosen on the bar under the timeline (`PlayerMenuBar`).
 enum PlayerPanelTab: String, CaseIterable, Identifiable {
-    case subtitles, audio, picture, speed, chapters
+    case subtitles, audio, picture, speed, chapters, info
 
     var id: String { rawValue }
 
@@ -17,6 +17,7 @@ enum PlayerPanelTab: String, CaseIterable, Identifiable {
         case .picture: "Picture"
         case .speed: "Speed"
         case .chapters: "Chapters"
+        case .info: "Info"
         }
     }
 
@@ -27,41 +28,25 @@ enum PlayerPanelTab: String, CaseIterable, Identifiable {
         case .picture: "sparkles.tv"
         case .speed: "gauge.with.dots.needle.67percent"
         case .chapters: "list.bullet.rectangle"
+        case .info: "info.circle"
         }
     }
 }
 
-/// A glass panel over the picture: at the side when the screen is wide, at the bottom when it is tall. A tap outside closes it.
+/// The open menu: a glass card with its title and close button over the menu's own scrolling content. It sits on the bar whose
+/// segments choose it (`PlayerControls`); a tap outside the card and the bar closes it.
 struct PlayerOptionsPanel: View {
     let model: PlayerViewModel
     @Binding var tab: PlayerPanelTab?
     var actions = PlayerControlActions()
+    /// The crop that takes off the film's own black bars, once known (`PictureSampler`): Picture › Screen then offers No Bars.
+    var barsCrop: VideoCrop?
+    /// AI super resolution, for Info: what it is doing or why not, and the frames it scales. Only Info reads it, so its frame count
+    /// redraws nothing else.
+    var upscaling: SuperResolutionRenderer?
     @State private var scrollPosition = ScrollPosition()
 
     var body: some View {
-        GeometryReader { proxy in
-            let wide = proxy.size.width > proxy.size.height
-            ZStack(alignment: wide ? .trailing : .bottom) {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .contentShape(.rect)
-                    .onTapGesture { close() }
-                    .accessibilityHidden(true)
-                panel
-                    .frame(width: wide ? min(440, proxy.size.width * 0.55) : min(560, proxy.size.width - 20),
-                           height: wide ? max(0, proxy.size.height - 24) : min(400, proxy.size.height * 0.54))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("player.panel")
-                    .padding(wide ? 12 : 10)
-                    // The enclosing overlay fades in. Never move the panel diagonally
-                    // across the video while changing between portrait and landscape.
-            }
-        }
-        .foregroundStyle(.white)
-        .tint(.white)
-    }
-
-    private var panel: some View {
         VStack(spacing: 0) {
             HStack {
                 Text((tab ?? .subtitles).title)
@@ -82,10 +67,7 @@ struct PlayerOptionsPanel: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            PlayerOptionsTabPicker(selection: $tab)
-                .frame(height: 44)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            .padding(.bottom, 8)
             Divider()
             ScrollView {
                 content
@@ -97,12 +79,15 @@ struct PlayerOptionsPanel: View {
             .scrollIndicators(.visible)
             .scrollBounceBehavior(.basedOnSize)
             .onChange(of: tab) { _, _ in scrollPosition.scrollTo(edge: .top) }
-            // The system segmented control animates its own thumb. Track rows never
-            // participate in a selection morph or an opening/closing transaction.
+            // Rows never take part in a selection morph or an opening/closing transaction.
             .transaction { $0.animation = nil }
         }
-        .background(.regularMaterial, in: .rect(cornerRadius: 24))
         .clipShape(.rect(cornerRadius: 24))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
+        .foregroundStyle(.white)
+        .tint(.white)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("player.panel")
     }
 
     @ViewBuilder
@@ -113,6 +98,7 @@ struct PlayerOptionsPanel: View {
         case .picture: picture
         case .speed: speed
         case .chapters: chapters
+        case .info: info
         }
     }
 
@@ -258,19 +244,13 @@ struct PlayerOptionsPanel: View {
     // MARK: Picture
 
     private var picture: some View {
-        let layout = model.videoLayout
         let processing = model.processing
+        let zoom = model.pictureZoom
+        // No Bars once the film's own bars are known (the pinch's third step).
+        let zooms: [PlayerViewModel.PictureZoom] = barsCrop != nil || zoom == .noBars ? [.original, .fill, .noBars] : [.original, .fill]
         return VStack(alignment: .leading, spacing: 18) {
             PanelSection("Frame") {
-                VStack(alignment: .leading, spacing: 14) {
-                    PanelChips(title: "Screen", options: [VideoFit.fit, .fill], selection: layout.fit,
-                               label: { $0 == .fit ? "Original" : "Fill Screen" }) { model.setVideoFit($0) }
-                    Text("Fill Screen crops evenly to fit your display without stretching the picture. Pinch outward to fill, inward to restore.")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.60))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                }
+                PanelChips(title: "Screen", options: zooms, selection: zoom, label: Self.zoomLabel) { model.setPictureZoom($0, barsCrop: barsCrop) }
             }
             if model.capabilities.contains(.dolbyVisionSwitch) || model.capabilities.contains(.toneMapping) {
                 PanelSection("Colour") {
@@ -303,6 +283,14 @@ struct PlayerOptionsPanel: View {
             if model.canOpenInAdvancedPlayer {
                 PanelButton("Play in Advanced Player", symbol: "arrow.triangle.swap") { Task { await model.openInAdvancedPlayer() } }
             }
+        }
+    }
+
+    private static func zoomLabel(_ zoom: PlayerViewModel.PictureZoom) -> String {
+        switch zoom {
+        case .original: "Original"
+        case .fill: "Fill Screen"
+        case .noBars: "No Bars"
         }
     }
 
@@ -365,6 +353,101 @@ struct PlayerOptionsPanel: View {
             }
         }
     }
+
+    // MARK: Info
+
+    /// What is playing and how, refreshed every second: the stream as its addon lists it, then the picture, the sound and the
+    /// playback as the engine measures them.
+    private var info: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let stats = model.statistics()
+            VStack(alignment: .leading, spacing: 18) {
+                if let stream = model.currentCandidate {
+                    PanelSection("Stream") {
+                        PanelGroup {
+                            PanelInfoRow("Name", stream.title)
+                            if !stream.addonName.isEmpty { PanelInfoRow("Addon", stream.addonName) }
+                            if let filename = stream.filename, !filename.isEmpty { PanelInfoRow("File", filename) }
+                            if let size = stream.videoSize, size > 0 { PanelInfoRow("Size", size.formatted(.byteCount(style: .file))) }
+                        }
+                    }
+                }
+                if let stats {
+                    infoSection("Video", rows: Self.videoRows(stats) + upscalingRows)
+                    infoSection("Audio", rows: audioRows(stats))
+                    infoSection("Playback", rows: Self.playbackRows(stats))
+                    ForEach(stats.notes, id: \.self) { note in
+                        Text(note).font(.footnote).foregroundStyle(.white.opacity(0.6)).padding(.horizontal, 4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text("Nothing is playing yet.").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("player.panel.info")
+    }
+
+    @ViewBuilder
+    private func infoSection(_ title: String, rows: [(label: String, value: String)]) -> some View {
+        if !rows.isEmpty {
+            PanelSection(title) {
+                PanelGroup {
+                    ForEach(rows, id: \.label) { row in PanelInfoRow(row.label, row.value) }
+                }
+            }
+        }
+    }
+
+    private static func videoRows(_ stats: PlaybackStatistics) -> [(label: String, value: String)] {
+        var rows: [(label: String, value: String)] = []
+        if let width = stats.width, let height = stats.height, width > 0, height > 0 { rows.append(("Resolution", "\(width) × \(height)")) }
+        if let codec = stats.videoCodec { rows.append(("Codec", codec)) }
+        if let rate = stats.frameRate, rate > 0 { rows.append(("Frame Rate", "\(rate.formatted(.number.precision(.fractionLength(0...3)))) fps")) }
+        if let colour = stats.sourceColour { rows.append(("Colour", colour)) }
+        if let dolbyVision = stats.dolbyVision { rows.append(("Dolby Vision", dolbyVision)) }
+        if let output = stats.outputColour { rows.append(("Output", output)) }
+        if let bitrate = stats.videoBitrate, bitrate > 0 { rows.append(("Bitrate", Self.bitrate(bitrate))) }
+        if let decoder = stats.decoder { rows.append(("Decoder", decoder)) }
+        return rows
+    }
+
+    /// Only while AI upscaling is chosen: whether it runs, at what scale, or why it stepped aside, and while it runs, the scaled frames
+    /// it shows each second, which proves it is working.
+    private var upscalingRows: [(label: String, value: String)] {
+        guard model.processing.upscaling == .ai else { return [] }
+        var rows = [(label: "AI Upscaling", value: upscaling?.status ?? "Off")]
+        if let rate = upscaling?.framesPerSecond { rows.append((label: "Upscaled Frames", value: "\(rate) a second")) }
+        return rows
+    }
+
+    private func audioRows(_ stats: PlaybackStatistics) -> [(label: String, value: String)] {
+        var rows: [(label: String, value: String)] = []
+        if let track = model.audioTrackRows.first(where: { $0.id == model.audioTrackSelectionID }) { rows.append(("Track", track.title)) }
+        if let codec = stats.audioCodec { rows.append(("Codec", codec)) }
+        if let channels = stats.audioChannels { rows.append(("Channels", channels)) }
+        if let output = stats.audioOutput { rows.append(("Output", output)) }
+        if let bitrate = stats.audioBitrate, bitrate > 0 { rows.append(("Bitrate", Self.bitrate(bitrate))) }
+        let subtitles: String? = switch model.subtitleChoice {
+        case .off: nil
+        case .embedded(let id): model.embeddedSubtitleRows.first { $0.id == id }?.title
+        case .external(let id): model.externalSubtitleRows.first { $0.id == id }?.title
+        }
+        if let subtitles { rows.append(("Subtitles", subtitles)) }
+        return rows
+    }
+
+    private static func playbackRows(_ stats: PlaybackStatistics) -> [(label: String, value: String)] {
+        var rows: [(label: String, value: String)] = [("Player", stats.engine)]
+        if let network = stats.networkBitrate, network > 0 { rows.append(("Network", Self.bitrate(network))) }
+        if let ahead = stats.bufferedAhead, ahead.isFinite, ahead >= 0 { rows.append(("Buffered", "\(Int(ahead.rounded())) s ahead")) }
+        if let dropped = stats.droppedFrames { rows.append(("Dropped Frames", "\(dropped)")) }
+        return rows
+    }
+
+    private static func bitrate(_ bitsPerSecond: Double) -> String {
+        bitsPerSecond >= 1_000_000 ? String(format: "%.1f Mb/s", bitsPerSecond / 1_000_000) : String(format: "%.0f kb/s", bitsPerSecond / 1_000)
+    }
 }
 
 // MARK: Building blocks
@@ -386,6 +469,10 @@ private struct PanelSection<Content: View>: View {
         case "Quality": "sparkles.tv"
         case "Style": "textformat"
         case "Online": "globe"
+        case "Stream": "play.rectangle"
+        case "Video": "film"
+        case "Audio": "waveform"
+        case "Playback": "gauge.with.dots.needle.33percent"
         default: nil
         }
     }
@@ -431,6 +518,35 @@ private struct PanelGroup<Content: View>: View {
             }
         }
         .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
+    }
+}
+
+/// A fact on one row: its label, then its value, which wraps under itself when it is long (a release name, a file name).
+private struct PanelInfoRow: View {
+    let label: String
+    let value: String
+
+    init(_ label: String, _ value: String) {
+        self.label = label
+        self.value = value
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 104, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
     }
 }
 

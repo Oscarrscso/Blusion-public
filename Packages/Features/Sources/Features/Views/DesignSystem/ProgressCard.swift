@@ -6,6 +6,8 @@ import StremioKit
 struct ProgressCard: View {
     let title: String
     let subtitle: String?
+    /// The episode's own name. An episode at 0% (the next one, queued after a completion) shows it with `subtitle` in its caption.
+    let episodeName: String?
     let artwork: URL?
     let logo: URL?
     let fraction: Double
@@ -13,10 +15,11 @@ struct ProgressCard: View {
     let width: CGFloat?
     @Environment(\.layoutMetrics) private var metrics
 
-    init(title: String, subtitle: String? = nil, artwork: URL?, logo: URL? = nil, fraction: Double,
+    init(title: String, subtitle: String? = nil, episodeName: String? = nil, artwork: URL?, logo: URL? = nil, fraction: Double,
          duration: TimeInterval? = nil, width: CGFloat? = nil) {
         self.title = title
         self.subtitle = subtitle
+        self.episodeName = episodeName
         self.artwork = artwork
         self.logo = logo
         self.fraction = fraction
@@ -28,10 +31,46 @@ struct ProgressCard: View {
         let progress = fraction.isFinite ? min(max(fraction, 0), 1) : 0
         let fixed = width ?? metrics.continueCardWidth
         let overlay = PlaybackProgressOverlay(fraction: progress, duration: duration, episode: subtitle, width: fixed)
-        LandscapeCard(title: title, logo: logo, artwork: artwork, width: width) { overlay }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel([title, subtitle, overlay.remainingTime, "\(Int((progress * 100).rounded())) percent watched"].compactMap { $0 }
-                .filter { !$0.isEmpty }.joined(separator: ", "))
+        let upNext = progress == 0 && !(subtitle ?? "").isEmpty
+        LandscapeCard(title: title, logo: logo, artwork: artwork, width: width) {
+            if upNext {
+                UpNextCaption(episode: subtitle ?? "", name: episodeName, width: fixed, height: fixed / CardAspect.wide.ratio)
+            } else {
+                overlay
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([title, subtitle, upNext ? episodeName : nil, overlay.remainingTime,
+                             "\(Int((progress * 100).rounded())) percent watched"].compactMap { $0 }
+            .filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+}
+
+/// The caption of an episode not started yet, the next one after a completion: its name over its season and number, in small
+/// type, on the same fade as the other cards' captions, all in the card's bottom third.
+private struct UpNextCaption: View {
+    let episode: String
+    let name: String?
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        BottomFade(length: 1.0 / 3.0)
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 1) {
+                    if let name, !name.isEmpty {
+                        Text(name).font(.system(size: 10, weight: .semibold))
+                    }
+                    Text(episode).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.75))
+                }
+                .lineLimit(1)
+                .foregroundStyle(.white)
+                .padding(.horizontal, Theme.Spacing.s)
+                .padding(.bottom, Theme.Spacing.s)
+                .frame(width: width, height: height / 3, alignment: .bottomLeading)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

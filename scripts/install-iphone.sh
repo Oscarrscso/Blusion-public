@@ -3,10 +3,10 @@
 #
 #   scripts/install-iphone.sh [--no-launch] [--release] [--fresh]
 #
-# --release installs the optimised build instead (build/iphone-rel.noindex). A Debug build is unoptimised, and SwiftUI screens full
+# --release installs the optimised build instead (build/iphone-rel-<commit>.noindex). A Debug build is unoptimised, and SwiftUI screens full
 # of cards run several times slower in it, which can look like a freeze.
 #
-# A Debug build, signed by Xcode with your BLUSION_DEVELOPMENT_TEAM, built into build/iphone.noindex (Spotlight skips folders named
+# A Debug build, signed by Xcode with your team (BLUSION_DEVELOPMENT_TEAM or Config/Signing.xcconfig.local), built into build/iphone-<commit>.noindex (Spotlight skips folders named
 # *.noindex, so the build product is never listed on the Mac as one more Blusion). Xcode may renew the provisioning profile
 # with the Apple ID it is signed in with. With a free Apple ID the app stops opening after seven days: run this again.
 # The device has to be paired, connected (cable or the same network) and unlocked. macOS + Xcode + xcodegen only.
@@ -49,8 +49,13 @@ mkdir -p build
 # Exact target device, supplied outside source control.
 TARGET_UDID="${BLUSION_IPHONE_UDID:-}"
 [[ -n "$TARGET_UDID" ]] || fail "set BLUSION_IPHONE_UDID to the intended device UDID before installing"
-TEAM="${BLUSION_DEVELOPMENT_TEAM:-}"
-[[ -n "$TEAM" ]] || fail "set BLUSION_DEVELOPMENT_TEAM to your Apple Developer Team ID before installing"
+# Signing team, also kept outside source control: BLUSION_DEVELOPMENT_TEAM, else Config/Signing.xcconfig.local (the file Xcode reads).
+TEAM_SETTING=()
+if [[ -n "${BLUSION_DEVELOPMENT_TEAM:-}" ]]; then
+  TEAM_SETTING=(DEVELOPMENT_TEAM="$BLUSION_DEVELOPMENT_TEAM")
+elif ! grep -Eq '^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*[A-Za-z0-9]+' Config/Signing.xcconfig.local 2>/dev/null; then
+  fail "set BLUSION_DEVELOPMENT_TEAM, or DEVELOPMENT_TEAM in Config/Signing.xcconfig.local, to your Apple Developer Team ID before installing"
+fi
 DEVICES="$(mktemp)"
 trap 'rm -f "$DEVICES"' EXIT
 xcrun devicectl list devices --json-output "$DEVICES" >/dev/null 2>&1 || fail "could not list devices (is Xcode set up?)"
@@ -69,7 +74,7 @@ UDID="${DEVICE%% *}"; NAME="${DEVICE#* }"
 ./scripts/enable-fallback.sh >/dev/null || fail "could not generate the Xcode project with the fallback engine (scripts/enable-fallback.sh)"
 echo "install-iphone: building $TAG for $NAME (log: $LOG)"
 xcodebuild -project Blusion.xcodeproj -scheme Blusion -configuration "$CONFIG" -destination "id=$UDID" \
-  -derivedDataPath "$WORK" -jobs 4 -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" BLUSION_BUILD_TAG="$TAG" BLUSION_SOURCE_REVISION="$REVISION" build >"$LOG" 2>&1 || true
+  -derivedDataPath "$WORK" -jobs 4 -allowProvisioningUpdates ${TEAM_SETTING[@]+"${TEAM_SETTING[@]}"} BLUSION_BUILD_TAG="$TAG" BLUSION_SOURCE_REVISION="$REVISION" build >"$LOG" 2>&1 || true
 if ! grep -q '\*\* BUILD SUCCEEDED \*\*' "$LOG"; then
   grep -E 'error:' "$LOG" | sed -E "s#$ROOT/##g" | sort -u | head -40 >&2
   fail "BUILD FAILED (full log: $LOG)"

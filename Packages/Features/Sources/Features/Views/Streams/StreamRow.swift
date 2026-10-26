@@ -17,13 +17,20 @@ struct StreamRow: View {
     /// `StreamSaveSlotKey`).
     var savesToPlayer = false
     var downloadsToPlayer = false
+    /// True while Blusion readies this stream to play: its play button turns into a spinner until the film is ready.
+    var isPreparing = false
+    /// Usenet or debrid, as the addon marks it, read once. Nil when its text says neither.
+    private let delivery: StreamDelivery?
     /// Whether TorBox holds this stream's file already, as the addon marks it, read once. Nil for a stream that is not on TorBox.
     private let torBox: TorBoxCache?
     /// Compact width (iPhone in portrait) takes the short badge words: "RMX" and "DV".
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    init(item: RankedStream, isBest: Bool = false, isRemux: Bool = false, savesToPlayer: Bool = false, downloadsToPlayer: Bool = false) {
+    init(item: RankedStream, isBest: Bool = false, isRemux: Bool = false, savesToPlayer: Bool = false, downloadsToPlayer: Bool = false,
+         isPreparing: Bool = false) {
         self.item = item
+        self.isPreparing = isPreparing
+        self.delivery = StreamDelivery.detect(in: item.stream)
         self.isBest = isBest
         self.isRemux = isRemux
         self.savesToPlayer = savesToPlayer
@@ -43,10 +50,11 @@ struct StreamRow: View {
                         .accessibilityIdentifier("stream.bestMatch")
                 }
                 if hasBadges {
-                    // The TorBox mark gives up its letters before the row runs out of room, so no badge is cut.
+                    // Every badge with its words when they fit on one line. Otherwise the delivery and TorBox marks give up their words
+                    // and the badges wrap onto a second line, so none is cut and the card never runs past the screen's edge.
                     ViewThatFits(in: .horizontal) {
-                        badges(torBoxTitled: true)
-                        badges(torBoxTitled: false)
+                        HStack(spacing: Theme.Spacing.xs) { badges(titled: true) }
+                        FlowLayout(spacing: Theme.Spacing.xs) { badges(titled: false) }
                     }
                 }
                 HStack(alignment: .top, spacing: Theme.Spacing.m) {
@@ -121,25 +129,27 @@ struct StreamRow: View {
         return true
     }
 
-    private func badges(torBoxTitled: Bool) -> some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            if let label = item.quality.resolutionLabel {
-                QualityBadge.resolution(label, is4K: (item.quality.resolution ?? 0) >= 2160)
-            }
-            if item.quality.isHDR || item.quality.isDolbyVision {
-                QualityBadge.hdr(dolbyVision: item.quality.isDolbyVision, compact: horizontalSizeClass == .compact)
-            }
-            if isRemux { QualityBadge.remux(compact: horizontalSizeClass == .compact) }
-            if let source = item.quality.source {
-                QualityBadge.source(source, is4K: (item.quality.resolution ?? 0) >= 2160)
-            }
-            if playsAtmosOverAirPods { SpatialAudioBadge() }
-            if let torBox {
-                if torBoxTitled {
-                    QualityBadge.torBox(torBox, compact: horizontalSizeClass == .compact)
-                } else {
-                    TorBoxMark(cache: torBox)
-                }
+    /// The badges, for the row or the wrapping layout to place. `titled` keeps the delivery and TorBox marks' words.
+    @ViewBuilder
+    private func badges(titled: Bool) -> some View {
+        // Usenet or Debrid first, so how the stream arrives reads before its quality.
+        if let delivery { QualityBadge.delivery(delivery, titled: titled) }
+        if let label = item.quality.resolutionLabel {
+            QualityBadge.resolution(label, is4K: (item.quality.resolution ?? 0) >= 2160)
+        }
+        if item.quality.isHDR || item.quality.isDolbyVision {
+            QualityBadge.hdr(dolbyVision: item.quality.isDolbyVision, compact: horizontalSizeClass == .compact)
+        }
+        if isRemux { QualityBadge.remux(compact: horizontalSizeClass == .compact) }
+        if let source = item.quality.source {
+            QualityBadge.source(source, is4K: (item.quality.resolution ?? 0) >= 2160)
+        }
+        if playsAtmosOverAirPods { SpatialAudioBadge() }
+        if let torBox {
+            if titled {
+                QualityBadge.torBox(torBox, compact: horizontalSizeClass == .compact)
+            } else {
+                TorBoxMark(cache: torBox)
             }
         }
     }
@@ -147,7 +157,7 @@ struct StreamRow: View {
     /// Whether any badge applies, so the badge row is left out for a stream with none and takes no spacing.
     private var hasBadges: Bool {
         item.quality.resolutionLabel != nil || item.quality.isHDR || item.quality.isDolbyVision || isRemux || item.quality.source != nil
-            || playsAtmosOverAirPods || torBox != nil
+            || playsAtmosOverAirPods || torBox != nil || delivery != nil
     }
 
     /// Keep the release name, not the badges' resolution/HDR: the file name when the addon gives one, else the name of the file it links to.
@@ -207,15 +217,27 @@ struct StreamRow: View {
         }
     }
 
-    /// The round mark at the trailing edge: it shows what a tap does with this stream. It is not a control of its own, so it is hidden
-    /// from VoiceOver, which reads the card's hint instead.
+    /// The round mark at the trailing edge: it shows what a tap does with this stream. A stream Blusion plays has the one play button,
+    /// a little larger, centred on the card's right; while Blusion readies the film it is a spinner instead. It is not a control of its
+    /// own (the whole card plays), so it is hidden from VoiceOver, which reads the card's hint instead.
     private var routeGlyph: some View {
-        Image(systemName: routeMark.symbol)
-            .font(.footnote.weight(.bold))
-            .foregroundStyle(routeMark.tint)
-            .frame(width: StreamCardMetrics.markSize, height: StreamCardMetrics.markSize)
-            .background(Theme.surfaceStrong, in: Circle())
-            .accessibilityHidden(true)
+        let side = item.route.isPlayable ? StreamCardMetrics.playButtonSize : StreamCardMetrics.markSize
+        return ZStack {
+            if isPreparing {
+                Spinner()
+                    .controlSize(.small)
+                    .transition(.opacity)
+            } else {
+                Image(systemName: routeMark.symbol)
+                    .font((item.route.isPlayable ? Font.subheadline : .footnote).weight(.bold))
+                    .foregroundStyle(routeMark.tint)
+                    .transition(.opacity)
+            }
+        }
+        .frame(width: side, height: side)
+        .background(Theme.surfaceStrong, in: Circle())
+        .animation(.smooth(duration: 0.2), value: isPreparing)
+        .accessibilityHidden(true)
     }
 
     private var routeMark: (symbol: String, tint: Color) {
@@ -243,6 +265,8 @@ enum StreamCardMetrics {
     static let cornerRadius: CGFloat = 14
     /// The width and height of the round mark, and of the bookmark under it.
     static let markSize: CGFloat = 28
+    /// The play button of a stream Blusion plays, its card's one control.
+    static let playButtonSize: CGFloat = 34
     /// The service's or the disc's box, its corners, and how much smaller than the box the logo is fitted.
     static let providerBox = CGSize(width: 40, height: 28)
     static let providerBoxRadius: CGFloat = 8
@@ -257,6 +281,7 @@ enum StreamCardMetrics {
     static let padding: CGFloat = Theme.Spacing.l
     static let cornerRadius: CGFloat = Theme.Radius.surface
     static let markSize: CGFloat = 36
+    static let playButtonSize: CGFloat = 44
     static let providerBox = CGSize(width: 52, height: 36)
     static let providerBoxRadius: CGFloat = 10
     static let logoInset = CGSize(width: 12, height: 14)

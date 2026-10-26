@@ -102,8 +102,6 @@ struct AddonsView: View {
             }
         } header: {
             Text("Add an addon")
-        } footer: {
-            Text("Links usually come from the addon's own page. They can contain a private token, so Blusion keeps them in the Keychain and never shows or logs them.")
         }
     }
 
@@ -187,8 +185,6 @@ struct AddonsView: View {
             }
         } header: {
             Text("Installed")
-        } footer: {
-            Text("Order matters: addons higher up supply rows and streams first.")
         }
     }
 }

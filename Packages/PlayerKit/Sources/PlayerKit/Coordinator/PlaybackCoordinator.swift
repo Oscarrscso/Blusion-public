@@ -120,6 +120,13 @@ public final class PlaybackCoordinator {
         await moveOn(startPosition: lastPosition)
     }
 
+    /// A stream explicitly chosen from the player menu. Opening the menu has no playback side effects.
+    public func selectCandidate(at index: Int) async {
+        guard !stopped, plan.candidates.indices.contains(index), index != candidateIndex else { return }
+        notice = nil
+        await tryCandidate(at: index, startPosition: lastPosition)
+    }
+
     public func stop() async {
         stopped = true
         observer?.cancel()
@@ -134,7 +141,8 @@ public final class PlaybackCoordinator {
 
     public func play() { engine?.play() }
     public func pause() { engine?.pause() }
-    public func togglePlayPause() { state.isPlaying ? pause() : play() }
+    /// A stall is still playing as far as the viewer is concerned, so the button pauses it rather than asking to play again.
+    public func togglePlayPause() { state.isPlayingOrBuffering ? pause() : play() }
     public func seek(to position: TimeInterval) async { await engine?.seek(to: max(0, position)) }
     public func skip(by seconds: TimeInterval) async {
         let target = state.position + seconds

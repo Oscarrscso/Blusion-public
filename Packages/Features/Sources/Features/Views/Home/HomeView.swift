@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import StremioKit
 import SwiftUI
+import UIKit
 
 /// Home: the spotlight, then one section per widget of the user's layout (or the automatic one). Each section fills in as its addon
 /// answers, and every state (loading, nothing installed, nothing to browse, an issue, offline) has a look of its own.
@@ -20,6 +21,7 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLandscape) private var isLandscape
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(TitleActions.self) private var actions: TitleActions?
     /// The widget editor opened from a row's menu.
     @State private var editing: HomeWidget?
@@ -44,9 +46,10 @@ struct HomeView: View {
         }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
             .onGeometryChange(for: CGFloat.self) { max($0.safeAreaInsets.leading, $0.safeAreaInsets.trailing) } action: { sideInset = $0 }
-            .navigationTitle(heroIsFirst ? "" : "Home")
+            .navigationTitle(heroIsFirst || isPhoneInLandscape ? "" : "Home")
             .navigationBarTitleDisplayMode(.inline)
             .pageTopBar(hidden: heroIsFirst || isPhoneLandscape)
+            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
             .task { await model.observeAddons() }
             // Auto Pick's switch is changed away from Home, so a Continue Watching card reads it again whenever Home shows.
             .task(id: scenePhase) { await launcher.refreshAutoPick() }
@@ -130,6 +133,10 @@ struct HomeView: View {
         return first.widget.hideTitle
     }
 
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well. A phone in landscape has no room for
+    /// a title over the shelves.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
+
     @ViewBuilder
     private var content: some View {
         switch model.phase {
@@ -195,12 +202,13 @@ struct HomeView: View {
                 heroPull = value
             }
             .environment(\.heroPull, heroIsFirst ? heroPull : 0)
+            .trackLandscapeTabScroll()
             .onScrollPhaseChange { _, phase in isScrolling = phase.isScrolling }
             .onDisappear { isScrolling = false }
             .contentMargins(.top, 0, for: .scrollContent)
             .screenBackground()
-            .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollEdgeEffectHidden(heroIsFirst || isPhoneLandscape || HeroCarousel.isMacCatalyst, for: .top)
+            .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
             .ignoresSafeArea(.container, edges: ignoredEdges)
             .onChange(of: router.spotlightRevision) { _, _ in
                 var transaction = Transaction(animation: nil)

@@ -8,6 +8,9 @@ public final class ProgressSession {
     private let store: any ProgressStore
     private let clock: @Sendable () -> Date
     private var pendingSaves: [Task<Void, Never>] = []
+    /// False while a player is readied before its screen shows (see `PlayerViewModel.prepare`): nothing is saved, so a stream loaded
+    /// in the background and never watched leaves no Continue Watching entry and nothing for Trakt.
+    public var isRecording = true
 
     public init(request: StreamRequest, previous: WatchProgress?, store: any ProgressStore, policy: ProgressPolicy = .default,
                 clock: @escaping @Sendable () -> Date = Date.init) {
@@ -17,13 +20,14 @@ public final class ProgressSession {
     }
 
     public func observe(position: TimeInterval, duration: TimeInterval?) {
+        guard isRecording else { return }
         guard let record = recorder.observe(position: position, duration: duration, now: clock()) else { return }
         save(record)
     }
 
     /// Writes the final position. Call when playback stops or the player is dismissed.
     public func finish() async {
-        if let record = recorder.finish(now: clock()) { save(record) }
+        if isRecording, let record = recorder.finish(now: clock()) { save(record) }
         for task in pendingSaves { await task.value }
         pendingSaves = []
     }

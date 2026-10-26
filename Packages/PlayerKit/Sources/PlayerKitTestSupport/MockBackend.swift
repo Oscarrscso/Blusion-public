@@ -26,6 +26,9 @@ public final class MockBackend: FallbackBackend {
     public private(set) var layouts: [VideoLayout] = []
     public private(set) var processings: [VideoProcessing] = []
     public private(set) var subtitleStyles: [SubtitleStyle] = []
+    /// What the start waits for, and how much this backend says it holds (`FallbackBackend.startCushion`).
+    public var startCushion: StartCushion?
+    public var bufferedAhead: TimeInterval?
 
     private var continuation: AsyncStream<FallbackEvent>.Continuation?
     private let stream: AsyncStream<FallbackEvent>

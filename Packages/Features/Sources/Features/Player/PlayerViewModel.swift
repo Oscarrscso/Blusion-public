@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Persistence
 import PlayerKit
 import StremioKit
 
@@ -26,6 +27,9 @@ public final class PlayerViewModel {
     public static let controlsHideDelay: TimeInterval = 3
     public static let maximumSubtitleOffset: TimeInterval = 60
     public static let maximumAudioDelay: TimeInterval = 10
+    /// How often a playing session refreshes its snapshot: often enough that a kill loses seconds, rare enough that the file is
+    /// not written on every tick. A pause or the app leaving the front refreshes it at once.
+    public static let snapshotRefreshInterval: TimeInterval = 15
 
     public let plan: PlaybackPlan
     public private(set) var coordinator: PlaybackCoordinator?
@@ -52,6 +56,8 @@ public final class PlayerViewModel {
     public private(set) var isSearchingOpenSubtitles = false
 
     private let services: AppServices
+    /// The session store this player keeps current: the app's one, or a test's memory.
+    private let snapshotStore: any PlaybackSnapshotStore
     private let now: @Sendable () -> Date
     private var timeline: SubtitleTimeline?
     private var bitmapTimeline: BitmapSubtitleTimeline?
@@ -71,10 +77,28 @@ public final class PlayerViewModel {
     private var skippedMarkers: Set<SkipMarker> = []
     private var temporaryFiles: [URL] = []
     private var saveTask: Task<Void, Never>?
+    /// The start made by `prepare`, so `start` (the screen appearing) waits for it instead of starting again.
+    private var preparation: Task<Void, Never>?
+    /// True while a prepared player holds: muted, paused on its first frame, and saving no progress until its screen shows.
+    private var isHeld = false
+    private var progressSession: ProgressSession?
+    /// Set by `close`: a start still loading its settings then makes no player, and a screen rejoining its session never gets a
+    /// closed one (`LivePlaybackSession.session(for:)`).
+    public private(set) var isClosed = false
+    /// A session being walked back into: its position, pause, track choices and picture, taken over as the engine comes up.
+    private var pendingResume: PlaybackSnapshot?
+    /// The session was left paused: the screen showing does not start it again.
+    private var resumeWasPaused = false
+    /// The restored track choices have been applied (or there were none), so a later track list never overrides a fresh choice.
+    private var restoredChoicesApplied = false
+    /// When the snapshot was last refreshed, so playback writes it every few seconds rather than every tick.
+    private var lastSnapshotRefresh: Date?
 
-    public init(plan: PlaybackPlan, services: AppServices, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(plan: PlaybackPlan, services: AppServices, now: @escaping @Sendable () -> Date = Date.init,
+                snapshotStore: (any PlaybackSnapshotStore)? = nil) {
         self.plan = plan
         self.services = services
+        self.snapshotStore = snapshotStore ?? PlaybackSession.store
         self.now = now
         self.lastInteraction = now()
     }
@@ -82,39 +106,244 @@ public final class PlayerViewModel {
     // MARK: Lifecycle
 
     /// Loads settings and resume position, starts playback (returns when playing or every stream failed), and fetches subtitles alongside.
+    /// A player readied by `prepare` is not started again: it waits for that start, then plays from where it held.
     public func start() async {
+        if let preparation {
+            await preparation.value
+            releaseHold()
+            return
+        }
+        // Already running: a screen rejoining its session (a rebuild while the app was away, or a second start) does not begin again.
+        guard coordinator == nil else { return }
+        await begin(holding: false)
+    }
+
+    /// Readies playback before the player's screen shows: the stream loads and starts muted, then holds paused on its first frame with
+    /// no progress saved. Returns once it is ready, or once every stream has failed. `start` then plays it at once. Calling it again
+    /// waits for the same start.
+    public func prepare() async {
+        if let preparation {
+            await preparation.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.begin(holding: true)
+        }
+        preparation = task
+        await task.value
+    }
+
+    /// True once a prepared player has a stream ready to play (or has nothing to play: every stream failed).
+    public var isPrepared: Bool {
+        guard preparation != nil, let phase = coordinator?.phase else { return false }
+        return phase == .playing || phase == .exhausted
+    }
+
+    /// The stream has started playing: until then the player shows no play or seek controls, only that it is loading.
+    public var hasStartedPlayback: Bool {
+        guard let phase = coordinator?.phase else { return false }
+        return phase == .playing || phase == .finished
+    }
+
+    private func begin(holding: Bool) async {
         // Both at once: the stream starts loading only after them.
         async let loadedSettings = services.settings.load()
         async let savedProgress = services.progress.progress(for: plan.request.identity)
         settings = await loadedSettings
         let previous = await savedProgress
-        let resume = ProgressRecorder.resumePosition(for: previous)
+        guard !isClosed else { return }
+        // The saved session knows where the viewer actually was, past what the progress store had flushed; progress still resumes a
+        // session whose snapshot was at its start.
+        var resume = ProgressRecorder.resumePosition(for: previous)
+        if let position = pendingResume?.position, position > 0 { resume = position }
+        resumeWasPaused = pendingResume?.wasPaused ?? false
         let session = ProgressSession(request: plan.request, previous: previous, store: services.progress)
+        session.isRecording = !holding
+        progressSession = session
         let player = settings.player
-        // Older builds could save stretch or arbitrary display ratios. Start with
-        // an undistorted picture, retaining only the preferred Fit/Fill mode.
-        var safeLayout = player.videoLayout
+        // A restored session brings its own picture. Without one, a stretch or arbitrary display ratio saved by an older build starts
+        // undistorted, keeping only the preferred Fit/Fill mode.
+        var safeLayout = pendingResume?.layout ?? player.videoLayout
         if safeLayout.fit == .stretch { safeLayout.fit = .fit }
-        safeLayout.zoom = 1
-        safeLayout.aspect = .source
-        safeLayout.crop = .off
+        if pendingResume?.layout == nil {
+            safeLayout.zoom = 1
+            safeLayout.aspect = .source
+            safeLayout.crop = .off
+        }
         let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: safeLayout,
-                                              processing: player.processing, subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
+                                              processing: pendingResume?.processing ?? player.processing,
+                                              subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
         coordinator.onEnded = { [weak self] in self?.hasFinished = true }
         coordinator.onCandidateChange = { [weak self] candidate in self?.lookUpSubtitles(for: candidate) }
         coordinator.onEngineChange = { [weak self] in self?.engineChanged() }
         coordinator.onTracksChange = { [weak self] in self?.tracksChanged() }
         self.coordinator = coordinator
+        if holding {
+            isHeld = true
+            // Muted before the first engine is made, so the start makes no sound while the screen is not up.
+            coordinator.setMuted(true)
+        }
         startSubtitles()
         await coordinator.start()
+        // A restored session takes its track choices over once the engine lists them.
+        restoreChoicesIfPossible()
+        // Ready: it waits, paused on its first frame, for the screen.
+        if isHeld, coordinator.phase == .playing { coordinator.pause() }
+        // A session left paused stays paused when its screen shows.
+        else if resumeWasPaused, coordinator.phase == .playing { coordinator.pause() }
+    }
+
+    /// The screen is up: a held player saves progress, gets its sound back and plays, unless the session was left paused.
+    private func releaseHold() {
+        guard isHeld, let coordinator else { return }
+        isHeld = false
+        progressSession?.isRecording = true
+        coordinator.setMuted(false)
+        if coordinator.phase == .playing, !resumeWasPaused { coordinator.play() }
     }
 
     public func close() async {
+        isClosed = true
         subtitleTask?.cancel()
         lookupTasks.forEach { $0.cancel() }
         await coordinator?.stop()
         temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         temporaryFiles = []
+    }
+
+    /// True once a session exists and has not been closed: the app-level holder keeps such a session alive across its screen's
+    /// appearances and disappearances (including backgrounding), and hands it back to a screen that reopens the same plan.
+    public var isSessionLive: Bool { coordinator != nil && !isClosed }
+
+    // MARK: The previous session
+
+    /// Takes over a saved session: where it stopped, whether it was paused, its track choices and its picture. Called before the
+    /// player is readied, so the start itself resumes there; called on a running player, it applies at once.
+    public func resumePlayback(from snapshot: PlaybackSnapshot) {
+        pendingResume = snapshot
+        resumeWasPaused = snapshot.wasPaused
+        restoredChoicesApplied = false
+        guard hasStartedPlayback else { return }
+        applyRestoredPicture(snapshot)
+        if snapshot.position > 0 { Task { await seek(to: snapshot.position) } }
+        if snapshot.wasPaused { coordinator?.pause() }
+        restoreChoicesIfPossible()
+    }
+
+    /// The session's own state, for the store to keep while it plays: no link and no header, only where and how it is.
+    public var saveState: PlaybackSaveState {
+        PlaybackSaveState(position: position, duration: state.duration, isPaused: !wantsPlayback,
+                          audioTrack: state.audioTracks.first { $0.id == state.selectedAudioTrackID }.map(SnapshotTrack.init),
+                          subtitleTrack: subtitleSnapshotTrack, subtitlesOff: subtitleChoice == .off,
+                          layout: videoLayout, processing: processing)
+    }
+
+    /// Keeps the saved session current with where the viewer is, so a kill loses at most `snapshotRefreshInterval` of playback.
+    /// A pause, a seek or the app leaving the front refreshes it at once (`force`). A prepared player has not started for the viewer
+    /// yet, and a closed one has no session.
+    public func recordSessionSnapshot(force: Bool = false) async {
+        guard isSessionLive, !isHeld, hasStartedPlayback else { return }
+        let current = now()
+        if !force, let last = lastSnapshotRefresh, current.timeIntervalSince(last) < Self.snapshotRefreshInterval { return }
+        lastSnapshotRefresh = current
+        guard var snapshot = await snapshotStore.load(), snapshot.request.identity == plan.request.identity else { return }
+        snapshot.apply(saveState)
+        try? await snapshotStore.save(snapshot)
+    }
+
+    /// Saves the session a hand-over starts: the next episode's own stream, so killing the app during it walks back into that episode.
+    /// The picture is the one Settings keeps, not the finished film's measured crop, which belongs to that film alone.
+    public func saveSessionSnapshot(for next: PlaybackPlan, candidateIndex: Int = 0) async {
+        guard next.candidates.indices.contains(candidateIndex) else { return }
+        let candidate = next.candidates[candidateIndex]
+        guard let identity = PlaybackStreamIdentity(candidate: candidate) else { return }
+        var layout = settings.player.videoLayout
+        if layout.fit == .stretch { layout.fit = .fit }
+        layout.zoom = 1
+        layout.aspect = .source
+        layout.crop = .off
+        let snapshot = PlaybackSnapshot(request: next.request, stream: identity, addonName: candidate.addonName,
+                                        position: 0, duration: nil, wasPaused: false,
+                                        layout: layout, processing: settings.player.processing)
+        try? await snapshotStore.save(snapshot)
+        lastSnapshotRefresh = now()
+    }
+
+    private var subtitleSnapshotTrack: SnapshotTrack? {
+        switch subtitleChoice {
+        case .off:
+            return nil
+        case .embedded(let id):
+            return embeddedSubtitleTracks.first { $0.id == id }.map(SnapshotTrack.init)
+        case .external(let id):
+            guard let option = subtitleOptions.first(where: { $0.id == id }) else { return nil }
+            return SnapshotTrack(title: option.title, language: option.language, isForced: option.isForced,
+                                 isHearingImpaired: option.isHearingImpaired, isExternal: true)
+        }
+    }
+
+    private func applyRestoredPicture(_ snapshot: PlaybackSnapshot) {
+        if var layout = snapshot.layout {
+            if layout.fit == .stretch { layout.fit = .fit }
+            coordinator?.setVideoLayout(layout)
+        }
+        if let processing = snapshot.processing { coordinator?.setProcessing(processing) }
+    }
+
+    /// Applies the restored audio and subtitle choices once their lists exist. A list that is still empty keeps the choice waiting,
+    /// so a track that arrives a moment later is still taken over; a fresh choice made meanwhile wins.
+    private func restoreChoicesIfPossible() {
+        guard let restored = pendingResume, !restoredChoicesApplied, hasStartedPlayback else { return }
+        var applied = true
+        if let pick = restored.audioTrack {
+            if let track = Self.track(pick, in: state.audioTracks) {
+                userChoseAudio = true
+                audioTrackSelectionID = track.id
+                coordinator?.selectAudioTrack(id: track.id)
+            } else if state.audioTracks.isEmpty {
+                applied = false
+            }
+        }
+        if restored.subtitlesOff {
+            userChoseSubtitle = true
+            automaticChoice = nil
+            Task { [weak self] in await self?.apply(.off) }
+        } else if let pick = restored.subtitleTrack {
+            if let track = Self.track(pick, in: embeddedSubtitleTracks) {
+                userChoseSubtitle = true
+                automaticChoice = nil
+                Task { [weak self] in await self?.apply(.embedded(track.id)) }
+            } else if let option = Self.option(pick, in: subtitleOptions) {
+                userChoseSubtitle = true
+                automaticChoice = nil
+                Task { [weak self] in await self?.apply(.external(option.id)) }
+            } else if embeddedSubtitleTracks.isEmpty && subtitleOptions.isEmpty {
+                applied = false
+            }
+        }
+        if applied {
+            restoredChoicesApplied = true
+            pendingResume = nil
+        }
+    }
+
+    /// A saved track against a fresh engine's own: its name and language, then its language and flags, then its name alone. A fresh
+    /// engine numbers its tracks its own way, so its ids never match.
+    private static func track(_ pick: SnapshotTrack, in tracks: [MediaTrack]) -> MediaTrack? {
+        tracks.first { $0.title == pick.title && $0.language == pick.language && $0.isForced == pick.isForced
+                && $0.isHearingImpaired == pick.isHearingImpaired }
+            ?? tracks.first { !pick.title.isEmpty && $0.title == pick.title && $0.language == pick.language }
+            ?? tracks.first { $0.language != nil && $0.language == pick.language && $0.isForced == pick.isForced
+                && $0.isHearingImpaired == pick.isHearingImpaired }
+            ?? tracks.first { !pick.title.isEmpty && $0.title == pick.title }
+    }
+
+    private static func option(_ pick: SnapshotTrack, in options: [SubtitleOption]) -> SubtitleOption? {
+        options.first { $0.title == pick.title && $0.language == pick.language && $0.isForced == pick.isForced
+                && $0.isHearingImpaired == pick.isHearingImpaired }
+            ?? options.first { !pick.title.isEmpty && $0.title == pick.title && $0.language == pick.language }
+            ?? options.first { $0.language == pick.language && $0.isForced == pick.isForced && $0.isHearingImpaired == pick.isHearingImpaired }
     }
 
     // MARK: Playback state (read-through)
@@ -128,11 +357,15 @@ public final class PlayerViewModel {
         default: return coordinator?.phase == .starting
         }
     }
-    /// The spinner shows only for a stall after playback has begun, with the controls hidden. While the stream starts, and whenever the
-    /// controls show, the play button sits where it would.
-    public var showsBufferingIndicator: Bool {
-        isBuffering && !controlsVisible && failureMessage == nil && coordinator?.phase == .playing
+    /// Playback has begun and is waiting for data (a stall, or a reload such as a reconnect). Before its first frame the player shows its
+    /// startup spinner instead, with only Close (see `hasStartedPlayback` and `PlayerContent.isVideoReady`).
+    public var isStalled: Bool {
+        isBuffering && failureMessage == nil && coordinator?.phase == .playing
     }
+    /// The stall spinner stands alone while the controls are hidden; with them showing it takes the play button's place.
+    public var showsBufferingIndicator: Bool { isStalled && !controlsVisible }
+    /// Playing, or stalled while meant to play: the play button offers Pause.
+    public var wantsPlayback: Bool { isPlaying || isStalled }
     public var position: TimeInterval { isScrubbing ? scrubFraction * (state.duration ?? 0) : state.position }
     public var duration: TimeInterval? { state.duration }
     public var fraction: Double { isScrubbing ? scrubFraction : (state.duration.map { $0 > 0 ? min(1, state.position / $0) : 0 } ?? 0) }
@@ -140,6 +373,9 @@ public final class PlayerViewModel {
     public var remainingText: String { state.duration.map { "-" + PlayerTime.format(max(0, $0 - position)) } ?? "" }
     public var notice: String? { coordinator?.notice }
     public var hasNextStream: Bool { (coordinator?.candidateIndex ?? 0) + 1 < plan.candidates.count }
+    public var currentStreamIndex: Int { coordinator?.candidateIndex ?? 0 }
+    /// The stream playing now, as its addon listed it (the options panel's Info).
+    public var currentCandidate: PlaybackCandidate? { coordinator?.current }
     public var hasNextEpisode: Bool { plan.request.nextRequest != nil }
     public var canPictureInPicture: Bool { coordinator?.current?.route.isNative == true }
     public var volume: Float { coordinator?.volume ?? 1 }
@@ -163,18 +399,22 @@ public final class PlayerViewModel {
     // MARK: Transport
 
     public func togglePlayPause() {
-        coordinator?.togglePlayPause()
+        // The button's glyph decides: during a stall it shows Pause, so a tap pauses.
+        if wantsPlayback { coordinator?.pause() } else { coordinator?.play() }
         showControls()
+        Task { await recordSessionSnapshot(force: true) }
     }
 
     public func skip(by seconds: TimeInterval) async {
         showControls()
         await coordinator?.skip(by: seconds)
+        await recordSessionSnapshot(force: true)
     }
 
     public func seek(to position: TimeInterval) async {
         showControls()
         await coordinator?.seek(to: position)
+        await recordSessionSnapshot(force: true)
     }
 
     public func nextStream() async {
@@ -182,9 +422,31 @@ public final class PlayerViewModel {
         await coordinator?.advance()
     }
 
+    /// Selection is explicit: opening the stream menu itself never switches or plays media.
+    public func selectStream(at index: Int) async {
+        showControls()
+        await coordinator?.selectCandidate(at: index)
+    }
+
     public func setRate(_ rate: Float) {
         coordinator?.setRate(rate)
         showControls()
+    }
+
+    /// The speed to go back to when a hold at double speed ends; nil while no hold is on.
+    public private(set) var heldRate: Float?
+
+    /// Pressing and holding the picture plays at double speed until the finger lifts, then at the speed before. The controls stay
+    /// as they are. A paused film is not started.
+    public func holdDoubleSpeed(_ holding: Bool) {
+        if holding {
+            guard heldRate == nil, isPlaying, let coordinator else { return }
+            heldRate = coordinator.rate
+            coordinator.setRate(2)
+        } else if let rate = heldRate {
+            heldRate = nil
+            coordinator?.setRate(rate)
+        }
     }
 
     /// The Mac's ↑ and ↓ keys, in tenths of the full level.
@@ -207,21 +469,32 @@ public final class PlayerViewModel {
     public func beginScrub() {
         // Capture the live position before fraction starts reading scrubFraction.
         // Otherwise touching the timeline jumps its thumb to the previous drag.
+        // Picture swipes use this too: refresh the idle delay without revealing hidden controls.
         let currentFraction = fraction
         scrubFraction = currentFraction
         isScrubbing = true
-        showControls()
+        lastInteraction = now()
     }
 
     public func updateScrub(fraction: Double) {
         scrubFraction = min(1, max(0, fraction))
-        showControls()
+        lastInteraction = now()
     }
 
     public func endScrub() async {
         guard isScrubbing else { return }
-        let target = scrubFraction * (state.duration ?? 0)
-        await coordinator?.seek(to: target)
+        // With no length known there is no time to go to: letting go must not send the film back to its start.
+        guard let duration = state.duration, duration > 0 else {
+            isScrubbing = false
+            return
+        }
+        await coordinator?.seek(to: scrubFraction * duration)
+        isScrubbing = false
+        await recordSessionSnapshot(force: true)
+    }
+
+    /// Lets go of a scrub without seeking: a sideways swipe on the picture that turned out to be a pinch.
+    public func cancelScrub() {
         isScrubbing = false
     }
 
@@ -243,9 +516,10 @@ public final class PlayerViewModel {
         if controlsVisible { controlsVisible = false } else { showControls() }
     }
 
-    /// Call periodically. Hides the controls after a few idle seconds, but only while playing and not scrubbing.
+    /// Call periodically. Hides the controls after a few idle seconds, but only while playing (or stalled while meant to play, so the
+    /// picture is clear and the spinner stands alone) and not scrubbing.
     public func hideControlsIfIdle() {
-        guard controlsVisible, isPlaying, !isScrubbing, now().timeIntervalSince(lastInteraction) >= Self.controlsHideDelay else { return }
+        guard controlsVisible, wantsPlayback, !isScrubbing, now().timeIntervalSince(lastInteraction) >= Self.controlsHideDelay else { return }
         controlsVisible = false
     }
 
@@ -347,6 +621,55 @@ public final class PlayerViewModel {
         coordinator?.setVideoLayout(layout)
         savePreferences { $0.videoLayout.fit = safeFit }
         showControls()
+    }
+
+    /// The pinch's steps, also in Picture › Screen: the whole frame; the frame filling the screen; and the film's own picture filling it,
+    /// without the black bars a widescreen film carries inside a 16:9 frame (only for a film that has them).
+    public enum PictureZoom: Sendable, Equatable, Hashable, CaseIterable {
+        case original, fill, noBars
+    }
+
+    public var pictureZoom: PictureZoom {
+        let layout = videoLayout
+        guard layout.fit == .fill else { return .original }
+        return layout.crop == .off ? .fill : .noBars
+    }
+
+    /// One pinch: out steps Original → Fill → No Bars (when `barsCrop`, the crop that takes off the film's own bars, is known), in steps
+    /// back. Past either end it does nothing.
+    public func zoomPicture(in zoomsIn: Bool, barsCrop: VideoCrop?) {
+        let next: PictureZoom? = switch (pictureZoom, zoomsIn) {
+        case (.original, true): .fill
+        case (.fill, true): barsCrop == nil ? nil : .noBars
+        case (.noBars, false): .fill
+        case (.fill, false): .original
+        default: nil
+        }
+        if let next { setPictureZoom(next, barsCrop: barsCrop) }
+    }
+
+    /// No Bars fills the screen with the picture inside the film's own bars, cropped centrally to `barsCrop`. Only Original or Fill is
+    /// kept for the next film: its bars are its own. Preserve controls visibility so pinching keeps the picture clear.
+    public func setPictureZoom(_ zoom: PictureZoom, barsCrop: VideoCrop?) {
+        var layout = videoLayout
+        layout.zoom = 1
+        layout.aspect = .source
+        switch zoom {
+        case .original:
+            layout.fit = .fit
+            layout.crop = .off
+        case .fill:
+            layout.fit = .fill
+            layout.crop = .off
+        case .noBars:
+            guard let barsCrop, barsCrop != .off else { return }
+            layout.fit = .fill
+            layout.crop = barsCrop
+        }
+        coordinator?.setVideoLayout(layout)
+        let fit = layout.fit
+        savePreferences { $0.videoLayout.fit = fit }
+        lastInteraction = now()
     }
 
     public func setZoom(_ zoom: Double) {
@@ -598,6 +921,7 @@ public final class PlayerViewModel {
         subtitleTask = Task { [weak self] in
             guard let self else { return }
             subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: first.subtitles))
+            restoreChoicesIfPossible()
             await applyDefaultSubtitle()
             await collect(services.subtitles.fetch(for: first, request: plan.request))
         }
@@ -608,6 +932,7 @@ public final class PlayerViewModel {
             if let items = response.value {
                 subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: items, addon: response.addon.name))
             }
+            restoreChoicesIfPossible()
             await applyDefaultSubtitle()
         }
     }
@@ -645,6 +970,7 @@ public final class PlayerViewModel {
         if audioTrackRows != audioRows { audioTrackRows = audioRows }
         if embeddedSubtitleRows != subtitleRows { embeddedSubtitleRows = subtitleRows }
         if audioTrackSelectionID != state.selectedAudioTrackID { audioTrackSelectionID = state.selectedAudioTrackID }
+        restoreChoicesIfPossible()
         if !userChoseAudio, let track = SubtitleDefaults.audioTrack(in: state.audioTracks, selected: state.selectedAudioTrackID,
                                                                     language: settings.player.audioLanguage) {
             coordinator?.selectAudioTrack(id: track.id)
@@ -799,11 +1125,32 @@ public final class PlayerViewModel {
         defer { picker.cancelLoading() }
         // Every addon's answers within the window, as before: the stream continuing this one may come from a slower addon.
         await picker.loadForAutomaticSelection(stopsForWaitTarget: false)
-        let context = plan.candidates.indices.contains(coordinator?.candidateIndex ?? 0) ? plan.candidates[coordinator?.candidateIndex ?? 0].bingeContext : nil
-        if case .play(let nextPlan)? = await picker.bingeChoice(continuing: context) { return nextPlan }
+        if case .play(let nextPlan)? = await picker.bingeChoice(continuing: bingeContext) { return nextPlan }
         return nil
     }
+
+    /// Readies a chosen episode's streams, as `prepareNextEpisode` does for the one after this: the stream continuing this binge where
+    /// the addons have it, else the best they offer that Blusion itself can play. Nil when none of them can be played.
+    public func prepareEpisode(_ request: StreamRequest) async -> PlaybackPlan? {
+        let picker = StreamPickerViewModel(request: request, services: services)
+        defer { picker.cancelLoading() }
+        await picker.loadForAutomaticSelection(stopsForWaitTarget: false)
+        if case .play(let chosenPlan)? = await picker.bingeChoice(continuing: bingeContext) { return chosenPlan }
+        // Already in the player: the chosen episode plays here even when the saved policy would hand streams to another app.
+        guard let best = picker.bestToPlay, case .play(let chosenPlan)? = picker.inAppChoice(for: best) else { return nil }
+        return chosenPlan
+    }
+
+    /// The release this playback continues, which the next episode's stream or a chosen one's keeps where the addons offer it.
+    private var bingeContext: BingeContext? {
+        let index = coordinator?.candidateIndex ?? 0
+        guard plan.candidates.indices.contains(index) else { return nil }
+        return plan.candidates[index].bingeContext
+    }
 }
+
+/// The player as the snapshot store sees it: it takes a saved session over on restore, and reports where it is while it plays.
+extension PlayerViewModel: PlaybackSnapshotResuming, PlaybackSnapshotRecording {}
 
 extension PlaybackRoute {
     var isNative: Bool {

@@ -2,21 +2,26 @@
 import AVFoundation
 import CoreImage
 import Observation
+import PlayerKit
 import QuartzCore
+import StremioKit
 import SwiftUI
 import UIKit
 import VideoToolbox
 
-/// Machine-learning super resolution for the AVPlayer engine, on VideoToolbox's low-latency super-resolution scaler (iOS 26). Frames come
-/// from an `AVPlayerItemVideoOutput`, are scaled on the device's Neural Engine/GPU, and are shown in a sample-buffer layer over the player
-/// layer. It steps aside, saying why, when it cannot help: HDR (the scaler takes 8-bit frames), video already at screen resolution, a
-/// chip without the scaler, or frames that take longer than the frame interval.
+/// Machine-learning super resolution, on VideoToolbox's low-latency super-resolution scaler (iOS 26), for the AVPlayer engine and for
+/// AetherEngine, which plays through an AVPlayer. Frames come from an `AVPlayerItemVideoOutput`, are scaled on the device's Neural
+/// Engine/GPU, and are shown in a sample-buffer layer over the picture. It steps aside, saying why, when it cannot help: HDR (the scaler
+/// takes 8-bit frames), video already at the size it is shown, a chip without the scaler, or frames that take longer than the frame
+/// interval. What it did is kept for Settings (`UpscalingReport`).
 @MainActor
 @Observable
 final class SuperResolutionRenderer {
     /// What it is doing, for the statistics panel.
     private(set) var status = "Off"
     private(set) var isRendering = false
+    /// Scaled frames shown in the last second, while it runs.
+    private(set) var framesPerSecond: Int?
 
     @ObservationIgnored let displayLayer = AVSampleBufferDisplayLayer()
     @ObservationIgnored private weak var player: AVPlayer?
@@ -24,10 +29,19 @@ final class SuperResolutionRenderer {
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var pipeline: (any VideoScalingPipeline)?
     @ObservationIgnored private var link: CADisplayLink?
-    @ObservationIgnored private var targetSize = CGSize.zero
+    @ObservationIgnored private var displayScale: CGFloat = 1
+    /// The picture's size, in pixels, when the scale was last decided; a new size (a rotation) decides again.
+    @ObservationIgnored private var decidedSize = CGSize.zero
     @ObservationIgnored private var wanted = false
     @ObservationIgnored private var blockedBySubtitles = false
     @ObservationIgnored private var observation: NSKeyValueObservation?
+    @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
+    @ObservationIgnored private var poll: Task<Void, Never>?
+    /// What it did while it ran during this video, for the report.
+    @ObservationIgnored private var ranSummary: String?
+    @ObservationIgnored private var peakFramesPerSecond = 0
+    @ObservationIgnored private var countedFrames = 0
+    @ObservationIgnored private var countedSince = CACurrentMediaTime()
 
     static var isSupportedOnThisDevice: Bool {
         #if targetEnvironment(simulator)
@@ -43,33 +57,94 @@ final class SuperResolutionRenderer {
         displayLayer.backgroundColor = UIColor.clear.cgColor
     }
 
-    /// `targetSize` is the layer's size in pixels. Call again when anything changes; it starts or stops as needed.
-    func update(player: AVPlayer?, wanted: Bool, targetSize: CGSize, gravity: AVLayerVideoGravity, embeddedSubtitlesOn: Bool) {
+    /// `source` gives the AVPlayer playing the picture: AVPlayer itself, or AetherEngine's, which it swaps as it rebuilds its session, so
+    /// it is followed every half second. The scale is decided from the size the picture is shown at (the display layer's, which its host
+    /// lays out with the picture) and asked again whenever that size changes. Call again when anything changes; it starts or stops as
+    /// needed.
+    func update(source: (any AVPlayerFrameSource)?, wanted: Bool, displayScale: CGFloat, gravity: AVLayerVideoGravity,
+                embeddedSubtitlesOn: Bool) {
         displayLayer.videoGravity = gravity
-        self.targetSize = targetSize
+        self.displayScale = max(displayScale, 1)
         self.blockedBySubtitles = embeddedSubtitlesOn
-        let changedPlayer = player !== self.player || player?.currentItem !== item
         self.wanted = wanted
-        if !wanted || player == nil || embeddedSubtitlesOn {
-            stop(reason: !wanted ? "Off" : embeddedSubtitlesOn ? "Paused while the stream's own subtitles are on (they are drawn under the scaled picture)" : "Off")
-            self.player = player
-            return
-        }
-        if changedPlayer || pipeline == nil {
-            stop(reason: "Waiting for the video…")
-            self.player = player
-            item = player?.currentItem
-            observation = item?.observe(\.presentationSize, options: [.initial, .new]) { [weak self] _, _ in
-                Task { @MainActor in self?.prepare() }
+        self.source = source
+        refresh()
+        if wanted, source != nil {
+            if poll == nil {
+                poll = Task { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard let self else { return }
+                        self.refresh()
+                        self.countFrames()
+                    }
+                }
             }
+        } else {
+            poll?.cancel()
+            poll = nil
         }
     }
 
+    private func refresh() {
+        let player = source?.framePlayer
+        guard wanted, let player, !blockedBySubtitles else {
+            let reason = !wanted ? "Off"
+                : blockedBySubtitles ? "Paused while the stream's own subtitles are on (they are drawn under the scaled picture)"
+                : "Not available: this player draws the picture itself (mpv, or AetherEngine's software path)"
+            if pipeline != nil || status != reason { stop(reason: reason) }
+            // Forgotten, so turning it on again starts afresh.
+            self.player = nil
+            item = nil
+            observation = nil
+            return
+        }
+        if engineSaysHDR, pipeline != nil {
+            stop(reason: Self.hdrReason)
+            return
+        }
+        guard player !== self.player || player.currentItem !== item else {
+            // The same video: a picture laid out at a new size (the first layout, a rotation) decides the scale again.
+            if pipeline == nil, pictureSize != decidedSize { prepare() }
+            return
+        }
+        stop(reason: "Waiting for the video…")
+        self.player = player
+        item = player.currentItem
+        observation = item?.observe(\.presentationSize, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor in self?.prepare() }
+        }
+    }
+
+    /// The size the picture is shown at, in pixels: the display layer's frame, which its host keeps on the picture.
+    private var pictureSize: CGSize {
+        CGSize(width: (displayLayer.bounds.width * displayScale).rounded(), height: (displayLayer.bounds.height * displayScale).rounded())
+    }
+
+    /// The engine's word on HDR, for streams whose asset does not say (AetherEngine's, which can learn it only after loading).
+    private var engineSaysHDR: Bool { (source as? any PictureOverlayHosting)?.pictureIsHDR == true }
+
+    private static let hdrReason = "Not used for HDR video (the scaler takes 8-bit SDR frames)"
+
+    /// Ends this video: what it did goes to Settings' report, when AI upscaling was chosen.
     func tearDown() {
+        poll?.cancel()
+        poll = nil
+        source = nil
+        // A video closed before anything was decided (still waiting for it) leaves the last report as it was.
+        let undecided = status == "Off" || status.hasPrefix("Waiting")
+        if wanted, let summary = ranSummary {
+            UpscalingReport.record(undecided || isRendering ? summary : "\(summary). Then: \(status)")
+        } else if wanted, !undecided {
+            UpscalingReport.record(status)
+        }
         stop(reason: "Off")
         observation = nil
         player = nil
         item = nil
+        ranSummary = nil
+        peakFramesPerSecond = 0
+        wanted = false
     }
 
     private func prepare() {
@@ -79,6 +154,12 @@ final class SuperResolutionRenderer {
         #else
         guard Self.isSupportedOnThisDevice else {
             stop(reason: "This device has no machine-learning video scaler; the standard scaler is used")
+            return
+        }
+        let size = pictureSize
+        decidedSize = size
+        guard size.width > 0, size.height > 0 else {
+            stop(reason: "Waiting for the picture's size…")
             return
         }
         Task { [weak self] in
@@ -92,20 +173,25 @@ final class SuperResolutionRenderer {
     #if !targetEnvironment(simulator)
     private func start(item: AVPlayerItem, isHDR: Bool) {
         guard wanted, pipeline == nil, item === self.item else { return }
-        guard !isHDR else {
-            stop(reason: "Not used for HDR video (the scaler takes 8-bit SDR frames)")
+        guard !isHDR, !engineSaysHDR else {
+            stop(reason: Self.hdrReason)
             return
         }
         let source = item.presentationSize
         let width = Int(source.width), height = Int(source.height)
-        let needed = max(targetSize.width / source.width, targetSize.height / source.height)
+        let shown = pictureSize
+        decidedSize = shown
+        // Fitted inside its frame, the picture is scaled by the smaller ratio; filling it (or a frame already the picture's shape), by
+        // the larger.
+        let ratios = (shown.width / source.width, shown.height / source.height)
+        let needed = displayLayer.videoGravity == .resizeAspect ? min(ratios.0, ratios.1) : max(ratios.0, ratios.1)
         guard needed > 1.15 else {
-            stop(reason: "Not needed: the video is already at the screen's resolution")
+            stop(reason: "Not needed: the \(width)×\(height) video is shown at \(Int(shown.width))×\(Int(shown.height)) or smaller")
             return
         }
         if let maximum = VTLowLatencySuperResolutionScalerConfiguration.maximumDimensions,
            width > Int(maximum.width) || height > Int(maximum.height) {
-            stop(reason: "The video is larger than the scaler takes (\(maximum.width)×\(maximum.height))")
+            stop(reason: "The video is larger than the scaler takes (\(Int(maximum.width))×\(Int(maximum.height)))")
             return
         }
         let factors = VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors(frameWidth: width, frameHeight: height).sorted()
@@ -129,7 +215,11 @@ final class SuperResolutionRenderer {
         self.link = link
         displayLayer.isHidden = false
         isRendering = true
-        status = "AI super resolution ×\(factor.formatted()) (VideoToolbox): \(width)×\(height) → \(Int(Float(width) * factor))×\(Int(Float(height) * factor))"
+        countedFrames = pipeline.shownFrames
+        countedSince = CACurrentMediaTime()
+        let scaled = "\(Int(Float(width) * factor))×\(Int(Float(height) * factor))"
+        status = "On: ×\(factor.formatted()), \(width)×\(height) → \(scaled)"
+        ranSummary = "Ran ×\(factor.formatted()): \(width)×\(height) → \(scaled)"
     }
     #endif
 
@@ -139,6 +229,26 @@ final class SuperResolutionRenderer {
         guard output.hasNewPixelBuffer(forItemTime: time),
               let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
         pipeline.submit(buffer, presentationTime: time, frameInterval: link.targetTimestamp - link.timestamp)
+    }
+
+    /// The scaled frames shown since the last count, as a rate: proof it is working, for Info and the report.
+    private func countFrames() {
+        guard let pipeline, isRendering else {
+            if framesPerSecond != nil { framesPerSecond = nil }
+            return
+        }
+        let now = CACurrentMediaTime()
+        let shown = pipeline.shownFrames
+        let elapsed = now - countedSince
+        guard elapsed >= 0.9 else { return }
+        let rate = Int((Double(shown - countedFrames) / elapsed).rounded())
+        countedFrames = shown
+        countedSince = now
+        if framesPerSecond != rate { framesPerSecond = rate }
+        if rate > peakFramesPerSecond, let summary = ranSummary?.components(separatedBy: ", up to ").first {
+            peakFramesPerSecond = rate
+            ranSummary = "\(summary), up to \(rate) frames a second"
+        }
     }
 
     private func stop(reason: String) {
@@ -151,6 +261,7 @@ final class SuperResolutionRenderer {
         displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true) {}
         displayLayer.isHidden = true
         isRendering = false
+        if framesPerSecond != nil { framesPerSecond = nil }
         status = reason
     }
 
@@ -160,6 +271,18 @@ final class SuperResolutionRenderer {
         let transfer = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
         return transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String)
             || transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String)
+    }
+}
+
+/// What AI upscaling did on the last video played with it chosen, kept for Settings › Player. Saved in the standard defaults, as a line
+/// and a date, so it is still there after a relaunch.
+enum UpscalingReport {
+    static let summaryKey = "upscaling.lastReport"
+    static let dateKey = "upscaling.lastReportDate"
+
+    static func record(_ summary: String) {
+        UserDefaults.standard.set(summary, forKey: summaryKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: dateKey)
     }
 }
 
@@ -176,6 +299,8 @@ private final class DisplayLinkTarget: NSObject {
 private protocol VideoScalingPipeline: AnyObject {
     func submit(_ source: CVPixelBuffer, presentationTime: CMTime, frameInterval: CFTimeInterval)
     func end()
+    /// Scaled frames handed to the display layer so far.
+    var shownFrames: Int { get }
 }
 
 #if !targetEnvironment(simulator)
@@ -190,6 +315,9 @@ private final class SuperResolutionPipeline: VideoScalingPipeline, @unchecked Se
     private var busy = false
     private var slowFrames = 0
     private var ended = false
+    private var shown = 0
+
+    var shownFrames: Int { lock.withLock { shown } }
 
     @MainActor
     init?(configuration: VTLowLatencySuperResolutionScalerConfiguration, layer: AVSampleBufferDisplayLayer, onSlow: @escaping @Sendable () -> Void) {
@@ -233,6 +361,7 @@ private final class SuperResolutionPipeline: VideoScalingPipeline, @unchecked Se
             }
             guard error == nil, let sample = Self.sampleBuffer(output.buffer, time: presentationTime) else { return }
             renderer.enqueue(sample)
+            lock.withLock { shown += 1 }
         }
     }
 
@@ -265,37 +394,71 @@ private struct UncheckedBuffer: @unchecked Sendable {
 }
 #endif
 
-/// Ambient mode: the colours at the picture's edges, sampled twice a second from a tiny copy of the frame, for a glow around
-/// letterboxed video. Reads AVPlayer frames only; the fallback engine draws straight to the screen, so there is nothing to sample there.
+/// Small copies of the picture's frames, read twice a second from the AVPlayer playing it (AVPlayer, or AetherEngine through its
+/// AVPlayer): ambient mode's colours, taken just inside the picture rather than from its bars, and the black bars the film carries in its
+/// own frame (`LetterboxEstimate`), for the No Bars zoom. There is nothing to read when another renderer draws the picture (mpv,
+/// AetherEngine's software path).
 @MainActor
 @Observable
-final class AmbientSampler {
-    /// Left, right, top and bottom edge colours.
+final class PictureSampler {
+    /// Left, right, top and bottom edge colours, while ambient mode is on.
     private(set) var colours: [Color] = []
+    /// The crop that takes off the film's own black bars; nil when it has none, or until they are known.
+    private(set) var barsCrop: VideoCrop?
 
+    @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
     @ObservationIgnored private weak var item: AVPlayerItem?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private let context = CIContext(options: [.workingColorSpace: NSNull()])
+    @ObservationIgnored private var samplesColours = false
+    @ObservationIgnored private var estimate = LetterboxEstimate()
+    /// The bars of this video are measured and ambient mode is off: the frame copy is let go, so the video plays with nothing reading it.
+    @ObservationIgnored private var isSettled = false
 
-    func update(player: AVPlayer?, enabled: Bool) {
-        guard enabled, let item = player?.currentItem else {
+    /// Bright frames after which the bars of a video count as measured for good: twice what a first reading needs, about ten seconds.
+    private static let samplesToSettle = LetterboxEstimate.samplesNeeded * 2
+
+    /// The copy's size: enough lines to place a bar within about half a per cent of the frame, so the thin bars of a 1.85:1 film
+    /// (~2% each side) read as 2–3 lines and a single line of noise does not read as a bar at all.
+    private static let width = 256, height = 144
+
+    /// The frame's mean luma, taken every fourth pixel of every fourth line; `LetterboxEstimate.isBrightFrame` rejects a dark scene
+    /// or a fade on it, so only frames that show the picture are measured.
+    private static func isBrightFrame(_ width: Int, _ height: Int, stride: Int, pixels: UnsafePointer<UInt8>) -> Bool {
+        var total = 0, counted = 0
+        var y = 0
+        while y < height {
+            var x = 0
+            let row = pixels + y * stride
+            while x < width {
+                let p = row + x * 4
+                total += (Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8
+                counted += 1
+                x += 4
+            }
+            y += 4
+        }
+        return LetterboxEstimate.isBrightFrame(meanLuma: counted > 0 ? total / counted : 0)
+    }
+
+    func update(source: (any AVPlayerFrameSource)?, ambient: Bool) {
+        samplesColours = ambient
+        if !ambient, !colours.isEmpty { colours = [] }
+        guard let source else {
             stop()
             return
         }
-        guard item !== self.item else { return }
-        stop()
-        self.item = item
-        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: 32, kCVPixelBufferHeightKey as String: 18,
-        ])
-        item.add(output)
-        self.output = output
+        if source !== self.source {
+            stop()
+            self.source = source
+        }
+        guard task == nil else { return }
         task = Task { [weak self] in
             while !Task.isCancelled {
-                self?.sample()
-                try? await Task.sleep(for: .milliseconds(500))
+                guard let self else { return }
+                self.sample()
+                // Settled, it only looks for a new video (the next episode, AetherEngine's rebuilt item) every two seconds.
+                try? await Task.sleep(for: .milliseconds(self.isSettled ? 2000 : 500))
             }
         }
     }
@@ -303,30 +466,105 @@ final class AmbientSampler {
     func stop() {
         task?.cancel()
         task = nil
-        if let output { item?.remove(output) }
-        output = nil
-        item = nil
+        detach()
+        source = nil
         colours = []
     }
 
+    private func detach() {
+        releaseOutput()
+        item = nil
+        isSettled = false
+        estimate = LetterboxEstimate()
+        if barsCrop != nil { barsCrop = nil }
+    }
+
+    /// Takes the frame copy off the video. A video output makes the player convert every frame for it, which a UHD remux can feel.
+    private func releaseOutput() {
+        if let output { item?.remove(output) }
+        output = nil
+    }
+
     private func sample() {
+        // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session.
+        guard let item = source?.framePlayer?.currentItem else {
+            detach()
+            return
+        }
+        if item === self.item, isSettled {
+            // Ambient mode turned on after the bars were measured: it needs the frames again.
+            guard samplesColours else { return }
+            isSettled = false
+        }
+        if item !== self.item || output == nil {
+            if item !== self.item { detach() }
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: Self.width, kCVPixelBufferHeightKey as String: Self.height,
+            ])
+            item.add(output)
+            self.item = item
+            self.output = output
+        }
         guard let output else { return }
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
         guard let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
+        let size = item.presentationSize
+        read(buffer, frameAspect: size.height > 0 ? size.width / size.height : 16.0 / 9.0)
+    }
+
+    private func read(_ buffer: CVPixelBuffer, frameAspect: Double) {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
         let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer), stride = CVPixelBufferGetBytesPerRow(buffer)
+        guard width > 2, height > 2 else { return }
         let pixels = base.assumingMemoryBound(to: UInt8.self)
+        func luma(_ x: Int, _ y: Int) -> Int {
+            let p = pixels + y * stride + x * 4
+            return (Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8
+        }
+        // A black line: dark on average and with no bright point (noise and compression keep bars from being exactly 0).
+        func isBlack(_ count: Int, _ value: (Int) -> Int) -> Bool {
+            var sum = 0, peak = 0
+            for index in 0..<count {
+                let level = value(index)
+                sum += level
+                peak = max(peak, level)
+            }
+            return sum < 18 * count && peak < 48
+        }
+        var top = 0, bottom = 0, left = 0, right = 0
+        while top < height / 2, isBlack(width, { luma($0, top) }) { top += 1 }
+        while bottom < height / 2, isBlack(width, { luma($0, height - 1 - bottom) }) { bottom += 1 }
+        while left < width / 2, isBlack(height, { luma(left, $0) }) { left += 1 }
+        while right < width / 2, isBlack(height, { luma(width - 1 - right, $0) }) { right += 1 }
+        // Only bright frames are measured: on a dark scene or a fade the picture's own edges read as black, and a bar would seem to
+        // grow into the picture. A frame this dark is skipped, so the estimate only ever sees what the bars are when they are visible.
+        if Self.isBrightFrame(width, height, stride: stride, pixels: pixels) {
+            estimate.add(top: top, bottom: bottom, left: left, right: right, width: width, height: height)
+        }
+        let crop = estimate.crop(frameAspect: frameAspect)
+        if crop != barsCrop { barsCrop = crop }
+        guard samplesColours else {
+            if estimate.samples >= Self.samplesToSettle {
+                isSettled = true
+                releaseOutput()
+            }
+            return
+        }
+        // The colours just inside this frame's picture, not of its bars.
+        let x0 = min(left, width - 1), x1 = max(x0 + 1, width - right)
+        let y0 = min(top, height - 1), y1 = max(y0 + 1, height - bottom)
         func average(_ xs: Range<Int>, _ ys: Range<Int>) -> Color {
             var (r, g, b, n) = (0, 0, 0, 0)
             for y in ys { for x in xs { let p = pixels + y * stride + x * 4; b += Int(p[0]); g += Int(p[1]); r += Int(p[2]); n += 1 } }
             guard n > 0 else { return .black }
             return Color(red: Double(r) / Double(n * 255), green: Double(g) / Double(n * 255), blue: Double(b) / Double(n * 255))
         }
-        let edge = max(1, width / 6), band = max(1, height / 5)
-        colours = [average(0..<edge, 0..<height), average(width - edge..<width, 0..<height),
-                   average(0..<width, 0..<band), average(0..<width, height - band..<height)]
+        let edge = max(1, (x1 - x0) / 6), band = max(1, (y1 - y0) / 5)
+        colours = [average(x0..<x0 + edge, y0..<y1), average(x1 - edge..<x1, y0..<y1),
+                   average(x0..<x1, y0..<y0 + band), average(x0..<x1, y1 - band..<y1)]
     }
 }
 

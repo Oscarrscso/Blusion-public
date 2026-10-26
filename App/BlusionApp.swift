@@ -47,10 +47,14 @@ struct RootView: View {
     }
 
     /// Starts the daily IMDb ratings check without waiting for it: the download and the import run off the main actor, and a check that
-    /// is not due (the last one was under 24 hours ago) returns at once.
+    /// is not due (the last one was under 24 hours ago) returns at once. At launch it waits for Home's rows first (at most 30 seconds),
+    /// so on a fresh install the large download does not slow Home's first load.
     private func refreshIMDbDataset() {
         let ratings = environment.services.posterRatings
-        Task(priority: .utility) { await ratings.refreshIMDbDataset() }
+        Task(priority: .utility) {
+            await HomeStartup.shared.waitUntilSettled()
+            await ratings.refreshIMDbDataset()
+        }
     }
 
     var body: some View {
