@@ -38,6 +38,7 @@ public final class AVEngine: PlaybackEngine {
         var frameRate: Double?
         var sourceColour: String?
         var dolbyVision: String?
+        var dolbyVisionNote: String?
         var audioCodec: String?
         var audioChannels: String?
         var isSpatialAudioFormat = false
@@ -173,6 +174,7 @@ public final class AVEngine: PlaybackEngine {
         stats.frameRate = mediaInfo.frameRate
         stats.sourceColour = mediaInfo.sourceColour
         stats.dolbyVision = mediaInfo.dolbyVision
+        if let note = mediaInfo.dolbyVisionNote { stats.notes.append(note) }
         stats.audioCodec = mediaInfo.audioCodec
         stats.audioChannels = mediaInfo.audioChannels
         if mediaInfo.sourceColour?.hasPrefix("SDR") == false {
@@ -409,7 +411,18 @@ public final class AVEngine: PlaybackEngine {
             if let format = (try? await video.load(.formatDescriptions))?.first {
                 let codec = CMFormatDescriptionGetMediaSubType(format)
                 info.videoCodec = videoCodecName(codec)
-                if codec == kCMVideoCodecType_DolbyVisionHEVC || fourCC(codec) == "dvav" || fourCC(codec) == "dva1" { info.dolbyVision = "Dolby Vision (\(fourCC(codec)))" }
+                if codec == kCMVideoCodecType_DolbyVisionHEVC || fourCC(codec) == "dvav" || fourCC(codec) == "dva1" {
+                    info.dolbyVision = "Dolby Vision (\(fourCC(codec)))"
+                }
+                // AVFoundation exposes the Dolby Vision configuration under the sample-description
+                // atoms. Inspect its record even for an hvc1 HEVC tag (Profiles 8.1/8.4 can use it).
+                if let configuration = dolbyVisionConfiguration(of: format) {
+                    info.dolbyVision = configuration.label
+                    info.videoCodec = "HEVC (Dolby Vision)"
+                    #if targetEnvironment(macCatalyst)
+                    info.dolbyVisionNote = configuration.macPlaybackNote
+                    #endif
+                }
                 let transfer = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
                 let primaries = CMFormatDescriptionGetExtension(format, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String
                 info.sourceColour = colourName(transfer: transfer, primaries: primaries)
@@ -426,6 +439,17 @@ public final class AVEngine: PlaybackEngine {
             }
         }
         return info
+    }
+
+    private static func dolbyVisionConfiguration(of format: CMFormatDescription) -> DolbyVisionConfiguration? {
+        guard let atoms = CMFormatDescriptionGetExtension(
+            format, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms
+        ) as? [String: Any] else { return nil }
+        var payloads: [String: Data] = [:]
+        for key in ["dvcC", "dvvC"] {
+            if let bytes = atoms[key] as? Data { payloads[key] = bytes }
+        }
+        return DolbyVisionConfiguration.parse(atomPayloads: payloads)
     }
 
     private static func fourCC(_ code: FourCharCode) -> String {
