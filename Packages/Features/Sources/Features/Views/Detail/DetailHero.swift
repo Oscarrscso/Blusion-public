@@ -119,14 +119,9 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
         .ignoresSafeArea(.container, edges: [.top, .horizontal])
     }
 
-    /// The full overview in the landscape hero.
-    @ViewBuilder
+    /// Share portrait's folded, tappable synopsis and page-owned expansion state in landscape.
     private var landscapeOverview: some View {
-        if let description = model.detail.preview.description, !description.isEmpty {
-            JustifiedText(text: description, color: UIColor.label.withAlphaComponent(0.85), lineLimit: 0)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("detail.overview")
-        }
+        synopsis.accessibilityIdentifier("detail.overview")
     }
 
     /// Landscape, under the trailer's panel: the reviews opened from a rating. The synopsis already appears in the hero overview.
