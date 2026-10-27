@@ -13,8 +13,8 @@ An agent cannot do these: they need your Apple account, certificates and App Sto
 
 1. Pick a bundle id you own. The placeholder is `app.blusion.player` (`project.yml`: `PRODUCT_BUNDLE_IDENTIFIER`; the test targets append `.tests`, `.uitests`).
    Keep the "no third-party marks in the name or id" rule.
-2. Keep your Apple Developer Team ID out of version control. Set `BLUSION_DEVELOPMENT_TEAM` in your local shell (or choose a team in the generated Xcode project). Leave `CODE_SIGN_STYLE: Automatic` unless you manage profiles by hand.
-3. Regenerate and open: `xcodegen generate && open Blusion.xcodeproj`. Sign in under Xcode *Settings > Accounts* and select your team under *Signing & Capabilities* if building from Xcode. Regenerating the project resets that local choice; command-line builds can instead pass `DEVELOPMENT_TEAM="$BLUSION_DEVELOPMENT_TEAM"`.
+2. Keep your Apple Developer Team ID out of version control. Write it to `Config/Signing.xcconfig.local` (ignored by Git) as `DEVELOPMENT_TEAM = <Team ID>`; `Config/Signing.xcconfig` includes it in every configuration, and `scripts/install-iphone.sh` reads it too (`BLUSION_DEVELOPMENT_TEAM` in your shell takes precedence). Leave `CODE_SIGN_STYLE: Automatic` unless you manage profiles by hand.
+3. Regenerate and open: `xcodegen generate && open Blusion.xcodeproj`. Sign in under Xcode *Settings > Accounts*. With the local file in place, *Signing & Capabilities* already shows your team, and regenerating keeps it. A team picked only in that editor is reset by every regeneration. Command-line builds can also pass `DEVELOPMENT_TEAM="$BLUSION_DEVELOPMENT_TEAM"`.
 4. Bump `MARKETING_VERSION` (user-visible) and `CURRENT_PROJECT_VERSION` (must increase on every upload) in `project.yml`.
 
 ## 2. Build a signed archive

@@ -21,6 +21,9 @@ final class MPVMetalLayer: CAMetalLayer {
 
 final class MPVHostView: UIView {
     let metalLayer = MPVMetalLayer()
+    /// The view has a new width: side margins given in points are worked out again.
+    var onResize: (() -> Void)?
+    private var laidOutWidth: CGFloat = 0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -55,6 +58,10 @@ final class MPVHostView: UIView {
         let scale = max(traitCollection.displayScale, 1)
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        if bounds.width != laidOutWidth {
+            laidOutWidth = bounds.width
+            onResize?()
+        }
     }
 }
 
@@ -309,6 +316,7 @@ public final class MPVBackend: FallbackBackend {
     private var layout = VideoLayout()
     /// What was last set, so a reconfig that follows a change doesn't set it again (setting `vf` reconfigures the video once more).
     private var appliedCrop: String?
+    private var appliedMargin: String?
     private var appliedFilter: String?
     /// The playing video's Dolby Vision profile, read at each reconfig; nil when it has none.
     private var dolbyVisionProfile: Int?
@@ -331,6 +339,7 @@ public final class MPVBackend: FallbackBackend {
         self.continuation = continuation
         Self.activateAudioSession()
         setUp()
+        host.onResize = { [weak self] in self?.applyMargins() }
     }
 
     public func makeEventStream() -> AsyncStream<FallbackEvent> { events }
@@ -466,7 +475,17 @@ public final class MPVBackend: FallbackBackend {
         // video-zoom is a power of two.
         set("video-zoom", String(log2(layout.zoom)))
         set("video-aspect-override", layout.aspect.ratio.map { String($0) } ?? "no")
+        applyMargins()
         applyPicture()
+    }
+
+    /// Normal's safe-area inset as mpv's side margins, a share of the view's width. mpv redraws at once: it cannot ease the change in.
+    func applyMargins() {
+        let width = Double(host.bounds.width)
+        let ratio = width > 0 ? min(0.45, layout.inset / width) : 0
+        let value = String(format: "%.4f", ratio)
+        guard value != appliedMargin else { return }
+        if set("video-margin-ratio-left", value), set("video-margin-ratio-right", value) { appliedMargin = value }
     }
 
     /// The crop (in source pixels, so it needs the video's size) and the Dolby Vision filter. Run again at each video reconfig.
@@ -476,9 +495,10 @@ public final class MPVBackend: FallbackBackend {
         if let profile = read.int("current-tracks/video/dolby-vision-profile"), profile > 0 { dolbyVisionProfile = profile } else { dolbyVisionProfile = nil }
         var crop = "0x0+0+0"   // no crop
         if let width = read.int("video-params/w"), let height = read.int("video-params/h"), width > 0, height > 0, layout.crop != .off {
-            let shown = layout.aspect.ratio
-                ?? (read.int("video-params/dw").flatMap { dw in read.int("video-params/dh").map { dh in dh > 0 ? Double(dw) / Double(dh) : 0 } })
-                ?? Double(width) / Double(height)
+            // The whole frame's shape from its pixels and their pixel aspect, never from dw/dh, which can already reflect the crop set
+            // here and would undo it on the next reconfig.
+            let pixelAspect = read.double("video-params/par").flatMap { $0 > 0 ? $0 : nil } ?? 1
+            let shown = layout.aspect.ratio ?? Double(width) * pixelAspect / Double(height)
             let kept = VideoGeometry.keptFraction(aspect: shown, crop: layout.crop.ratio)
             let keptWidth = Int((Double(width) * kept.width).rounded()), keptHeight = Int((Double(height) * kept.height).rounded())
             crop = "\(keptWidth)x\(keptHeight)+\((width - keptWidth) / 2)+\((height - keptHeight) / 2)"

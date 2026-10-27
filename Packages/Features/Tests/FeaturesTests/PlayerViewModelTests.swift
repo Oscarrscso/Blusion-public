@@ -359,15 +359,10 @@ import StremioKitTestSupport
         await model.endScrub()
         #expect(!model.controlsVisible && engines.made["a"]?.seeks == [100])
 
-        model.zoomPicture(in: true, barsCrop: nil)
-        #expect(!model.controlsVisible && model.pictureZoom == .fill)
-        // The film's bars can be measured after the pinch has ended.
-        model.setPictureZoom(.noBars, barsCrop: .ratio240)
-        #expect(!model.controlsVisible && model.pictureZoom == .noBars)
-        model.zoomPicture(in: false, barsCrop: .ratio240)
-        #expect(!model.controlsVisible && model.pictureZoom == .fill)
-        model.zoomPicture(in: false, barsCrop: nil)
-        #expect(!model.controlsVisible && model.pictureZoom == .original)
+        model.pinchZoom(in: true)
+        #expect(!model.controlsVisible && model.zoomMode == .crop)
+        model.pinchZoom(in: false)
+        #expect(!model.controlsVisible && model.zoomMode == .normal)
 
         model.beginScrub()
         model.updateScrub(fraction: 0.75)
@@ -456,27 +451,83 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// The pinch's steps: Original → Fill → No Bars (only for a film with bars of its own), and back.
-    @Test func pinchingStepsThroughOriginalFillAndNoBars() async throws {
+    /// The pinch is a shortcut for Zoom Mode: out fills the screen (Crop), in shows the whole picture (Normal). It never steps further.
+    @Test func pinchingSwitchesBetweenNormalAndCrop() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
-        model.setPictureZoom(.original, barsCrop: nil)
-        #expect(model.pictureZoom == .original)
-        model.zoomPicture(in: true, barsCrop: nil)
-        #expect(model.pictureZoom == .fill && model.videoLayout.crop == .off)
-        model.zoomPicture(in: true, barsCrop: nil)
-        #expect(model.pictureZoom == .fill, "no bars of its own: Fill is the last step")
-        model.zoomPicture(in: true, barsCrop: .ratio240)
-        #expect(model.pictureZoom == .noBars && model.videoLayout.crop == .ratio240 && model.videoLayout.fit == .fill)
-        model.zoomPicture(in: true, barsCrop: .ratio240)
-        #expect(model.pictureZoom == .noBars)
-        model.zoomPicture(in: false, barsCrop: .ratio240)
-        #expect(model.pictureZoom == .fill && model.videoLayout.crop == .off)
-        model.zoomPicture(in: false, barsCrop: .ratio240)
-        #expect(model.pictureZoom == .original)
-        model.zoomPicture(in: false, barsCrop: .ratio240)
-        #expect(model.pictureZoom == .original)
+        model.pinchZoom(in: true)
+        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fill))
+        model.pinchZoom(in: true)
+        #expect(model.zoomMode == .crop, "Crop is the last step")
+        model.pinchZoom(in: false)
+        #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit))
+        model.setZoomMode(.stretch)
+        model.pinchZoom(in: false)
+        #expect(model.zoomMode == .normal)
+        await model.close()
+    }
+
+    /// As in Infuse: Normal and Aspect Fit show the whole frame, Crop fills the screen, Stretch fills it exactly. Normal keeps clear of
+    /// the notch (the safe area); the others use the whole screen.
+    @Test func zoomModesSetTheRenderersLayout() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        #expect(model.zoomMode == .normal && model.aspectRatio == .auto, "the defaults: Normal, Auto")
+        model.setSafeAreaInset(59)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59), "Normal fits inside the safe area")
+        model.setZoomMode(.aspectFit)
+        if PlayerViewModel.ZoomMode.available.contains(.aspectFit) {
+            #expect(model.videoLayout == VideoLayout(fit: .fit), "Aspect Fit fits to the whole screen")
+        } else {
+            #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit, inset: 59), "a Mac has no Aspect Fit")
+        }
+        model.setZoomMode(.crop)
+        #expect(model.videoLayout == VideoLayout(fit: .fill), "Auto: Crop fills with the whole frame, nothing detected")
+        model.setZoomMode(.stretch)
+        #expect(model.videoLayout == VideoLayout(fit: .stretch))
+        model.setZoomMode(.normal)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59))
+        await model.close()
+    }
+
+    /// The zoom button steps through every mode this device offers and round again.
+    @Test func theZoomButtonCyclesTheModes() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        var seen: [PlayerViewModel.ZoomMode] = []
+        for _ in PlayerViewModel.ZoomMode.available {
+            model.cycleZoomMode()
+            seen.append(model.zoomMode)
+        }
+        #expect(seen == Array(PlayerViewModel.ZoomMode.available.dropFirst()) + [.normal])
+        await model.close()
+    }
+
+    /// Video › Aspect Ratio, as in Infuse: Crop and Stretch use it as the shape of the picture inside the frame, so a 1.85:1 film in a
+    /// 16:9 file loses its baked-in bars; Normal and Aspect Fit show the whole frame. It never reshapes the picture.
+    @Test func aspectRatioIsUsedByCropAndStretchOnly() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        model.setAspectRatio(.widescreenA)
+        #expect(model.aspectRatio == .widescreenA && model.videoLayout == VideoLayout(fit: .fit), "Normal shows the whole frame")
+        model.setZoomMode(.crop)
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio185), "Crop fills the screen with the 1.85:1 picture")
+        model.setAspectRatio(.anamorphicB)
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
+        model.setZoomMode(.stretch)
+        #expect(model.videoLayout == VideoLayout(fit: .stretch, crop: .ratio239))
+        model.setZoomMode(.normal)
+        #expect(model.videoLayout == VideoLayout(fit: .fit), "Normal shows the whole frame")
+        model.setZoomMode(.crop)
+        model.setAspectRatio(.sdtv)
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio4x3), "4:3 crops the sides of a 16:9 frame")
+        model.setAspectRatio(.auto)
+        #expect(model.videoLayout == VideoLayout(fit: .fill))
+        #expect(engines.made["a"]?.layouts.allSatisfy { $0.aspect == .source } == true, "the display aspect is never changed")
         await model.close()
     }
 

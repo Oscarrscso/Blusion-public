@@ -155,7 +155,7 @@ final class PlaybackFlowTests: XCTestCase {
         let count = bar.buttons.count
         XCTAssertGreaterThanOrEqual(count, 4, "Subtitles, Speed, Picture and Info at least")
         XCTAssertFalse((0..<count).contains { bar.buttons.element(boundBy: $0).isSelected }, "no menu is open yet")
-        bar.buttons["Picture"].tap()
+        bar.buttons["Video"].tap()
         let panel = app.otherElements["player.panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         XCTAssertTrue(bar.isHittable, "the bar stays while its menu is open")
@@ -199,7 +199,7 @@ final class PlaybackFlowTests: XCTestCase {
         bar.buttons.element(boundBy: count - 1).tap()
         wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: panel)], timeout: 5)
         XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 5))
-        bar.buttons["Picture"].tap()
+        bar.buttons["Video"].tap()
         XCTAssertTrue(panel.waitForExistence(timeout: 5))
         app.buttons["player.panel.close"].tap()
         XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 5))

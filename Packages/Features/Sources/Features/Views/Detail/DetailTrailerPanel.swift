@@ -4,7 +4,8 @@ import UIKit
 
 /// The trailer's place on the title page, under the actions and above the synopsis: the player in a panel shaped like the trailer's
 /// picture while a trailer plays (16:9 when the shape is not known; AVKit's player for a direct file, YouTube's embedded player for a
-/// YouTube video), or one line saying it could not be played with a button that tries again. Nothing is shown in the other phases.
+/// YouTube video), or one line saying it could not be played with a button that tries again. Nothing is shown while it loads (the trailer button
+/// shows the spinner) or when idle.
 struct DetailTrailerPanel: View {
     let model: DetailViewModel
     /// The panel's width. Its height follows the picture's shape, and in landscape it is never taller than 16:9 at this width.
@@ -49,15 +50,7 @@ struct DetailTrailerPanel: View {
         case .failed(let message):
             InlineErrorView(message) { model.toggleTrailer() }
                 .accessibilityIdentifier("detail.trailerError")
-        case .loading:
-            RoundedRectangle(cornerRadius: Theme.Radius.surface)
-                .fill(Theme.placeholder)
-                .frame(width: size.width, height: size.height)
-                .mediaArtwork()
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel("Loading trailer")
-                .loadingCardSpinner()
-        case .idle:
+        case .idle, .loading:
             EmptyView()
         }
     }

@@ -10,6 +10,9 @@ struct PersonView: View {
     @State private var isBiographyExpanded = false
     @State private var isBiographyTruncated = false
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    /// `isPhoneLandscape` is also true on an iPad turned sideways; only a phone swaps its navigation bar for the landscape bar.
+    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     /// The Mac page reads from the left, 60 points from the sidebar like the title page, with its credits in columns. iPhone and iPad
     /// keep the centred page with one column.
@@ -47,8 +50,13 @@ struct PersonView: View {
             }
             .padding(.bottom, Theme.Spacing.xxl)
         }
+        // Phone landscape: no navigation bar; the page starts below the corner Back and the name sits on top of the landscape bar.
+        .contentMargins(.top, isPhoneInLandscape ? LandscapeTabBarState.backClearance : 0, for: .scrollContent)
+        .trackLandscapeTabScroll()
         .screenBackground()
-        .navigationTitle(model.destination.name)
+        // The name is the page's own heading, so the bar carries no title, and no soft fade darkens the top of the page.
+        .scrollEdgeEffectHidden(true, for: .top)
+        .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
         .accessibilityIdentifier("person.scroll")

@@ -7,14 +7,31 @@ on 2026-10-24; `PlaybackEngine.statistics()` still reads what the engine decodes
 **Options panel (all engines, iPhone and Mac; replaced the system menus on 2026-10-24):** the bar under the timeline opens one glass
 panel, at the side on a wide screen and at the bottom on a tall one, with tabs for Subtitles, Audio, Picture, Speed and Chapters. Values
 are chips, delays are −/+ steppers (hold to repeat, tap the value to reset), switches are toggles; picking a track or a chapter closes it,
-a tap outside or Escape closes it too. **Start-up:** no spinner while a stream starts or while the controls show (the play button sits
-there); it shows only for a stall after playback began, with the controls hidden. The picture never animates into place: the video views
+a tap outside or Escape closes it too. **Start-up (2026-10-25):** until the film's first frame is on screen (`PlayerContent.isVideoReady`;
+playing over AirPlay counts) the player shows only a spinner on black, and Close: no poster, play button, skip buttons, subtitles or
+scrubber. Another
+stream or the next episode waits for its own first frame the same way. After that the spinner shows only for a stall, with the controls
+hidden. The picture never animates into place: the video views
 lay out with Core Animation's actions off, so a new size or scaling mode doesn't slide it up or down.
 
 **Preload (iPhone and iPad, AetherEngine):** the moment a player opens (`PlayerContent.init`, before its screen appears), its first stream
 starts downloading with `AetherEngine.prewarm` (4 MB, redirects followed: a debrid link resolves here), and `AetherSession.load` waits up
 to 4 s for a warm still under way, since the engine adopts only a finished one. AVPlayer and mpv fetch their own bytes, so their streams
 are not warmed.
+
+**Readied before it opens (iPhone, iPad and Mac):** a stream Blusion plays opens its player only once the film is ready. Tapping a
+stream (or Auto Pick) turns its play button into a spinner while `PlayerViewModel.prepare` starts it off screen: muted, held paused on
+its first frame, saving no progress (`ProgressSession.isRecording`), so nothing reaches Continue Watching or Trakt. The player screen
+takes that model and plays at once. The first stream listed starts readying in the background as soon as it arrives, so playing it is
+nearly instant; tapping another stream replaces it, tapping the spinning one calls it off, and leaving the picker closes it. A muted
+start still takes the audio session, so music from another app stops when a stream list loads. mpv's view starts at 1280×720 so it has
+a picture layer to draw on before the screen lays it out. The picture itself can only be drawn once the player's screen is up, so the
+player's spinner takes over from the button's until the first frame: a spinner shows from the tap until the picture.
+
+**Swipe to seek (iPhone and iPad, 2026-10-25):** a sideways swipe anywhere on the picture seeks, right forward and left back. A swipe across
+the whole width moves two minutes, or the whole of a shorter video (`SwipeSeek`). It drives the timeline's own scrub, so the timeline shows
+where it will land, and it seeks once, when the finger lifts. A drag's first movement decides it: up or down at the sides stays brightness
+and volume (that Settings switch covers only those two), and a drag that is part of a pinch never seeks.
 
 **Picture tab (all engines, iPhone and Mac):** Fit / Fill / Stretch, Zoom, **Aspect Ratio** (Original, 1:1, 5:4, 4:3, 3:2, 1.66, 16:10,
 16:9, 1.85, 1.90, 2:1, 2.20, 2.35, 2.39, 2.40, 2.55, 2.76) and **Crop** (4:3 to 2.76:1, centred, takes off bars burned into the video). mpv
@@ -93,8 +110,8 @@ iCloud Keychain). Intentionally iPhone/iPad-only:
 - **The fallback engine.** MPVKit 0.41's `Libuavs3d` (AVS3 decoder) and `Libluajit` binaries have no Mac Catalyst slice, so the Catalyst
   build cannot link `_FFmpeg`. Until a build of MPVKit without them exists, the Mac plays MP4/MOV/HLS only; mpv-only features (full ASS
   styling, PGS/VobSub in MKV, TrueHD/DTS, audio delay, deinterlacing, tone-mapping choice) follow from that.
-- **Brightness and volume swipes and pinch zoom.** No touch screen; the Mac's keyboard already sets the volume (↑ ↓ M) and an app cannot set
-  a Mac display's brightness. Zoom is in the Picture tab on both.
+- **Brightness and volume swipes, swipe to seek, and pinch zoom.** No touch screen; the Mac's keyboard already sets the volume (↑ ↓ M) and
+  seeks 10 s (← →), the timeline can be dragged, and an app cannot set a Mac display's brightness. Zoom is in the Picture tab on both.
 
 ## Blockers and what would unblock them
 

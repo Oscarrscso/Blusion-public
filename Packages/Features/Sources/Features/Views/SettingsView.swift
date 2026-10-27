@@ -142,7 +142,7 @@ struct SettingsView: View {
             .trackLandscapeTabScroll()
             .screenBackground()
             .navigationTitle("Settings")
-            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await model.load()

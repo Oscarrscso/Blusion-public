@@ -7,7 +7,6 @@ struct DiscoverView: View {
     @State private var model: DiscoverViewModel
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
-    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
     let onOpenAddons: () -> Void
@@ -33,13 +32,15 @@ struct DiscoverView: View {
                         EmptyAddonsView(onOpenAddons: onOpenAddons)
                     }
                 }
-                .padding(.vertical, Theme.Spacing.l)
+                .padding(.top, isPhoneInLandscape ? 0 : Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.l)
                 .id(Self.topID)
             }
             .trackLandscapeTabScroll()
             .screenBackground()
+            .ignoresSafeArea(.container, edges: isPhoneInLandscape ? .top : [])
             .navigationTitle("")
-            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)

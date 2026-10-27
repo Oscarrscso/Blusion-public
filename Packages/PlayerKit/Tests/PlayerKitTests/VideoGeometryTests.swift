@@ -75,6 +75,18 @@ import StremioKit
         #expect(close(geometry.visible, CGRect(origin: .zero, size: phone)))
     }
 
+    /// Zoom Mode's Normal keeps clear of the notch: a picture wider than the safe area fits its width, still centred on the screen.
+    @Test func theSafeAreaInsetNarrowsFitAndKeepsThePictureCentred() throws {
+        let scope = CGSize(width: 2390, height: 1000)
+        let inset = try #require(VideoGeometry(bounds: phone, source: scope, layout: VideoLayout(fit: .fit, inset: 59)))
+        #expect(abs(inset.visible.width - (852 - 118)) < 0.5 && abs(inset.visible.midX - 426) < 0.5)
+        let whole = try #require(VideoGeometry(bounds: phone, source: scope, layout: VideoLayout(fit: .fit)))
+        #expect(abs(whole.visible.width - 852) < 0.5, "Aspect Fit uses the whole screen")
+        // A 16:9 picture is narrower than the safe area already: the inset changes nothing.
+        let hdInset = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fit, inset: 59)))
+        #expect(close(hdInset.visible, try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fit))).visible))
+    }
+
     @Test func noSizeNoGeometry() {
         #expect(VideoGeometry(bounds: .zero, source: hd, layout: VideoLayout()) == nil)
         #expect(VideoGeometry(bounds: phone, source: .zero, layout: VideoLayout()) == nil)

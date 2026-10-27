@@ -190,7 +190,7 @@ public struct LibraryFilter: Equatable, Sendable {
         }
         chips += genres.sorted { $0.localizedStandardCompare($1) == .orderedAscending }.map { FilterChip(target: .genre($0), label: $0) }
         if let minimumRating {
-            chips.append(FilterChip(target: .rating, label: "Rating \(LibraryFiltering.ratingText(minimumRating))+"))
+            chips.append(FilterChip(target: .rating, label: "Rating \(LibraryFiltering.minimumRatingText(minimumRating))"))
         }
         if addedWithin != .anyTime {
             chips.append(FilterChip(target: .addedWithin, label: addedWithin.title))
@@ -377,5 +377,10 @@ public enum LibraryFiltering {
     /// "80" for 8.0 and "75" for 7.5: the threshold as a whole score out of 100, the way the rating picker and chips show it.
     public static func ratingText(_ value: Double) -> String {
         ScoreText.wholeScore(value)
+    }
+
+    /// A lower-bound rating label. The maximum possible score is exact, so it has no misleading trailing plus.
+    public static func minimumRatingText(_ value: Double) -> String {
+        ratingText(value) + (value >= 10 ? "" : "+")
     }
 }

@@ -395,56 +395,25 @@ private struct UncheckedBuffer: @unchecked Sendable {
 #endif
 
 /// Small copies of the picture's frames, read twice a second from the AVPlayer playing it (AVPlayer, or AetherEngine through its
-/// AVPlayer): ambient mode's colours, taken just inside the picture rather than from its bars, and the black bars the film carries in its
-/// own frame (`LetterboxEstimate`), for the No Bars zoom. There is nothing to read when another renderer draws the picture (mpv,
-/// AetherEngine's software path).
+/// AVPlayer), while ambient mode is on: its colours, taken just inside the picture rather than from its bars. There is nothing to read
+/// when another renderer draws the picture (mpv, AetherEngine's software path).
 @MainActor
 @Observable
 final class PictureSampler {
     /// Left, right, top and bottom edge colours, while ambient mode is on.
     private(set) var colours: [Color] = []
-    /// The crop that takes off the film's own black bars; nil when it has none, or until they are known.
-    private(set) var barsCrop: VideoCrop?
 
     @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
     @ObservationIgnored private weak var item: AVPlayerItem?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var samplesColours = false
-    @ObservationIgnored private var estimate = LetterboxEstimate()
-    /// The bars of this video are measured and ambient mode is off: the frame copy is let go, so the video plays with nothing reading it.
-    @ObservationIgnored private var isSettled = false
 
-    /// Bright frames after which the bars of a video count as measured for good: twice what a first reading needs, about ten seconds.
-    private static let samplesToSettle = LetterboxEstimate.samplesNeeded * 2
-
-    /// The copy's size: enough lines to place a bar within about half a per cent of the frame, so the thin bars of a 1.85:1 film
-    /// (~2% each side) read as 2–3 lines and a single line of noise does not read as a bar at all.
+    /// The copy's size: enough to find where the picture's own bars end, so the colours come from the picture.
     private static let width = 256, height = 144
 
-    /// The frame's mean luma, taken every fourth pixel of every fourth line; `LetterboxEstimate.isBrightFrame` rejects a dark scene
-    /// or a fade on it, so only frames that show the picture are measured.
-    private static func isBrightFrame(_ width: Int, _ height: Int, stride: Int, pixels: UnsafePointer<UInt8>) -> Bool {
-        var total = 0, counted = 0
-        var y = 0
-        while y < height {
-            var x = 0
-            let row = pixels + y * stride
-            while x < width {
-                let p = row + x * 4
-                total += (Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8
-                counted += 1
-                x += 4
-            }
-            y += 4
-        }
-        return LetterboxEstimate.isBrightFrame(meanLuma: counted > 0 ? total / counted : 0)
-    }
-
+    /// Reads frames only while ambient mode is on: a frame copy makes the player convert every frame for it, which a UHD remux can feel.
     func update(source: (any AVPlayerFrameSource)?, ambient: Bool) {
-        samplesColours = ambient
-        if !ambient, !colours.isEmpty { colours = [] }
-        guard let source else {
+        guard let source, ambient else {
             stop()
             return
         }
@@ -457,8 +426,7 @@ final class PictureSampler {
             while !Task.isCancelled {
                 guard let self else { return }
                 self.sample()
-                // Settled, it only looks for a new video (the next episode, AetherEngine's rebuilt item) every two seconds.
-                try? await Task.sleep(for: .milliseconds(self.isSettled ? 2000 : 500))
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
     }
@@ -468,15 +436,12 @@ final class PictureSampler {
         task = nil
         detach()
         source = nil
-        colours = []
+        if !colours.isEmpty { colours = [] }
     }
 
     private func detach() {
         releaseOutput()
         item = nil
-        isSettled = false
-        estimate = LetterboxEstimate()
-        if barsCrop != nil { barsCrop = nil }
     }
 
     /// Takes the frame copy off the video. A video output makes the player convert every frame for it, which a UHD remux can feel.
@@ -491,11 +456,6 @@ final class PictureSampler {
             detach()
             return
         }
-        if item === self.item, isSettled {
-            // Ambient mode turned on after the bars were measured: it needs the frames again.
-            guard samplesColours else { return }
-            isSettled = false
-        }
         if item !== self.item || output == nil {
             if item !== self.item { detach() }
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
@@ -509,11 +469,10 @@ final class PictureSampler {
         guard let output else { return }
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
         guard let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
-        let size = item.presentationSize
-        read(buffer, frameAspect: size.height > 0 ? size.width / size.height : 16.0 / 9.0)
+        read(buffer)
     }
 
-    private func read(_ buffer: CVPixelBuffer, frameAspect: Double) {
+    private func read(_ buffer: CVPixelBuffer) {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return }
@@ -539,20 +498,6 @@ final class PictureSampler {
         while bottom < height / 2, isBlack(width, { luma($0, height - 1 - bottom) }) { bottom += 1 }
         while left < width / 2, isBlack(height, { luma(left, $0) }) { left += 1 }
         while right < width / 2, isBlack(height, { luma(width - 1 - right, $0) }) { right += 1 }
-        // Only bright frames are measured: on a dark scene or a fade the picture's own edges read as black, and a bar would seem to
-        // grow into the picture. A frame this dark is skipped, so the estimate only ever sees what the bars are when they are visible.
-        if Self.isBrightFrame(width, height, stride: stride, pixels: pixels) {
-            estimate.add(top: top, bottom: bottom, left: left, right: right, width: width, height: height)
-        }
-        let crop = estimate.crop(frameAspect: frameAspect)
-        if crop != barsCrop { barsCrop = crop }
-        guard samplesColours else {
-            if estimate.samples >= Self.samplesToSettle {
-                isSettled = true
-                releaseOutput()
-            }
-            return
-        }
         // The colours just inside this frame's picture, not of its bars.
         let x0 = min(left, width - 1), x1 = max(x0 + 1, width - right)
         let y0 = min(top, height - 1), y1 = max(y0 + 1, height - bottom)

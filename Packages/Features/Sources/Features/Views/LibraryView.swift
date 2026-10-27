@@ -10,7 +10,6 @@ struct LibraryView: View {
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
-    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(TitleActions.self) private var actions: TitleActions?
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
@@ -56,13 +55,15 @@ struct LibraryView: View {
                         }
                     }
                 }
-                .padding(.vertical, Theme.Spacing.l)
+                .padding(.top, isPhoneInLandscape ? 0 : Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.l)
                 .id(Self.topID)
             }
             .trackLandscapeTabScroll()
             .screenBackground()
+            .ignoresSafeArea(.container, edges: isPhoneInLandscape ? .top : [])
             .navigationTitle("")
-            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)
@@ -196,7 +197,7 @@ struct RatingPicker: View {
         Picker("At least", selection: $threshold) {
             Text("Any").tag(Double?.none)
             ForEach([5.0, 6, 7, 8, 9, 10], id: \.self) { value in
-                Text("\(LibraryFiltering.ratingText(value))+").tag(Double?.some(value))
+                Text(LibraryFiltering.minimumRatingText(value)).tag(Double?.some(value))
             }
         }
         .accessibilityIdentifier("library.filter.rating.threshold")

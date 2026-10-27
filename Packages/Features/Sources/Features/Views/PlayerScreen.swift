@@ -43,16 +43,18 @@ struct PlayerContent: View {
     #if canImport(UIKit) && canImport(AVKit)
     @State private var pip = PiPProxy()
     @State private var superResolution = SuperResolutionRenderer()
-    /// Small copies of the picture's frames: ambient mode's colours, and the film's own bars for the No Bars zoom.
+    /// Small copies of the picture's frames: ambient mode's colours.
     @State private var picture = PictureSampler()
     #endif
     @State private var importsSubtitle = false
     /// The open menu (it sits on the controls' menu bar); nil when none is open.
     @State private var panel: PlayerPanelTab?
     @State private var noticeVisible = false
+    /// The current chapter marker after its three-second Skip prompt has elapsed.
+    @State private var hiddenSkipMarker: SkipMarker?
     @State private var importsAudio = false
     @State private var showsOpenSubtitles = false
-    /// The episode picker is up, over the player.
+    /// The episode picker's panel is open, dropped from the Episodes button.
     @State private var showsEpisodes = false
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
@@ -61,8 +63,6 @@ struct PlayerContent: View {
     @State private var seekSwipeStart: Double?
     /// A pinch is under way. A drag that is part of one neither seeks nor sets a level.
     @GestureState private var isPinching = false
-    /// A pinch asked for No Bars before the film's bars were measured: it takes effect as soon as they are.
-    @State private var wantsNoBars = false
     @State private var isDragging = false
     @State private var dragDirection: Axis?
     @State private var dragIsPinch = false
@@ -151,23 +151,23 @@ struct PlayerContent: View {
             .animation(.easeOut(duration: 0.2), value: showsStall && model.showsBufferingIndicator)
             .allowsHitTesting(false)
             gestureLayer
-            // With a menu open, a tap anywhere but the menu and its bar closes it.
+            // With a menu or the episodes open, a tap anywhere but them and the controls closes them.
             ZStack {
-                if panel != nil && model.failureMessage == nil {
+                if (panel != nil || showsEpisodes) && model.failureMessage == nil {
                     Color.black.opacity(0.18)
                         .ignoresSafeArea()
                         .contentShape(.rect)
-                        .onTapGesture { panel = nil }
+                        .onTapGesture { closeMenus() }
                         .accessibilityHidden(true)
                         .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.18), value: panel != nil)
+            .animation(.easeInOut(duration: 0.18), value: panel != nil || showsEpisodes)
             // Retain the controls (and native scrubber) while hidden. Their local
             // fade cannot change the video viewport or animate the renderer.
             PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
-                           onShowEpisodes: { showsEpisodes = true },
-                           panel: $panel, actions: controlActions, barsCrop: picture.barsCrop, upscaling: upscalingRenderer,
+                           onShowEpisodes: toggleEpisodes, episodesOpen: showsEpisodes,
+                           panel: $panel, actions: controlActions, upscaling: upscalingRenderer,
                            onSelectStream: { index in Task { await model.selectStream(at: index) } },
                            isVideoReady: isVideoReady, isStalled: showsStall && model.isStalled)
                 .opacity(controlsAreVisible ? 1 : 0)
@@ -175,10 +175,12 @@ struct PlayerContent: View {
                 .accessibilityHidden(!controlsAreVisible)
                 .disabled(!controlsAreVisible)
                 .animation(.easeInOut(duration: 0.18), value: controlsAreVisible)
+            episodePanel
             ZStack {
                 if let progress = upNextProgress, upNext != nil, model.failureMessage == nil {
                     upNextPrompt(progress: progress)
-                } else if let marker = model.activeSkipMarker, model.failureMessage == nil, isVideoReady {
+                } else if let marker = model.activeSkipMarker, marker != hiddenSkipMarker,
+                          model.failureMessage == nil, isVideoReady {
                     skipButton(marker)
                 }
             }
@@ -216,9 +218,20 @@ struct PlayerContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Zoom Mode's Normal keeps the picture inside the safe area beside a notch or Dynamic Island, centred, as Infuse does.
+        .background {
+            GeometryReader { proxy in
+                let insets = proxy.safeAreaInsets
+                Color.clear.onChange(of: max(insets.leading, insets.trailing), initial: true) { _, inset in
+                    model.setSafeAreaInset(inset)
+                }
+            }
+        }
         .onChange(of: panel) { old, new in
             // A closed menu leaves the controls up, with a fresh idle delay, whichever way it was closed.
             if old != nil && new == nil { model.showControls() }
+            // One pop-out at a time: a menu opened from the bar closes the episodes.
+            if new != nil { showsEpisodes = false }
         }
         .onChange(of: isHoldingFast) { _, holding in
             if !holding { holdEndedAt = Date() }
@@ -228,11 +241,6 @@ struct PlayerContent: View {
         #if !targetEnvironment(macCatalyst)
         .onChange(of: isPinching) { _, pinching in
             if pinching { pinchBegan() } else { pictureGestureEndedAt = Date() }
-        }
-        .onChange(of: picture.barsCrop) { _, crop in
-            guard wantsNoBars, let crop, model.pictureZoom == .fill else { return }
-            wantsNoBars = false
-            model.setPictureZoom(.noBars, barsCrop: crop)
         }
         .onChange(of: isDragGestureActive) { _, active in
             if !active {
@@ -249,6 +257,16 @@ struct PlayerContent: View {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) { noticeVisible = false }
+        }
+        .task(id: model.activeSkipMarker) {
+            guard let marker = model.activeSkipMarker else {
+                hiddenSkipMarker = nil
+                return
+            }
+            hiddenSkipMarker = nil
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, model.activeSkipMarker == marker else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { hiddenSkipMarker = marker }
         }
         .task { await model.start() }
         .task(id: model.isStalled) {
@@ -282,10 +300,6 @@ struct PlayerContent: View {
             }
         }
         .sheet(isPresented: $showsOpenSubtitles) { OpenSubtitlesSheet(model: model) }
-        .sheet(isPresented: $showsEpisodes) {
-            PlayerEpisodePicker(current: model.plan.request, services: services,
-                                prepare: { await model.prepareEpisode($0) }, onPlay: playChosenEpisode)
-        }
         .onChange(of: model.hasFinished) { _, finished in
             if finished { Task { await handleEnd() } }
         }
@@ -333,9 +347,59 @@ struct PlayerContent: View {
         #endif
     }
 
-    /// An open menu keeps the controls up: the menu stands on their bar.
+    /// An open menu keeps the controls up: the menu stands on their bar. The episodes' panel hangs from their top bar.
     private var controlsAreVisible: Bool {
-        (model.controlsVisible || panel != nil) && model.failureMessage == nil
+        (model.controlsVisible || panel != nil || showsEpisodes) && model.failureMessage == nil
+    }
+
+    /// The episodes, in a glass panel like the options menu, hanging from the Episodes button at the top trailing corner. It sits under
+    /// the top bar and takes the height down to the screen's bottom margin, with the transport and timeline hidden behind it.
+    private var episodePanel: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                if showsEpisodes && model.failureMessage == nil {
+                    PlayerEpisodePicker(current: model.plan.request, services: services,
+                                        prepare: { await model.prepareEpisode($0) }, onPlay: playChosenEpisode,
+                                        onClose: closeEpisodes)
+                        .frame(width: min(Self.episodePanelWidth, max(0, proxy.size.width - 40)))
+                        .frame(maxHeight: min(Self.episodePanelHeight, max(0, proxy.size.height - Self.episodePanelTop - 12)))
+                        .padding(.top, Self.episodePanelTop)
+                        .padding(.trailing, 20)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topTrailing)))
+                }
+            }
+            #if targetEnvironment(macCatalyst)
+            // The controls are at most 900 wide on Mac, so the panel lines up with their trailing edge.
+            .frame(maxWidth: 900, maxHeight: .infinity, alignment: .topTrailing)
+            #endif
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
+        }
+        .animation(.snappy(duration: 0.24), value: showsEpisodes)
+    }
+
+    private static let episodePanelWidth: CGFloat = 420
+    private static let episodePanelHeight: CGFloat = 560
+    /// Below the top bar: its 12 pt margin, the 44 pt buttons and a small gap.
+    private static let episodePanelTop: CGFloat = 12 + 44 + 8
+
+    private func toggleEpisodes() {
+        if showsEpisodes {
+            closeEpisodes()
+        } else {
+            panel = nil
+            showsEpisodes = true
+        }
+    }
+
+    private func closeEpisodes() {
+        guard showsEpisodes else { return }
+        showsEpisodes = false
+        model.showControls()
+    }
+
+    private func closeMenus() {
+        panel = nil
+        closeEpisodes()
     }
 
     private var hasVideoFrame: Bool {
@@ -392,9 +456,11 @@ struct PlayerContent: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// Escape closes the options panel first, then the player.
+    /// Escape closes the options panel or the episodes first, then the player.
     private func escape() {
-        if panel != nil {
+        if showsEpisodes {
+            closeEpisodes()
+        } else if panel != nil {
             panel = nil
             model.showControls()
         } else {
@@ -535,15 +601,11 @@ struct PlayerContent: View {
                     .updating($isPinching) { _, pinching, _ in pinching = true }
                     .onEnded { value in
                         pictureGestureEndedAt = Date()
-                        // Each pinch out is one step, Original → Fill → No Bars (when the film has bars of its own), and each pinch
-                        // in one step back. Never distort the ratio.
+                        // A shortcut for Zoom Mode: a pinch out fills the screen (Crop), a pinch in shows the whole picture (Normal).
                         if value.magnification > 1.08 {
-                            // The bars take a few seconds of picture to measure: a pinch for No Bars before then is kept for when they are.
-                            if model.pictureZoom == .fill, picture.barsCrop == nil { wantsNoBars = true }
-                            model.zoomPicture(in: true, barsCrop: picture.barsCrop)
+                            model.pinchZoom(in: true)
                         } else if value.magnification < 0.92 {
-                            wantsNoBars = false
-                            model.zoomPicture(in: false, barsCrop: picture.barsCrop)
+                            model.pinchZoom(in: false)
                         }
                     })
                 #endif
@@ -715,8 +777,8 @@ struct PlayerContent: View {
         }
     }
 
-    /// Moves to the episode chosen in the picker, whose plan is ready: its sheet leaves first, then this player gives way to the new one,
-    /// so the sheet is never left over a player that is being replaced.
+    /// Moves to the episode chosen in the picker, whose plan is ready: its panel closes first, then this player gives way to the new one,
+    /// so the panel is never left over a player that is being replaced.
     private func playChosenEpisode(_ plan: PlaybackPlan) {
         leaveUpNext()
         showsEpisodes = false

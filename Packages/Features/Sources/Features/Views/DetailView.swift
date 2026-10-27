@@ -50,6 +50,7 @@ struct DetailView: View {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(AppRouter.self) private var router
     @Environment(\.windowSafeArea) private var windowSafeArea
+    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     /// True while a trailer that started on a phone turned sideways is shown full screen. The cover belongs to the page, so it lives as
     /// long as the page does, and the trailer's panel is not what presents it.
     @State private var showsTrailerCover = false
@@ -235,12 +236,15 @@ struct DetailView: View {
                 // The track of the page's own scroll indicator is inset, so the bar is a short line rather than the whole screen height.
                 .contentMargins(.vertical, Self.scrollIndicatorInset, for: .scrollIndicators)
                 .contentMargins(.bottom, bottomExtra, for: .scrollContent)
+                // Phone landscape: scrolling down tucks the landscape bar away to Home, as on every other page.
+                .trackLandscapeTabScroll()
                 // Track the vertical page itself, not a background descendant or a nested horizontal shelf.
                 // The page passes the reference without reading its offset, so only the artwork observes each tick.
                 .onScrollGeometryChange(for: CGFloat.self) { scroll in
                     let offset = scroll.contentOffset.y + scroll.contentInsets.top
-                    let limit = TitleHero.height(width: geometry.size.width, metrics: metrics) + scroll.containerSize.height
-                    return isLandscape ? 0 : min(offset, limit)
+                    let hero = isLandscape ? TitleHero.landscapeHeroHeight(pageHeight: geometry.size.height)
+                                           : TitleHero.height(width: geometry.size.width, metrics: metrics)
+                    return min(offset, hero + scroll.containerSize.height)
                 } action: { _, value in
                     heroScroll.offset = value
                 }
@@ -298,11 +302,23 @@ struct DetailView: View {
         // The artwork runs under the top bar, so the bar's material blurs the picture rather than sitting over a strip of its own.
         .ignoresSafeArea(.container, edges: .top)
         #else
-        .ignoresSafeArea(.container, edges: showsBackdrop ? [] : .top)
+        // The picture runs to the top of the screen in both orientations; the back button floats over it.
+        .ignoresSafeArea(.container, edges: .top)
         #endif
         .scrollEdgeEffectHidden(true, for: .top)
         .pageTopBar(hidden: true)
+        // Phone landscape uses the shared corner Back (RootTabView), the same size and place as on See All and category pages.
+        .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
+        // A detail page's landscape controls start tucked away and omit the title and divider already represented by its hero.
+        .onAppear { landscapeTabs?.prepareForDetailPage() }
+        .onChange(of: isPhoneInLandscape) { _, landscape in
+            if landscape { landscapeTabs?.prepareForDetailPage() }
+        }
+        .onDisappear {
+            landscapeTabs?.reset()
+            landscapeTabs?.pageTitle = nil
+        }
         .task { await model.load(afterHero: { await loadHero() }, priorityStream: pendingStreams, prefetchOnOpen: true) }
         .task(id: "\(heroURL?.absoluteString ?? "-")|\(logoURL?.absoluteString ?? "-")|\(model.isLoadingArtwork)|\(showsBackdrop)") {
             await loadHero()
@@ -530,4 +546,5 @@ struct DetailView: View {
         }
     }
 }
+
 #endif

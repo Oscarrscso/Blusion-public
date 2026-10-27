@@ -28,6 +28,7 @@ settings:
     # String Catalogs (App/Localizable.xcstrings, App/InfoPlist.xcstrings); seed with scripts/extract-strings.py.
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: NO
 
 # The signing team comes from Config/Signing.xcconfig, which includes the Git-ignored Config/Signing.xcconfig.local when it exists,
 # so a regenerated project keeps the local team. No identity is tracked here.
@@ -157,6 +158,8 @@ schemes:
       #fallback#     script: 'bash "$SRCROOT/scripts/prepare-aether.sh" "$BUILD_DIR"'
     run:
       config: Debug
+      # Run without LLDB attached: on Xcode 26 / iOS 26 the debugger attach leaves the app on a dark screen for a long time at launch.
+      debugEnabled: false
     test:
       config: Debug
       targets:

@@ -4,72 +4,114 @@ import StremioKit
 import SwiftUI
 import UIKit
 
-/// The player's episode picker: the series' seasons and episodes in a sheet over the player. A tap reads that episode's streams and
-/// hands the player a plan for it, as Up Next does at the end of an episode.
+/// The player's episode picker: the series' seasons and episodes in a glass panel that drops from the Episodes button, in the same style
+/// as the options panel. A tap reads that episode's streams and hands the player a plan for it, as Up Next does at the end of an episode.
 struct PlayerEpisodePicker: View {
     /// Reads the chosen episode's streams and returns the plan to play, or nil when none can be played.
     let prepare: (StreamRequest) async -> PlaybackPlan?
     /// The plan is ready: the player moves to it.
     let onPlay: (PlaybackPlan) -> Void
+    let onClose: () -> Void
 
     @State private var model: PlayerEpisodePickerModel
     @State private var prepareTask: Task<Void, Never>?
     @State private var playFailure: String?
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
     init(current: StreamRequest, services: AppServices,
-         prepare: @escaping (StreamRequest) async -> PlaybackPlan?, onPlay: @escaping (PlaybackPlan) -> Void) {
+         prepare: @escaping (StreamRequest) async -> PlaybackPlan?, onPlay: @escaping (PlaybackPlan) -> Void,
+         onClose: @escaping () -> Void) {
         self.prepare = prepare
         self.onPlay = onPlay
+        self.onClose = onClose
         _model = State(initialValue: PlayerEpisodePickerModel(request: current, services: services))
     }
 
-    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well. A phone in landscape has no room for
-    /// a title above the episodes, so it is left out there.
-    private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
-
     var body: some View {
-        NavigationStack {
-            List {
-                if model.isLoading {
-                    HStack {
-                        Spacer()
-                        Spinner().controlSize(.large)
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-                } else if let failure = model.failure {
-                    Text(failure).font(.subheadline).foregroundStyle(.secondary)
-                } else {
-                    if model.seasons.count > 1 {
-                        Section {
-                            seasonMenu
-                        }
-                    }
-                    Section {
-                        ForEach(model.episodes) { episode in
-                            row(episode)
-                        }
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    content
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(12)
+                }
+                .scrollIndicators(.visible)
+                .scrollBounceBehavior(.basedOnSize)
+                // Opens on the episode playing, and on a season's first episode when the season changes.
+                .onChange(of: model.episodes.map(\.id)) { _, _ in
+                    if let current = model.episodes.first(where: model.isCurrent) {
+                        proxy.scrollTo(current.id, anchor: .center)
+                    } else if let first = model.episodes.first {
+                        proxy.scrollTo(first.id, anchor: .top)
                     }
                 }
             }
-            .navigationTitle(isPhoneInLandscape ? "" : "Episodes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+        }
+        .clipShape(.rect(cornerRadius: 24))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
+        .foregroundStyle(.white)
+        .tint(.white)
+        .task { await model.load() }
+        .onDisappear { prepareTask?.cancel() }
+        .alert("Episode unavailable", isPresented: Binding(get: { playFailure != nil },
+                                                           set: { if !$0 { playFailure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(playFailure ?? "")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("player.episodePicker")
+    }
+
+    /// The panel's title, or the season menu when there is more than one season, and its close button.
+    private var header: some View {
+        HStack {
+            if !model.isLoading && model.failure == nil && model.seasons.count > 1 {
+                seasonMenu
+            } else {
+                Text("Episodes")
+                    .font(.headline)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 12)
+            Button(action: onClose) {
+                Image(systemName: "xmark").frame(width: 32, height: 32)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            #if !targetEnvironment(macCatalyst)
+            .keyboardShortcut(.escape, modifiers: [])
+            #endif
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("player.episodePicker.close")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if model.isLoading {
+            Spinner().controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        } else if let failure = model.failure {
+            Text(failure).font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                .padding(.horizontal, 4)
+        } else {
+            LazyVStack(spacing: 0) {
+                ForEach(model.episodes) { episode in
+                    row(episode)
+                        .id(episode.id)
+                    if episode.id != model.episodes.last?.id {
+                        Divider().padding(.leading, 14)
+                    }
                 }
             }
-            .task { await model.load() }
-            .onDisappear { prepareTask?.cancel() }
-            .alert("Episode unavailable", isPresented: Binding(get: { playFailure != nil },
-                                                               set: { if !$0 { playFailure = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(playFailure ?? "")
-            }
-            .accessibilityIdentifier("player.episodePicker")
+            .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
         }
     }
 
@@ -79,16 +121,15 @@ struct PlayerEpisodePicker: View {
                 Button(PlayerEpisodePickerModel.seasonName(season)) { model.selectSeason(season) }
             }
         } label: {
-            HStack {
+            HStack(spacing: 6) {
                 Text(model.selectedSeason.map(PlayerEpisodePickerModel.seasonName) ?? "Season")
-                    .foregroundStyle(.primary)
-                Spacer()
+                    .font(.headline)
+                    .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.6))
             }
             .contentShape(.rect)
-            .frame(maxWidth: .infinity)
         }
         .accessibilityIdentifier("player.seasonPicker")
     }
@@ -104,21 +145,24 @@ struct PlayerEpisodePicker: View {
                 ArtworkImage(url: video.thumbnail, title: video.title, maxPixelSize: 240)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .frame(width: 96, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     if let number = video.episode {
-                        Text("Episode \(number)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        Text("Episode \(number)").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.6))
                     }
-                    Text(video.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(video.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 8)
                 if isPreparing {
                     Spinner().controlSize(.small)
                 } else if isCurrent {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                    Image(systemName: "checkmark").font(.body.weight(.semibold))
                         .accessibilityHidden(true)
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

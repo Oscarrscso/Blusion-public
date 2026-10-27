@@ -106,11 +106,12 @@ public final class TrailerLoader {
     /// True while the player is full screen: the page is covered then, not left, so it must not close the player.
     @ObservationIgnored public var isFullScreen = false
 
-    /// True while the page shows the trailer's panel: the player, or the line that says it failed.
+    /// True while the page shows the trailer's panel: the player, or the line that says it failed. While the trailer loads only the
+    /// trailer button's spinner shows, so the page does not open an empty panel first.
     public var showsPanel: Bool {
         switch phase {
-        case .loading, .playing, .failed: return true
-        case .idle: return false
+        case .playing, .failed: return true
+        case .idle, .loading: return false
         }
     }
 

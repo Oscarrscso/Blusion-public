@@ -87,6 +87,7 @@ struct StreamPickerView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     #if targetEnvironment(macCatalyst)
     /// Closes a pushed picker, for Escape: the same as its back button.
     @Environment(\.dismiss) private var dismiss
@@ -97,6 +98,8 @@ struct StreamPickerView: View {
     #endif
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
+    private var isPhoneInLandscapeOnPhone: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
     /// A slight inset from each edge. The screens' page margin is zero, so the stream rows would otherwise run to the screen's edge.
     private var streamMargin: CGFloat { Theme.Spacing.l }
 
@@ -143,6 +146,9 @@ struct StreamPickerView: View {
         // The last card scrolls clear of the tab bar and the mini player: the scroll content's bottom margin, not padding
         // inside it.
         .contentMargins(.bottom, Theme.Spacing.xxl, for: .scrollContent)
+        // A phone in landscape has no navigation bar here: the list starts below the glass Back drawn above Home (see `RootTabView`).
+        .contentMargins(.top, isPhoneInLandscapeOnPhone ? LandscapeTabBarState.backClearance : 0, for: .scrollContent)
+        .trackLandscapeTabScroll()
         // The glow is a layer of the page, not of the list: it stays put under the navigation bar while the streams scroll over it.
         .background(alignment: .top) { ambientBackdrop }
         .screenBackground()
@@ -150,6 +156,7 @@ struct StreamPickerView: View {
         .navigationTitle(model.request.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(removing: .title)
+        .toolbarVisibility(isPhoneInLandscapeOnPhone ? .hidden : .automatic, for: .navigationBar)
         .accessibilityIdentifier("streams.list")
     }
 

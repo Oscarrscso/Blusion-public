@@ -38,6 +38,7 @@ public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, Case
     case ratio240 = "2.40:1"
     case ratio255 = "2.55:1"
     case ratio276 = "2.76:1"
+    case ratio36x10 = "36:10"
 
     public var label: String { self == .source ? "Original" : rawValue }
 
@@ -133,12 +134,16 @@ public struct VideoLayout: Sendable, Equatable, Hashable, Codable {
     public var zoom: Double
     public var aspect: AspectOverride
     public var crop: VideoCrop
+    /// Points kept clear on the left and the right, where Fit sizes the picture: the safe area beside a notch (Zoom Mode's Normal). The
+    /// picture stays centred on the whole view. Belongs to the screen it is on, so it is never saved.
+    public var inset: Double
 
-    public init(fit: VideoFit = .fit, zoom: Double = 1, aspect: AspectOverride = .source, crop: VideoCrop = .off) {
+    public init(fit: VideoFit = .fit, zoom: Double = 1, aspect: AspectOverride = .source, crop: VideoCrop = .off, inset: Double = 0) {
         self.fit = fit
         self.zoom = min(Self.zoomRange.upperBound, max(Self.zoomRange.lowerBound, zoom))
         self.aspect = aspect
         self.crop = crop
+        self.inset = max(0, inset)
     }
 
     public init(from decoder: Decoder) throws {
@@ -147,6 +152,10 @@ public struct VideoLayout: Sendable, Equatable, Hashable, Codable {
                   zoom: (try? container.decode(Double.self, forKey: .zoom)) ?? 1,
                   aspect: (try? container.decode(AspectOverride.self, forKey: .aspect)) ?? .source,
                   crop: (try? container.decode(VideoCrop.self, forKey: .crop)) ?? .off)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fit, zoom, aspect, crop
     }
 }
 
@@ -328,9 +337,17 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     /// Prefer subtitles for the deaf and hard of hearing (SDH/CC) when both kinds exist.
     public var prefersSDH: Bool
     public var subtitleStyle: SubtitleStyle
-    /// Preferred audio language (ISO 639-2 or 639-1). nil keeps the file's default track.
+    /// Preferred audio language (ISO 639-2 or 639-1). nil means English (`defaultAudioLanguage`), whatever track the file marks as its
+    /// default.
     public var audioLanguage: String?
+    /// The audio language the player picks when none is set: English.
+    public static let defaultAudioLanguage = "eng"
+    /// Fit or Fill from before Zoom Mode; read once, to start Zoom Mode from it (Fill → Crop).
     public var videoLayout: VideoLayout
+    /// Video › Zoom Mode, for every video (as in Infuse).
+    public var zoomMode: VideoZoomMode
+    /// Video › Aspect Ratio per title (`AspectRatioChoice.titleKey`); a title with none plays at Auto.
+    public var aspectRatios: [String: AspectRatioChoice]
     public var processing: VideoProcessing
     /// Shows Skip Intro / Skip Recap / Skip Credits when the media marks them.
     public var showsSkipButtons: Bool
@@ -343,14 +360,15 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     /// The engine for files the built-in player cannot play natively (see `AdvancedEngine`).
     public var advancedEngine: AdvancedEngine
     /// AetherEngine composes Dolby Vision profile 7 FEL pictures: both layers decoded and joined on the GPU every frame, on its software
-    /// path. Off by default since 25 October 2026: on a phone a UHD remux could stutter there, and that path has no AVPlayer, so No Bars,
+    /// path. Off by default since 25 October 2026: on a phone a UHD remux could stutter there, and that path has no AVPlayer, so ambient mode,
     /// AI upscaling and Picture in Picture cannot work. Off plays the same stream on AVPlayer's hardware route (Dolby Vision 8.1).
     public var composesDolbyVisionFEL: Bool
     /// AetherEngine renders TrueHD and DTS:X object audio as spatial audio.
     public var rendersObjectAudio: Bool
 
     public init(subtitleMode: SubtitleMode = .always, prefersSDH: Bool = false, subtitleStyle: SubtitleStyle = SubtitleStyle(),
-                audioLanguage: String? = nil, videoLayout: VideoLayout = VideoLayout(), processing: VideoProcessing = VideoProcessing(),
+                audioLanguage: String? = nil, videoLayout: VideoLayout = VideoLayout(), zoomMode: VideoZoomMode = .normal,
+                aspectRatios: [String: AspectRatioChoice] = [:], processing: VideoProcessing = VideoProcessing(),
                 showsSkipButtons: Bool = true, skipsIntrosAutomatically: Bool = false, swipeGestures: Bool = true, ambientMode: Bool = false,
                 advancedEngine: AdvancedEngine = .aether, composesDolbyVisionFEL: Bool = false, rendersObjectAudio: Bool = true) {
         self.subtitleMode = subtitleMode
@@ -358,6 +376,8 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
         self.subtitleStyle = subtitleStyle
         self.audioLanguage = audioLanguage
         self.videoLayout = videoLayout
+        self.zoomMode = zoomMode
+        self.aspectRatios = aspectRatios
         self.processing = processing
         self.showsSkipButtons = showsSkipButtons
         self.skipsIntrosAutomatically = skipsIntrosAutomatically
@@ -376,6 +396,9 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
                   subtitleStyle: (try? container.decode(SubtitleStyle.self, forKey: .subtitleStyle)) ?? defaults.subtitleStyle,
                   audioLanguage: try? container.decodeIfPresent(String.self, forKey: .audioLanguage),
                   videoLayout: (try? container.decode(VideoLayout.self, forKey: .videoLayout)) ?? defaults.videoLayout,
+                  zoomMode: (try? container.decode(VideoZoomMode.self, forKey: .zoomMode))
+                      ?? ((try? container.decode(VideoLayout.self, forKey: .videoLayout))?.fit == .fill ? .crop : .normal),
+                  aspectRatios: (try? container.decode([String: AspectRatioChoice].self, forKey: .aspectRatios)) ?? [:],
                   processing: (try? container.decode(VideoProcessing.self, forKey: .processing)) ?? defaults.processing,
                   showsSkipButtons: (try? container.decode(Bool.self, forKey: .showsSkipButtons)) ?? defaults.showsSkipButtons,
                   skipsIntrosAutomatically: (try? container.decode(Bool.self, forKey: .skipsIntrosAutomatically)) ?? defaults.skipsIntrosAutomatically,
@@ -389,7 +412,7 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     /// The FEL choice is saved under a new name: the old one held the old default (on), which nobody chose, so every saved copy starts
     /// with the new default (off) once.
     private enum CodingKeys: String, CodingKey {
-        case subtitleMode, prefersSDH, subtitleStyle, audioLanguage, videoLayout, processing, showsSkipButtons, skipsIntrosAutomatically,
+        case subtitleMode, prefersSDH, subtitleStyle, audioLanguage, videoLayout, zoomMode, aspectRatios, processing, showsSkipButtons, skipsIntrosAutomatically,
              swipeGestures, ambientMode, advancedEngine, rendersObjectAudio
         case composesDolbyVisionFEL = "composesDolbyVisionFEL2"
     }

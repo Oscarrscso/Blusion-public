@@ -33,6 +33,24 @@ public final class CatalogListViewModel {
     /// Loaded, and nothing to show. A failed load is not empty.
     public var isEmpty: Bool { state == .loaded && items.isEmpty }
 
+    /// The order and narrowing the grid shows. The order is remembered for this list's title; the narrowing starts clear each visit.
+    public var filter = CatalogListFilter() {
+        didSet {
+            if filter.sort != oldValue.sort {
+                if filter.sort == .shuffle { reshuffle() }
+                defaults.set(filter.sort.rawValue, forKey: sortKey)
+            }
+            refreshVisible()
+        }
+    }
+    /// The loaded titles that pass `filter`, in its order. The grid draws these.
+    public private(set) var visibleItems: [MetaPreview] = []
+    /// The types among the loaded titles, so the type selector shows only when there is a choice to make.
+    public var loadedTypes: Set<String> { Set(items.map { $0.type.lowercased() }) }
+    private var shuffleRank: [String: Int] = [:]
+    private let defaults: UserDefaults
+    private var sortKey: String { "catalogList.sort.\(request.title)" }
+
     nonisolated static let pageSize = 50
     nonisolated static let mergedLimit = 100
 
@@ -41,9 +59,43 @@ public final class CatalogListViewModel {
     /// Raw items received so far: the protocol's `skip` counts what the addon sent, not what is left after de-duplication.
     private var receivedCount = 0
 
-    public init(request: CatalogListRequest, services: AppServices) {
+    public init(request: CatalogListRequest, services: AppServices, defaults: UserDefaults = .standard) {
         self.request = request
         self.services = services
+        self.defaults = defaults
+        if let saved = defaults.string(forKey: "catalogList.sort.\(request.title)").flatMap(CatalogListSort.init(rawValue:)) {
+            filter.sort = saved
+        }
+    }
+
+    /// A new random order of everything loaded. Choosing Shuffle again, or its button, calls this.
+    public func reshuffle() {
+        var generator = SystemRandomNumberGenerator()
+        shuffleRank = CatalogListFiltering.shuffleRanks(for: items, using: &generator)
+        refreshVisible()
+    }
+
+    /// When the filter leaves fewer titles than fill a screen, pages are fetched until it does or the source runs out, a few at most, so a
+    /// narrow filter over a long list still shows what the list holds.
+    public func fillForFilter() async {
+        var fetched = 0
+        while filter.isFiltering, visibleItems.count < 24, canLoadMore, state == .loaded, fetched < 5 {
+            fetched += 1
+            await loadMore()
+        }
+    }
+
+    private func refreshVisible() {
+        visibleItems = CatalogListFiltering.apply(filter, to: items, shuffleRank: shuffleRank)
+    }
+
+    /// New titles join the shuffle after the ones already placed, shuffled among themselves, so the grid never reorders under the reader.
+    private func rankNewItems() {
+        guard filter.sort == .shuffle else { return }
+        let fresh = items.filter { shuffleRank[$0.identity] == nil }
+        guard !fresh.isEmpty else { return }
+        var generator = SystemRandomNumberGenerator()
+        shuffleRank.merge(CatalogListFiltering.shuffleRanks(for: fresh, from: shuffleRank.count, using: &generator)) { old, _ in old }
     }
 
     /// Refresh must ask the sources again, even when their cached page has not expired.
@@ -63,6 +115,7 @@ public final class CatalogListViewModel {
         state = .loading
         guard !sources.isEmpty else {
             items = []
+            visibleItems = []
             state = .loaded
             return
         }
@@ -75,6 +128,9 @@ public final class CatalogListViewModel {
             }
             guard current == generation else { return }
             items = CatalogListViewModel.appending(page, to: [])
+            shuffleRank = [:]
+            rankNewItems()
+            refreshVisible()
             receivedCount = CatalogListViewModel.advance(0, by: page, source: sources.count == 1 ? sources[0] : nil)
             canLoadMore = sources.count == 1 && !page.isEmpty
             state = .loaded
@@ -95,6 +151,8 @@ public final class CatalogListViewModel {
             guard current == generation else { return }
             receivedCount = CatalogListViewModel.advance(receivedCount, by: page, source: source)
             items = CatalogListViewModel.appending(page, to: items)
+            rankNewItems()
+            refreshVisible()
             canLoadMore = !page.isEmpty
             state = .loaded
         } catch {

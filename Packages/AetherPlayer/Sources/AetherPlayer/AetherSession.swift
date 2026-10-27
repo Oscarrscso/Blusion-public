@@ -231,12 +231,16 @@ public final class AetherSession {
         }
     }
 
-    /// `aspect` replaces the file's width over height; `crop` keeps a centred part of that shape. nil leaves either alone.
-    public func apply(fit: AetherFit, zoom: Double, aspect: Double? = nil, crop: Double? = nil) {
+    /// `aspect` replaces the file's width over height; `crop` keeps a centred part of that shape. nil leaves either alone. `inset` keeps
+    /// Fit and Fill that far from the left and the right (points). A change of any of them moves the picture smoothly into its new place.
+    public func apply(fit: AetherFit, zoom: Double, aspect: Double? = nil, crop: Double? = nil, inset: Double = 0) {
+        let changes = host.fit != fit || host.zoom != max(1, zoom) || host.aspect != aspect || host.crop != crop || host.inset != inset
         host.fit = fit
         host.zoom = max(1, zoom)
         host.aspect = aspect
         host.crop = crop
+        host.inset = inset
+        if changes { host.animateNextLayout() }
     }
 
     public func apply(subtitleStyle: AetherSubtitleStyle) {
@@ -574,6 +578,12 @@ final class AetherHostView: UIView {
     var aspect: Double? { didSet { if aspect != oldValue { setNeedsLayout() } } }
     /// Width over height to crop the picture to, centred; nil keeps it whole.
     var crop: Double? { didSet { if crop != oldValue { setNeedsLayout() } } }
+    /// Points Fit and Fill keep clear on the left and the right.
+    var inset = 0.0 { didSet { if inset != oldValue { setNeedsLayout() } } }
+    /// The next layout is a change of the zoom, not of the size: it eases the picture into place.
+    private var animatesNextLayout = false
+    /// How long a zoom change takes to ease into place.
+    static let zoomAnimationDuration: TimeInterval = 0.3
     /// The picture's presented size, when the engine says it.
     var displaySize: CGSize? { didSet { if displaySize != oldValue { setNeedsLayout() } } }
     /// Tells the engine how to draw into the player view: stretched into the frame laid out here, or by fit before the size is known.
@@ -600,16 +610,54 @@ final class AetherHostView: UIView {
         fatalError("init(coder:) is not used")
     }
 
+    /// Eases the next layout into place: a Zoom Mode or Aspect Ratio change, once the picture's size is known and it is on screen.
+    func animateNextLayout() {
+        guard displaySize != nil, window != nil else { return }
+        animatesNextLayout = true
+        setNeedsLayout()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        // The picture never animates into place: a new size or scaling mode would otherwise slide it up or down for a moment, as the
-        // engine's layer animates its gravity and bounds by default.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
+        let animates = animatesNextLayout
+        animatesNextLayout = false
+        guard animates else {
+            // A new size never animates: the engine's layer would otherwise slide the picture up or down for a moment, as it animates
+            // its gravity and bounds by default.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            placePicture()
+            CATransaction.commit()
+            return
+        }
+        // A zoom change eases the frames to their new place; the gravity stays .resize, so the picture scales with its frame.
+        UIView.animate(withDuration: Self.zoomAnimationDuration, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(Self.zoomAnimationDuration)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+            self.placePicture()
+            CATransaction.commit()
+        }
+    }
+
+    private func placePicture() {
         playerView.transform = .identity
+        pictureOverlayView.transform = .identity
         let gravity: AVLayerVideoGravity
-        if let size = displaySize, let layout = Self.geometry(bounds: bounds.size, source: size, aspect: aspect, crop: crop, fit: fit, zoom: zoom) {
+        if let size = displaySize, fit != .fit, aspect == nil {
+            // Crop and Stretch: the engine fits the whole picture in the view, exactly as in Normal, and the view is scaled up so the kept
+            // part covers the screen. Nothing depends on the engine drawing into an odd-shaped frame. Subtitles sit on their own overlay,
+            // which is not scaled, so they stay on screen.
+            let scale = Self.fillScale(bounds: bounds.size, source: size, crop: crop, stretch: fit == .stretch, zoom: zoom)
+            clipView.frame = bounds
+            playerView.bounds = CGRect(origin: .zero, size: bounds.size)
+            playerView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            playerView.transform = CGAffineTransform(scaleX: scale.width, y: scale.height)
+            overlay.frame = bounds
+            overlay.videoRect = bounds
+            gravity = .resizeAspect
+        } else if let size = displaySize, let layout = Self.geometry(bounds: bounds.size, source: size, aspect: aspect, crop: crop, fit: fit, zoom: zoom,
+                                                             inset: inset) {
             clipView.frame = layout.visible
             playerView.frame = layout.picture.offsetBy(dx: -layout.visible.minX, dy: -layout.visible.minY)
             overlay.frame = bounds
@@ -627,12 +675,14 @@ final class AetherHostView: UIView {
             case .stretch: .resize
             }
         }
-        if gravity != lastGravity {
-            lastGravity = gravity
-            onGravity?(gravity)
-        }
-        // The frame the picture shows in, transform included.
-        pictureOverlayView.frame = playerView.frame
+        // Sent on every layout, not only on a change: the engine can make a new video layer when a file loads, which starts at its
+        // default gravity.
+        lastGravity = gravity
+        onGravity?(gravity)
+        // The picture overlay (AI super resolution) follows the picture, transform included.
+        pictureOverlayView.bounds = CGRect(origin: .zero, size: playerView.bounds.size)
+        pictureOverlayView.center = playerView.center
+        pictureOverlayView.transform = playerView.transform
         pictureOverlay?.frame = pictureOverlayView.bounds
         (pictureOverlay as? AVSampleBufferDisplayLayer)?.videoGravity = gravity
     }
@@ -646,9 +696,31 @@ final class AetherHostView: UIView {
         setNeedsLayout()
     }
 
+    /// Crop and Stretch as a scale of the fitted picture. The engine draws the whole picture fitted in the view, exactly as in Normal, and
+    /// the view is scaled about its centre by this much, so the kept part of the picture covers the view. Crop scales both ways alike and
+    /// overshoots each edge by a point, so no hairline of black shows; Stretch scales each way to the view. Blusion's `VideoGeometry.fillScale` (PlayerKit) does the same.
+    static func fillScale(bounds: CGSize, source: CGSize, crop: Double?, stretch: Bool, zoom: Double) -> CGSize {
+        guard bounds.width > 0, bounds.height > 0, source.width > 0, source.height > 0 else { return CGSize(width: 1, height: 1) }
+        let width = Double(bounds.width), height = Double(bounds.height)
+        let ratio = Double(source.width / source.height)
+        var keptWidth = 1.0, keptHeight = 1.0
+        if let crop, crop > 0 {
+            if crop > ratio { keptHeight = ratio / crop } else { keptWidth = crop / ratio }
+        }
+        let fittedWidth = min(width, height * ratio)
+        let fittedHeight = min(height, width / ratio)
+        let scaleX = width / (fittedWidth * keptWidth)
+        let scaleY = height / (fittedHeight * keptHeight)
+        let extra = max(1, zoom)
+        if stretch { return CGSize(width: scaleX * extra, height: scaleY * extra) }
+        let overshoot = max((width + 2) / width, (height + 2) / height)
+        let scale = max(scaleX, scaleY) * overshoot * extra
+        return CGSize(width: scale, height: scale)
+    }
+
     /// The whole picture's frame and the part of it that shows. Blusion's `VideoGeometry` (PlayerKit) does the same; this framework
     /// links no Blusion package, so it keeps this copy.
-    static func geometry(bounds: CGSize, source: CGSize, aspect: Double?, crop: Double?, fit: AetherFit, zoom: Double)
+    static func geometry(bounds: CGSize, source: CGSize, aspect: Double?, crop: Double?, fit: AetherFit, zoom: Double, inset: Double = 0)
         -> (picture: CGRect, visible: CGRect)? {
         guard bounds.width > 0, bounds.height > 0, source.width > 0, source.height > 0 else { return nil }
         let ratio = aspect ?? Double(source.width / source.height)
@@ -657,12 +729,13 @@ final class AetherHostView: UIView {
             if crop > ratio { keptHeight = ratio / crop } else { keptWidth = crop / ratio }
         }
         let shownRatio = ratio * keptWidth / keptHeight
-        let viewRatio = Double(bounds.width / bounds.height)
+        let areaWidth = max(1, Double(bounds.width) - 2 * max(0, inset))
+        let viewRatio = areaWidth / Double(bounds.height)
         var width: Double, height: Double
         switch fit {
         case .fit, .fill:
             if (fit == .fit) == (viewRatio < shownRatio) {
-                width = Double(bounds.width)
+                width = areaWidth
                 height = width / shownRatio
             } else {
                 height = Double(bounds.height)

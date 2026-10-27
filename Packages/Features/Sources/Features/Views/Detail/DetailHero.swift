@@ -5,8 +5,8 @@ import UIKit
 import Observation
 
 /// The title page's hero. In portrait the picture runs under the bar with the logo low on it, and the controls, the trailer's panel and the
-/// synopsis sit beneath it. In landscape the picture is beside the title and its controls, with the trailer's panel and the synopsis under
-/// them. The trailer's panel is there only while the trailer has one to show, and then pushes the synopsis down. The page supplies the
+/// synopsis sit beneath it. In landscape the backdrop fills the hero's trailing side and the title, controls, overview and ratings sit over
+/// its lower leading edge, with the trailer's panel, any open reviews and, when the overview is cut, the synopsis under them. The trailer's panel is there only while the trailer has one to show, and then pushes the synopsis down. The page supplies the
 /// controls, the panel and the synopsis, so the state they keep stays on the page and survives a rotation.
 struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     let model: DetailViewModel
@@ -26,6 +26,8 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     @ViewBuilder let trailer: TrailerPanel
     @ViewBuilder let synopsis: Synopsis
     @State private var renderedLogoHeight: CGFloat = TitleHero.logoMaxHeight
+    /// True when the landscape hero's overview is cut at its three lines; only then does the whole synopsis show under the hero.
+    @State private var overviewIsCut = false
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
 
@@ -50,42 +52,91 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
         }
     }
 
-    /// The landscape picture's width, and the width of the column beside it, where the play buttons sit.
-    private var landscapeWidths: (artwork: CGFloat, controls: CGFloat) {
-        let artwork = max(120, (size.width - contentMargin * 2 - Theme.Spacing.xl) * TitleHero.landscapeArtworkShare)
-        return (artwork, max(0, size.width - contentMargin * 2 - Theme.Spacing.xl - artwork))
-    }
+    private var landscapeHeroHeight: CGFloat { TitleHero.landscapeHeroHeight(pageHeight: size.height) }
 
-    /// Landscape: the picture beside the title and its controls.
+    /// Landscape: the backdrop on the trailing side, fading into the page on its leading side, with the title, the actions, the overview and
+    /// the ratings in a column over its lower leading edge. The scores are the rating buttons here and nowhere else in the hero.
     private var landscapeTop: some View {
-        let artworkWidth = landscapeWidths.artwork
-        return HStack(alignment: .center, spacing: Theme.Spacing.xl) {
-            HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fit, preview: model.preview, usesSystemSpinner: true)
-                .frame(width: artworkWidth, height: artworkWidth / CardAspect.wide.ratio)
-                .overlay(alignment: .bottomTrailing) {
-                    PosterRatingsOverlay(item: model.preview, isLandscape: true, startsLoading: model.hasSettledHero)
+        VStack(alignment: .leading, spacing: TitleHero.logoTextGap) {
+            titleArt(alignment: .leading)
+            controls
+            if showsDetails {
+                landscapeOverview
+                RatingButtonsRow(item: model.detail.preview, startsLoading: model.hasSettledHero,
+                                 openSite: model.openedReviews?.site, isLoading: model.reviewsLoading) { site, url, isSearch in
+                    model.toggleReviews(site, url: url, isSearch: isSearch)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
-            VStack(alignment: .leading, spacing: TitleHero.logoTextGap) {
-                titleArt(alignment: .leading)
-                controls
+                .padding(.top, Theme.Spacing.xs)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, contentMargin)
-        .padding(.vertical, Theme.Spacing.m)
+        .frame(width: TitleHero.landscapeTextWidth(pageWidth: size.width), alignment: .leading)
+        .padding(.leading, contentMargin)
+        .padding(.top, Self.landscapeTopClearance)
+        .padding(.bottom, Theme.Spacing.l)
+        // A minimum, not a fixed height: large text grows the hero rather than clipping it.
+        .frame(maxWidth: .infinity, minHeight: landscapeHeroHeight, alignment: .bottomLeading)
+        .background { landscapeArt }
     }
 
-    /// Landscape: the synopsis, then the ratings row, which is never wider than the column the play buttons sit in.
+    /// The least space kept above the text column, clear of the floating back button.
+    private static var landscapeTopClearance: CGFloat { 60 }
+
+    /// The ground, an optional wash of the title's colour on the text side, and the backdrop pinned to the trailing edge. It runs to the
+    /// top of the screen and under the side safe areas, so no strip of ground shows above it or beside the notch. As in portrait, a pull
+    /// past the top stretches it up so no gap opens over it, and scrolling the page zooms it.
+    private var landscapeArt: some View {
+        let artWidth = TitleHero.landscapeArtWidth(heroHeight: landscapeHeroHeight, pageWidth: size.width)
+        let tint = PlayColourStore.colour(hex: model.playColourHex)
+        return ZStack(alignment: .trailing) {
+            if let tint {
+                LinearGradient(stops: [
+                    .init(color: tint.opacity(0.22), location: 0),
+                    .init(color: tint.opacity(0.08), location: 0.45),
+                    .init(color: .clear, location: 0.75),
+                ], startPoint: .leading, endPoint: .trailing)
+                .transition(.opacity)
+            }
+            HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, alignment: .center, preview: model.preview,
+                        standInFromBackdrop: true, usesSystemSpinner: true)
+                .frame(width: artWidth)
+                .frame(maxHeight: .infinity)
+                .modifier(LandscapeHeroZoom(scroll: scroll))
+                .clipped()
+                .mask {
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.55), location: 0.25),
+                        .init(color: .black, location: 0.45),
+                    ], startPoint: .leading, endPoint: .trailing)
+                }
+            BottomFade(length: 0.42)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .modifier(LandscapeHeroPull(scroll: scroll))
+        .animation(.smooth(duration: 0.3), value: model.playColourHex)
+        .allowsHitTesting(false)
+        .ignoresSafeArea(.container, edges: [.top, .horizontal])
+    }
+
+    /// The overview, cut to three lines and not expandable. Its full text, with More, shows under the hero only when it is cut.
+    @ViewBuilder
+    private var landscapeOverview: some View {
+        if let description = model.detail.preview.description, !description.isEmpty {
+            JustifiedText(text: description, color: UIColor.label.withAlphaComponent(0.85), lineLimit: 3, isTruncated: $overviewIsCut)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("detail.overview")
+        }
+    }
+
+    /// Landscape, under the trailer's panel: the reviews opened from a rating. The synopsis already appears in the hero overview.
     @ViewBuilder
     private var landscapeBottom: some View {
-        synopsis
-            .padding(.horizontal, contentMargin)
-            .padding(.top, Theme.Spacing.s)
-        DetailRatings(model: model, startsLoading: model.hasSettledHero, buttonsWidth: landscapeWidths.controls)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, contentMargin)
-            .padding(.top, Theme.Spacing.m)
+        if let reviews = model.openedReviews {
+            DetailReviewsPanel(reviews: reviews, shown: model.shownReviews, item: model.detail.preview, isLoading: model.reviewsLoading,
+                               onLoaded: model.reviewsDidLoad, onClose: model.closeReviews)
+                .padding(.horizontal, contentMargin)
+                .padding(.top, Theme.Spacing.m)
+        }
     }
 
     /// Portrait: the picture under the bar, with the logo low on it and the controls beneath.
@@ -166,6 +217,26 @@ private struct DetailHeroScrollArtwork: View {
         HeroPicture(slot: slot, isRevealed: isRevealed, contentMode: .fill, preview: preview, usesSystemSpinner: true)
             .modifier(DetailHeroScrollTransform(width: width, heroHeight: heroHeight,
                                                 visibleHeight: visibleHeight, scroll: scroll))
+    }
+}
+
+/// Landscape: a pull past the top grows the art upward by the pull, so the picture fills it (it is drawn to fill) and stays against the
+/// top of the screen. Only this and `LandscapeHeroZoom` read the offset, so the art's content does not rebuild per scroll tick.
+private struct LandscapeHeroPull: ViewModifier {
+    let scroll: DetailHeroScrollState
+
+    func body(content: Content) -> some View {
+        content.padding(.top, -max(0, -scroll.offset))
+    }
+}
+
+/// Landscape: scrolling the page down zooms the picture from its top, on the same curve as portrait.
+private struct LandscapeHeroZoom: ViewModifier {
+    let scroll: DetailHeroScrollState
+
+    func body(content: Content) -> some View {
+        let down = max(0, scroll.offset)
+        content.scaleEffect(1 + 0.28 * (down / (down + 180)), anchor: .top)
     }
 }
 

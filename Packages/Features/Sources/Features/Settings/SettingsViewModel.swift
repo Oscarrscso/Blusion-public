@@ -113,8 +113,9 @@ public final class SettingsViewModel {
             ? "OpenSubtitles saved." : "The OpenSubtitles key could not be saved to secure storage. Try again."
     }
 
+    /// No "file's default": the player picks English when nothing else is chosen (`PlayerPreferences.defaultAudioLanguage`).
     public static var audioLanguageOptions: [Option<String?>] {
-        [.init(label: "File's default", value: nil)] + LanguageCodes.all.map { .init(label: $0.name, value: $0.code) }
+        LanguageCodes.all.map { .init(label: $0.name, value: $0.code) }
     }
 
     public func setFallbackEngineEnabled(_ enabled: Bool) async {

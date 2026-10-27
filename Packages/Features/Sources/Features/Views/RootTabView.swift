@@ -189,12 +189,26 @@ struct GalleryDestination: Hashable {
 @Observable
 final class LandscapeTabBarState {
     var collapsed = false
+    /// The current pushed browse/picker page, shown on top of the landscape panel.
+    var pageTitle: String?
+    /// A detail page stays tucked away through its initial downward scroll and expands only when the user reverses upward.
+    private var waitsForUpwardScroll = false
     private var previousOffset: CGFloat?
     private var distanceDown: CGFloat = 0
     private var distanceUp: CGFloat = 0
 
     func reset() {
         collapsed = false
+        waitsForUpwardScroll = false
+        previousOffset = nil
+        distanceDown = 0
+        distanceUp = 0
+    }
+
+    func prepareForDetailPage() {
+        collapsed = true
+        waitsForUpwardScroll = true
+        pageTitle = nil
         previousOffset = nil
         distanceDown = 0
         distanceUp = 0
@@ -202,7 +216,16 @@ final class LandscapeTabBarState {
 
     func update(offset: CGFloat) {
         let offset = max(0, offset)
-        guard offset > 8 else { reset(); return }
+        guard offset > 8 else {
+            if waitsForUpwardScroll {
+                previousOffset = offset
+                distanceDown = 0
+                distanceUp = 0
+            } else {
+                reset()
+            }
+            return
+        }
         guard let previousOffset else { self.previousOffset = offset; return }
         self.previousOffset = offset
         let difference = offset - previousOffset
@@ -215,9 +238,22 @@ final class LandscapeTabBarState {
         } else if difference < -1 {
             distanceUp -= difference
             distanceDown = 0
-            if distanceUp >= 35 { collapsed = false; distanceUp = 0 }
+            // Scrolling back up brings the icons back almost at once.
+            if distanceUp >= 12 {
+                collapsed = false
+                waitsForUpwardScroll = false
+                distanceUp = 0
+            }
         }
     }
+
+    /// How far the landscape buttons (Back, Home and its panel, Search) sit from the screen's two edges at their corner: a 44-point
+    /// round button whose edge keeps an even 6-point gap from the curve of an iPhone's roughly 55-point screen corner. They sit out in the
+    /// corners, past the safe area at the sides, rather than over the page.
+    static let cornerInset: CGFloat = 14
+    /// The landscape Back button's corner gap and 44-point height. A page whose navigation bar is hidden in phone landscape starts its
+    /// content below this, so the button sits clear of the artwork at rest.
+    static let backClearance: CGFloat = cornerInset + 44
 }
 
 private struct LandscapeTabScrollModifier: ViewModifier {
@@ -252,6 +288,97 @@ private struct TabBarStyle: ViewModifier {
     }
 }
 
+/// Landscape controls: one glass panel with the page's title on top, a hairline, and Home with the tab icons below. Scrolling down fades
+/// the panel, title and icons away and leaves Home alone in the corner; scrolling up brings them straight back. Home is mounted at one
+/// size and position for the whole scroll, and the panel grows upward from the bottom row, so Home never moves and no native tab-bar
+/// relayout occurs.
+private struct LandscapeTabControls: View {
+    let router: AppRouter
+    let collapsed: Bool
+    let title: String
+    let hidesPageHeader: Bool
+    let onHome: () -> Void
+
+    /// Home and three tab icons, 44 points each, 12 apart.
+    private static let panelContentWidth: CGFloat = 44 * 4 + 12 * 3
+    /// The panel's corners match Home's round end in the bottom-leading corner.
+    private static let panelShape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+    /// Collapsing shrinks the panel smoothly back into Home; expanding pops it out of Home on a soft spring.
+    static func fade(collapsed: Bool) -> Animation {
+        collapsed ? .smooth(duration: 0.3) : .spring(duration: 0.38, bounce: 0.18)
+    }
+    /// How small the panel (and Search) are while tucked away, grown from their corner.
+    static let tuckedScale: CGFloat = 0.6
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 0) {
+                if !hidesPageHeader {
+                    Text(title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 6)
+                        .padding(.top, 11)
+                        .padding(.bottom, 9)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("landscape.pageTitle")
+                    Rectangle()
+                        .fill(.white.opacity(0.3))
+                        .frame(height: 0.5)
+                        // A little gap so the line clears the round buttons below it.
+                        .padding(.bottom, 6)
+                }
+                HStack(spacing: 12) {
+                    Color.clear.frame(width: 44, height: 44)
+                    tabButton(.discover, symbol: "square.grid.2x2", selectedSymbol: "square.grid.2x2.fill", title: "Discover")
+                    tabButton(.library, symbol: "books.vertical", selectedSymbol: "books.vertical.fill", title: "Library")
+                    tabButton(.settings, symbol: "gearshape", selectedSymbol: "gearshape.fill", title: "Settings")
+                }
+            }
+            .frame(width: Self.panelContentWidth)
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .opacity(collapsed ? 0 : 1)
+            // The clearer, more see-through variant of Liquid Glass; it clears away with the rest when scrolled.
+            .glassEffect(collapsed ? .identity : .clear, in: Self.panelShape)
+            .scaleEffect(collapsed ? Self.tuckedScale : 1, anchor: .bottomLeading)
+            .allowsHitTesting(!collapsed)
+            .accessibilityHidden(collapsed)
+            .animation(Self.fade(collapsed: collapsed), value: collapsed)
+
+            // This is the same instance in both states: it never moves, scales or changes glass.
+            Button(action: onHome) {
+                Image(systemName: router.tab == .home ? "play.house.fill" : "play.house")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(router.tab == .home ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Home")
+            .accessibilityIdentifier("landscape.home")
+        }
+    }
+
+    private func tabButton(_ tab: LaunchRoute.Tab, symbol: String, selectedSymbol: String, title: String) -> some View {
+        Button {
+            router.tapTab(tab)
+        } label: {
+            Image(systemName: router.tab == tab ? selectedSymbol : symbol)
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(router.tab == tab ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("landscape.\(title.lowercased())")
+    }
+}
+
 public struct RootTabView: View {
     private let services: AppServices
     private let initialQuery: String?
@@ -271,6 +398,7 @@ public struct RootTabView: View {
     @State private var posterPlay: PosterPlayLauncher
     @State private var isLandscape = false
     @State private var windowSafeArea = EdgeInsets()
+    @State private var windowWidth: CGFloat = 0
     /// A phone turned sideways. A Mac window is never a phone, so `isPhoneLandscape` never governs its navigation bar, at any window shape.
     private var isPhoneLandscape: Bool { isLandscape && !Self.isMacCatalyst }
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
@@ -280,6 +408,20 @@ public struct RootTabView: View {
         #else
         return false
         #endif
+    }
+    /// Home, the landscape panel, Search and Back keep this distance from the screen's sides: the corner gap plus 1.5% of the width, so
+    /// they sit a little in from the far edges rather than against them. Their distance from the top and bottom stays the corner gap.
+    private var landscapeEdgeInset: CGFloat { LandscapeTabBarState.cornerInset + (windowWidth * 0.015).rounded() }
+    /// Only category pages put a heading above the landscape controls. Root tabs and other pushed pages need no repeated context label.
+    private var landscapeTitle: String { landscapeTabs.pageTitle ?? "" }
+    /// A page pushed on a browsing tab's stack, other than a title's page, in phone landscape: its navigation bar is hidden there and
+    /// Back is drawn above Home instead.
+    private var showsLandscapeBack: Bool {
+        guard isPhoneInLandscape else { return false }
+        switch router.tab {
+        case .home, .discover, .library, .search: return !router[keyPath: router.pathKey(for: router.tab)].isEmpty
+        case .settings, .widgets: return false
+        }
     }
     /// Phones show each tab's icon alone (see `tabItem`). The iPad and the Mac keep the titles, as their sidebar rows need them.
     private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone }
@@ -403,29 +545,75 @@ public struct RootTabView: View {
         .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
         .pageTopBar(hidden: isPhoneLandscape)
         .tabBarMinimizeBehavior(isPhoneInLandscape ? .never : .onScrollDown)
-        .toolbar(isPhoneInLandscape && landscapeTabs.collapsed ? .hidden : .automatic, for: .tabBar)
+        .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
         .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage, isPhoneLandscape: isPhoneInLandscape))
-        .overlay(alignment: .bottomLeading) {
-            if isPhoneInLandscape && landscapeTabs.collapsed && !router.showsTitlePage {
+        // The native bar stays hidden for *all* landscape scroll states. Replacing it mid-scroll
+        // changes safe-area geometry and is what made the old detached Home button jump.
+        .overlay(alignment: .bottom) {
+            // Category pages add their heading above the panel; root tabs and other pushed pages show the controls alone.
+            if isPhoneInLandscape {
+                HStack(alignment: .bottom) {
+                    LandscapeTabControls(router: router, collapsed: landscapeTabs.collapsed, title: landscapeTitle,
+                                         hidesPageHeader: landscapeTabs.pageTitle?.isEmpty != false,
+                                         onHome: { landscapeTabs.reset(); router.tapTab(.home) })
+                    Spacer(minLength: 0)
+                    Button {
+                        router.tapTab(.search)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 21, weight: .medium))
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("Search")
+                    .accessibilityIdentifier("landscape.search")
+                    .opacity(landscapeTabs.collapsed ? 0 : 1)
+                    .scaleEffect(landscapeTabs.collapsed ? LandscapeTabControls.tuckedScale : 1, anchor: .bottomTrailing)
+                    .allowsHitTesting(!landscapeTabs.collapsed)
+                    .accessibilityHidden(landscapeTabs.collapsed)
+                    .animation(LandscapeTabControls.fade(collapsed: landscapeTabs.collapsed), value: landscapeTabs.collapsed)
+                }
+                .padding(.horizontal, landscapeEdgeInset)
+                // Measured from the screen's bottom edge, not the home indicator's safe area, so Home and Search sit in the corners.
+                .padding(.bottom, LandscapeTabBarState.cornerInset)
+                .ignoresSafeArea(.container, edges: .bottom)
+            }
+        }
+        // Back sits in the top corner, in the same column as Home in the bottom one, on every pushed page in phone landscape (title pages,
+        // See All grids, categories and the stream picker), whose navigation bars are hidden there, so it is the same button everywhere.
+        .overlay(alignment: .topLeading) {
+            if showsLandscapeBack {
                 Button {
-                    landscapeTabs.reset()
-                    router.tapTab(.home)
+                    router.goBackOnTab()
                 } label: {
-                    Image(systemName: "play.house.fill")
-                        .font(.body.weight(.semibold))
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .accessibilityLabel("Home")
-                .accessibilityIdentifier("landscape.home")
-                .padding(.leading, max(windowSafeArea.leading, windowSafeArea.trailing) + 16)
-                .padding(.bottom, max(12, windowSafeArea.bottom + 8))
+                .accessibilityLabel("Back")
+                .accessibilityIdentifier("landscape.back")
+                .padding(.top, LandscapeTabBarState.cornerInset)
+                .padding(.leading, landscapeEdgeInset)
+                .ignoresSafeArea(.container, edges: .top)
+                .transition(.opacity)
             }
         }
-        .onChange(of: router.tab) { _, _ in landscapeTabs.reset() }
-        .onChange(of: isPhoneInLandscape) { _, _ in landscapeTabs.reset() }
+        .onChange(of: router.tab) { _, _ in
+            landscapeTabs.reset()
+            landscapeTabs.pageTitle = nil
+        }
+        .onChange(of: isPhoneInLandscape) { _, landscape in
+            if landscape, router.showsTitlePage {
+                landscapeTabs.prepareForDetailPage()
+            } else {
+                landscapeTabs.reset()
+            }
+        }
         .task(id: "\(router.tab)-\(userStateRevision)") {
             router.userStateRevision = userStateRevision
             await refreshUserState()
@@ -485,6 +673,8 @@ public struct RootTabView: View {
         .environment(\.isPhoneLandscape, isPhoneLandscape)
         .environment(\.windowSafeArea, windowSafeArea)
         .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { isLandscape = $0 }
+        // The full screen width (this sits inside the edge-to-edge line below), for the landscape buttons' side gap.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .focusedSceneValue(router)
         .preferredColorScheme(.dark)
         // Screens run edge to edge, including the sides of a landscape iPhone. Only the navigation bar and tab bar keep their safe area.

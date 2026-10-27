@@ -80,7 +80,7 @@ public final class AetherBackend: FallbackBackend {
         case .fill: .fill
         case .stretch: .stretch
         }
-        session.apply(fit: fit, zoom: layout.zoom, aspect: layout.aspect.ratio, crop: layout.crop.ratio)
+        session.apply(fit: fit, zoom: layout.zoom, aspect: layout.aspect.ratio, crop: layout.crop.ratio, inset: layout.inset)
     }
 
     public func apply(processing: VideoProcessing) {

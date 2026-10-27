@@ -79,7 +79,7 @@ import Testing
         await model.start()
         let engine = try #require(engines.made.last)
         #expect(engine.loadedItems.first?.startPosition == 42, "the session's place, not the start")
-        #expect(engine.layouts.contains(layout), "the session's picture")
+        #expect(engine.layouts.first == VideoLayout(), "the picture is the saved Zoom Mode and the title's Aspect Ratio, as in Infuse")
         #expect(engine.processings.contains(processing))
         try await waitUntil { model.selectedAudioTrackID == "a2" }
         try await waitUntil { model.subtitleChoice == .embedded("s2") }

@@ -49,7 +49,7 @@ struct HomeView: View {
             .navigationTitle(heroIsFirst || isPhoneInLandscape ? "" : "Home")
             .navigationBarTitleDisplayMode(.inline)
             .pageTopBar(hidden: heroIsFirst || isPhoneLandscape)
-            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             .task { await model.observeAddons() }
             // Auto Pick's switch is changed away from Home, so a Continue Watching card reads it again whenever Home shows.
             .task(id: scenePhase) { await launcher.refreshAutoPick() }

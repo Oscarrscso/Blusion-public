@@ -56,13 +56,23 @@ enum TitleHero {
     static let settleLarger: Double = 1.025
 
     // MARK: Landscape title page (iPhone only; the Mac keeps its original sizes)
-    /// The share of the content width (after the gap) the landscape picture takes.
-    static var landscapeArtworkShare: CGFloat {
-        #if targetEnvironment(macCatalyst)
-        0.48
-        #else
-        0.55
-        #endif
+    /// How much of the next section shows under the landscape hero, so the page reads as one that scrolls.
+    static let landscapePeek: CGFloat = 56
+    /// The tallest the landscape hero gets, so an iPad's hero is not the whole screen.
+    static let landscapeMaxHeight: CGFloat = 560
+    /// The least the landscape hero is, even on a very short window (split view, a keyboard).
+    static let landscapeMinHeight: CGFloat = 220
+    /// The height of the landscape hero over the page height: the screen less the peek, capped. Large text may still grow it.
+    static func landscapeHeroHeight(pageHeight: CGFloat) -> CGFloat {
+        max(landscapeMinHeight, min(pageHeight - landscapePeek, landscapeMaxHeight))
+    }
+    /// The width of the landscape backdrop: 16:9 at the hero's height, so it is never cropped, and never wider than the page.
+    static func landscapeArtWidth(heroHeight: CGFloat, pageWidth: CGFloat) -> CGFloat {
+        max(0, min(heroHeight * 16 / 9, pageWidth))
+    }
+    /// The width of the landscape hero's text column, so Play has room and the overview's lines stay readable.
+    static func landscapeTextWidth(pageWidth: CGFloat) -> CGFloat {
+        max(0, min(pageWidth * 0.46, 480))
     }
     /// The tallest and widest the landscape logo can be.
     static var landscapeLogoMaxHeight: CGFloat {

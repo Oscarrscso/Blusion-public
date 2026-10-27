@@ -201,7 +201,7 @@ import StremioKitTestSupport
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
                                     services: try await services(store: store, engines: engines))
         await model.start()
-        model.setVideoFit(.fill)
+        model.setZoomMode(.crop)
         model.setSubtitleStyle(SubtitleStyle(scale: 1.5, colour: .yellow))
         model.setProcessing(VideoProcessing(toneMapping: .spline, upscaling: .ai))
         #expect(engines.made[0].layouts.last?.fit == .fill)
@@ -209,53 +209,74 @@ import StremioKitTestSupport
         #expect(model.preferences.processing.upscaling == .ai)
         await model.waitForSavedPreferences()
         let saved = await store.load().player
-        #expect(saved.videoLayout.fit == .fill && saved.subtitleStyle.scale == 1.5 && saved.processing.toneMapping == .spline)
+        #expect(saved.zoomMode == .crop && saved.subtitleStyle.scale == 1.5 && saved.processing.toneMapping == .spline)
         await model.close()
     }
 
-    @Test func fitAndFillDiscardLegacyStretchZoomAspectAndCrop() async throws {
+    /// A saved stretched, zoomed or reshaped picture from an older build never comes back: the picture is Zoom Mode's, and a saved Fill
+    /// starts Zoom Mode at Crop.
+    @Test func anOldSavedPictureStartsAsZoomMode() async throws {
         var settings = PlaybackSettings()
-        settings.player.videoLayout = VideoLayout(fit: .stretch, zoom: 2,
-                                                  aspect: .ratio4x3, crop: .ratio239)
+        settings.player.videoLayout = VideoLayout(fit: .stretch, zoom: 2, aspect: .ratio4x3, crop: .ratio239)
         let store = InMemorySettingsStore(settings)
         let engines = Engines { _ in MockEngine() }
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
                                     services: try await services(store: store, engines: engines))
         await model.start()
         #expect(model.videoLayout == VideoLayout(), "the first frame must not inherit stretched or zoomed settings")
-
-        model.setAspect(.ratio16x9)
-        model.setCrop(.ratio239)
-        model.setZoom(2)
-        model.setVideoFit(.fill)
-        #expect(model.videoLayout == VideoLayout(fit: .fill), "fill is a centred, aspect-preserving crop")
-
-        model.setVideoFit(.fit)
-        #expect(model.videoLayout == VideoLayout(), "pinching inward restores the original uncropped picture")
-
-        await model.waitForSavedPreferences()
-        let saved = await store.load().player.videoLayout
-        #expect(saved.fit == .fit)
         await model.close()
     }
 
-    @Test func cropAndZoomKeepEachOtherAndDolbyVisionKeepsTheRestOfThePicture() async throws {
+    /// Zoom Mode is kept for every video; Aspect Ratio for the title: the film, or the whole season of a series.
+    @Test func zoomModeIsGlobalAndAspectRatioIsKeptPerTitle() async throws {
+        let store = InMemorySettingsStore()
+        let episode = StreamRequest(type: "series", id: "tt9:2:3", title: "Show · Three", season: 2, episode: 3, seriesName: "Show")
+        let engines = Engines { _ in MockEngine() }
+        let first = PlayerViewModel(plan: PlaybackPlan(request: episode, candidates: [candidate("a")]),
+                                    services: try await services(store: store, engines: engines))
+        await first.start()
+        first.setZoomMode(.crop)
+        first.setAspectRatio(.anamorphicB)
+        await first.waitForSavedPreferences()
+        await first.close()
+
+        let nextEpisode = StreamRequest(type: "series", id: "tt9:2:4", title: "Show · Four", season: 2, episode: 4, seriesName: "Show")
+        let second = PlayerViewModel(plan: PlaybackPlan(request: nextEpisode, candidates: [candidate("a")]),
+                                     services: try await services(store: store, engines: engines))
+        await second.start()
+        #expect(second.zoomMode == .crop && second.aspectRatio == .anamorphicB, "the same season keeps its Aspect Ratio")
+        #expect(second.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
+        await second.close()
+
+        let film = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
+                                   services: try await services(store: store, engines: engines))
+        await film.start()
+        #expect(film.zoomMode == .crop && film.aspectRatio == .auto, "Zoom Mode is global, Aspect Ratio belongs to its title")
+        await film.close()
+
+        let nextSeason = StreamRequest(type: "series", id: "tt9:3:1", title: "Show · One", season: 3, episode: 1, seriesName: "Show")
+        let third = PlayerViewModel(plan: PlaybackPlan(request: nextSeason, candidates: [candidate("a")]),
+                                    services: try await services(store: store, engines: engines))
+        await third.start()
+        #expect(third.aspectRatio == .auto)
+        third.setAspectRatio(.auto)
+        await third.close()
+        let saved = await store.load().player
+        #expect(saved.zoomMode == .crop && saved.aspectRatios == ["tt9:s2": .anamorphicB])
+    }
+
+    @Test func dolbyVisionKeepsTheRestOfThePicture() async throws {
         let store = InMemorySettingsStore()
         let engines = Engines { _ in MockEngine() }
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
                                     services: try await services(store: store, engines: engines))
         await model.start()
-        model.setAspect(.ratio16x9)
-        model.setCrop(.ratio239)
-        model.setZoom(1.5)
-        #expect(engines.made[0].layouts.last == VideoLayout(fit: .fit, zoom: 1.5, aspect: .ratio16x9, crop: .ratio239))
         model.setProcessing(VideoProcessing(toneMapping: .spline, upscaling: .ai))
         model.setDolbyVision(false)
         #expect(engines.made[0].processings.last == VideoProcessing(toneMapping: .spline, upscaling: .ai, dolbyVision: false))
         await model.waitForSavedPreferences()
         let saved = await store.load().player
         #expect(!saved.processing.dolbyVision && saved.processing.upscaling == .ai)
-        #expect(saved.videoLayout.crop == .off, "the crop is for this video")
         await model.close()
     }
 

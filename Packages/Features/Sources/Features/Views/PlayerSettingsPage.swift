@@ -60,7 +60,11 @@ struct PlayerSettingsPage: View {
             }
 
             Section {
-                Picker("Language", selection: binding(\.audioLanguage)) {
+                // Nothing saved reads as English, the language the player picks then.
+                Picker("Language", selection: Binding<String?>(get: { player.audioLanguage ?? PlayerPreferences.defaultAudioLanguage }, set: { value in
+                    Haptics.selection()
+                    Task { await model.updatePlayer { $0.audioLanguage = value } }
+                })) {
                     ForEach(SettingsViewModel.audioLanguageOptions) { Text($0.label).tag($0.value) }
                 }
                 .accessibilityIdentifier("settings.player.audioLanguage")
@@ -69,9 +73,10 @@ struct PlayerSettingsPage: View {
             }
 
             Section {
-                Picker("Picture", selection: binding(\.videoLayout.fit)) {
-                    ForEach([VideoFit.fit, .fill], id: \.self) { Text($0.label).tag($0) }
+                Picker("Zoom Mode", selection: binding(\.zoomMode)) {
+                    ForEach(VideoZoomMode.available) { Text($0.label).tag($0) }
                 }
+                .accessibilityIdentifier("settings.player.zoomMode")
                 Toggle("Dolby Vision", isOn: binding(\.processing.dolbyVision))
                     .accessibilityIdentifier("settings.player.dolbyVision")
                 Picker("HDR", selection: binding(\.processing.hdrOutput)) {

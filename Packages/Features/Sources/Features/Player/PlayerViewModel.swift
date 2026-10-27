@@ -162,16 +162,10 @@ public final class PlayerViewModel {
         session.isRecording = !holding
         progressSession = session
         let player = settings.player
-        // A restored session brings its own picture. Without one, a stretch or arbitrary display ratio saved by an older build starts
-        // undistorted, keeping only the preferred Fit/Fill mode.
-        var safeLayout = pendingResume?.layout ?? player.videoLayout
-        if safeLayout.fit == .stretch { safeLayout.fit = .fit }
-        if pendingResume?.layout == nil {
-            safeLayout.zoom = 1
-            safeLayout.aspect = .source
-            safeLayout.crop = .off
-        }
-        let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: safeLayout,
+        // The picture is Zoom Mode's, kept for every video, with this title's Aspect Ratio (as in Infuse).
+        zoomMode = player.zoomMode.onThisDevice
+        aspectRatio = player.aspectRatios[AspectRatioChoice.titleKey(for: plan.request)] ?? .auto
+        let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: pictureLayout,
                                               processing: pendingResume?.processing ?? player.processing,
                                               subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
         coordinator.onEnded = { [weak self] in self?.hasFinished = true }
@@ -253,16 +247,13 @@ public final class PlayerViewModel {
     }
 
     /// Saves the session a hand-over starts: the next episode's own stream, so killing the app during it walks back into that episode.
-    /// The picture is the one Settings keeps, not the finished film's measured crop, which belongs to that film alone.
+    /// The picture is the one Settings keeps: Zoom Mode, with the next title's own Aspect Ratio.
     public func saveSessionSnapshot(for next: PlaybackPlan, candidateIndex: Int = 0) async {
         guard next.candidates.indices.contains(candidateIndex) else { return }
         let candidate = next.candidates[candidateIndex]
         guard let identity = PlaybackStreamIdentity(candidate: candidate) else { return }
-        var layout = settings.player.videoLayout
-        if layout.fit == .stretch { layout.fit = .fit }
-        layout.zoom = 1
-        layout.aspect = .source
-        layout.crop = .off
+        let layout = VideoLayout(zoomMode: settings.player.zoomMode,
+                                 aspectRatio: settings.player.aspectRatios[AspectRatioChoice.titleKey(for: next.request)] ?? .auto)
         let snapshot = PlaybackSnapshot(request: next.request, stream: identity, addonName: candidate.addonName,
                                         position: 0, duration: nil, wasPaused: false,
                                         layout: layout, processing: settings.player.processing)
@@ -606,89 +597,76 @@ public final class PlayerViewModel {
 
     // MARK: Picture
 
-    public var videoLayout: VideoLayout { coordinator?.videoLayout ?? settings.player.videoLayout }
+    public var videoLayout: VideoLayout { coordinator?.videoLayout ?? pictureLayout }
     public var processing: VideoProcessing { coordinator?.processing ?? settings.player.processing }
 
-    /// Fit preserves the full frame; Fill crops centrally to screen, never stretching.
-    /// Changing modes also discards legacy aspect, crop and arbitrary zoom overrides.
-    public func setVideoFit(_ fit: VideoFit) {
-        let safeFit: VideoFit = fit == .fill ? .fill : .fit
-        var layout = videoLayout
-        layout.fit = safeFit
-        layout.zoom = 1
-        layout.aspect = .source
-        layout.crop = .off
-        coordinator?.setVideoLayout(layout)
-        savePreferences { $0.videoLayout.fit = safeFit }
+    // MARK: Zoom Mode and Aspect Ratio
+
+    /// Video › Zoom Mode (see `VideoZoomMode`).
+    public typealias ZoomMode = VideoZoomMode
+    /// Video › Aspect Ratio (see `AspectRatioChoice`).
+    public typealias AspectRatioChoice = StremioKit.AspectRatioChoice
+
+    /// As in Infuse: one global setting, kept for every video. Read from Settings when playback begins.
+    public private(set) var zoomMode: ZoomMode = .normal
+    /// As in Infuse: kept per title (a film, or a TV season). Read when playback begins; Auto when none was chosen.
+    public private(set) var aspectRatio: AspectRatioChoice = .auto
+    /// How far the safe area keeps the picture from each side, in points (beside a notch or Dynamic Island): Normal fits inside it.
+    public private(set) var safeAreaInset: Double = 0
+
+    /// The picture Zoom Mode and Aspect Ratio make on this screen.
+    var pictureLayout: VideoLayout { VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio, safeInset: safeAreaInset) }
+
+    /// Kept for every video, as in Infuse.
+    public func setZoomMode(_ mode: ZoomMode) {
+        changeZoomMode(to: mode)
         showControls()
     }
 
-    /// The pinch's steps, also in Picture › Screen: the whole frame; the frame filling the screen; and the film's own picture filling it,
-    /// without the black bars a widescreen film carries inside a 16:9 frame (only for a film that has them).
-    public enum PictureZoom: Sendable, Equatable, Hashable, CaseIterable {
-        case original, fill, noBars
+    private func changeZoomMode(to mode: ZoomMode) {
+        let mode = mode.onThisDevice
+        zoomMode = mode
+        applyPicture()
+        savePreferences { $0.zoomMode = mode }
     }
 
-    public var pictureZoom: PictureZoom {
-        let layout = videoLayout
-        guard layout.fit == .fill else { return .original }
-        return layout.crop == .off ? .fill : .noBars
+    /// The zoom button: the next Zoom Mode, round to the first (Normal, Aspect Fit, Crop, Stretch; a Mac has no Aspect Fit).
+    public func cycleZoomMode() {
+        setZoomMode(zoomMode.next)
     }
 
-    /// One pinch: out steps Original → Fill → No Bars (when `barsCrop`, the crop that takes off the film's own bars, is known), in steps
-    /// back. Past either end it does nothing.
-    public func zoomPicture(in zoomsIn: Bool, barsCrop: VideoCrop?) {
-        let next: PictureZoom? = switch (pictureZoom, zoomsIn) {
-        case (.original, true): .fill
-        case (.fill, true): barsCrop == nil ? nil : .noBars
-        case (.noBars, false): .fill
-        case (.fill, false): .original
-        default: nil
-        }
-        if let next { setPictureZoom(next, barsCrop: barsCrop) }
-    }
-
-    /// No Bars fills the screen with the picture inside the film's own bars, cropped centrally to `barsCrop`. Only Original or Fill is
-    /// kept for the next film: its bars are its own. Preserve controls visibility so pinching keeps the picture clear.
-    public func setPictureZoom(_ zoom: PictureZoom, barsCrop: VideoCrop?) {
-        var layout = videoLayout
-        layout.zoom = 1
-        layout.aspect = .source
-        switch zoom {
-        case .original:
-            layout.fit = .fit
-            layout.crop = .off
-        case .fill:
-            layout.fit = .fill
-            layout.crop = .off
-        case .noBars:
-            guard let barsCrop, barsCrop != .off else { return }
-            layout.fit = .fill
-            layout.crop = barsCrop
-        }
-        coordinator?.setVideoLayout(layout)
-        let fit = layout.fit
-        savePreferences { $0.videoLayout.fit = fit }
+    /// A pinch: out fills the screen (Crop), in shows the whole picture again (Normal). It changes Zoom Mode and is kept like it.
+    public func pinchZoom(in zoomsIn: Bool) {
+        let mode: ZoomMode = zoomsIn ? .crop : .normal
+        guard mode != zoomMode else { return }
+        // A pinch leaves the controls as they were, so the picture stays clear.
+        changeZoomMode(to: mode)
         lastInteraction = now()
     }
 
-    public func setZoom(_ zoom: Double) {
-        let layout = videoLayout
-        coordinator?.setVideoLayout(VideoLayout(fit: layout.fit, zoom: zoom, aspect: layout.aspect, crop: layout.crop))
+    /// Kept for this title: the film, or every episode of this season. Crop and Stretch use it; Normal and Aspect Fit show the whole frame.
+    public func setAspectRatio(_ choice: AspectRatioChoice) {
+        defer { showControls() }
+        guard choice != aspectRatio else { return }
+        aspectRatio = choice
+        applyPicture()
+        let key = AspectRatioChoice.titleKey(for: plan.request)
+        savePreferences { $0.aspectRatios[key] = choice == .auto ? nil : choice }
     }
 
-    public func setAspect(_ aspect: AspectOverride) {
-        var layout = videoLayout
-        layout.aspect = aspect
-        coordinator?.setVideoLayout(layout)
-        showControls()
+    /// The safe area the player screen reports. Only Normal uses it.
+    public func setSafeAreaInset(_ inset: Double) {
+        let inset = max(0, inset.rounded())
+        guard inset != safeAreaInset else { return }
+        safeAreaInset = inset
+        if zoomMode == .normal { applyPicture() }
     }
 
-    public func setCrop(_ crop: VideoCrop) {
-        var layout = videoLayout
-        layout.crop = crop
+    /// Hands the renderer the picture for the current Zoom Mode, Aspect Ratio and safe area.
+    private func applyPicture() {
+        let layout = pictureLayout
+        guard coordinator?.videoLayout != layout else { return }
         coordinator?.setVideoLayout(layout)
-        showControls()
     }
 
     /// Kept for next time, like the rest of the picture processing.
@@ -972,7 +950,7 @@ public final class PlayerViewModel {
         if audioTrackSelectionID != state.selectedAudioTrackID { audioTrackSelectionID = state.selectedAudioTrackID }
         restoreChoicesIfPossible()
         if !userChoseAudio, let track = SubtitleDefaults.audioTrack(in: state.audioTracks, selected: state.selectedAudioTrackID,
-                                                                    language: settings.player.audioLanguage) {
+                                                                    language: settings.player.audioLanguage ?? PlayerPreferences.defaultAudioLanguage) {
             coordinator?.selectAudioTrack(id: track.id)
         }
         Task { [weak self] in await self?.applyDefaultSubtitle() }

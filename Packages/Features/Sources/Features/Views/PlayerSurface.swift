@@ -27,7 +27,19 @@ final class PlayerLayerView: UIView {
     /// Draws scaled frames over the player layer while AI super resolution runs. It moves and scales with the picture.
     private weak var superResolutionLayer: AVSampleBufferDisplayLayer?
     /// AVPlayer only: a fallback engine lays out its own picture (`EngineCapabilities.videoLayout`).
-    var layout = VideoLayout() { didSet { if layout != oldValue { setNeedsLayout() } } }
+    var layout = VideoLayout() {
+        didSet {
+            guard layout != oldValue else { return }
+            // Crop changes apply immediately; other Zoom Mode or Aspect Ratio changes ease the picture into place.
+            if sourceSize != nil, window != nil, layout.fit != .fill, oldValue.fit != .fill {
+                animatesNextLayout = true
+            }
+            setNeedsLayout()
+        }
+    }
+    private var animatesNextLayout = false
+    /// How long a zoom change takes to ease into place.
+    static let zoomAnimationDuration: TimeInterval = 0.3
     private var sourceSize: CGSize? { didSet { if sourceSize != oldValue { setNeedsLayout() } } }
     private var sizeObservation: NSKeyValueObservation?
     private var frameObservation: NSKeyValueObservation?
@@ -89,7 +101,12 @@ final class PlayerLayerView: UIView {
         }
     }
 
-    /// The gravity the picture is drawn with: the geometry sizes the frame itself, so it stretches into it.
+    /// Crop and Stretch: the picture is fitted in the view as in Normal, and the view is scaled up (`VideoGeometry.fillScale`), so the
+    /// result never depends on the frame AVPlayer is handed matching the picture's shape.
+    private var scalesFittedPicture: Bool { sourceSize != nil && layout.fit != .fit && layout.aspect.ratio == nil }
+
+    /// The gravity the picture is drawn with: fitted while Crop or Stretch scales the view, else stretched into the frame the geometry
+    /// sizes for it.
     var videoGravity: AVLayerVideoGravity {
         guard sourceSize != nil else {
             return switch layout.fit {
@@ -98,20 +115,41 @@ final class PlayerLayerView: UIView {
             case .stretch: .resize
             }
         }
-        return .resize
+        return scalesFittedPicture ? .resizeAspect : .resize
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // No animation: the picture stays where it is while the controls, the size or the layout change.
-        UIView.performWithoutAnimation { placePicture() }
+        let animates = animatesNextLayout
+        animatesNextLayout = false
+        guard animates else {
+            // No animation: the picture stays where it is while the controls or the size change.
+            UIView.performWithoutAnimation { placePicture(animated: false) }
+            return
+        }
+        UIView.animate(withDuration: Self.zoomAnimationDuration, delay: 0, options: [.curveEaseInOut, .beginFromCurrentState]) {
+            self.placePicture(animated: true)
+        }
     }
 
-    private func placePicture() {
+    private func placePicture(animated: Bool) {
         CATransaction.begin()
-        CATransaction.setDisableActions(true)
+        if animated {
+            // The super resolution layer is no view's own layer: it follows the frames with the same timing.
+            CATransaction.setAnimationDuration(Self.zoomAnimationDuration)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        } else {
+            CATransaction.setDisableActions(true)
+        }
         videoView.transform = .identity
-        if let sourceSize, let geometry = VideoGeometry(bounds: bounds.size, source: sourceSize, layout: layout) {
+        if scalesFittedPicture, let sourceSize {
+            let scale = VideoGeometry.fillScale(bounds: bounds.size, source: sourceSize, crop: layout.crop.ratio,
+                                                stretch: layout.fit == .stretch, zoom: layout.zoom)
+            clipView.frame = bounds
+            videoView.bounds = CGRect(origin: .zero, size: bounds.size)
+            videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+            videoView.transform = CGAffineTransform(scaleX: scale.width, y: scale.height)
+        } else if let sourceSize, let geometry = VideoGeometry(bounds: bounds.size, source: sourceSize, layout: layout) {
             clipView.frame = geometry.visible
             videoView.frame = geometry.picture.offsetBy(dx: -geometry.visible.minX, dy: -geometry.visible.minY)
         } else {

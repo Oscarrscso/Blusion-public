@@ -54,7 +54,7 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.immediately)
             .screenBackground()
             .navigationTitle(isPhoneInLandscape ? "" : "Search")
-            .toolbar(isPhoneInLandscape && landscapeTabs?.collapsed == true ? .hidden : .automatic, for: .tabBar)
+            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             .searchable(text: $model.query, isPresented: $isSearchPresented,
                         placement: .navigationBarDrawer(displayMode: .always), prompt: "Shows, Movies, and More")
             .searchFocused($isSearchFocused)

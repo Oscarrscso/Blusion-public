@@ -14,7 +14,7 @@ enum PlayerPanelTab: String, CaseIterable, Identifiable {
         switch self {
         case .subtitles: "Subtitles"
         case .audio: "Audio"
-        case .picture: "Picture"
+        case .picture: "Video"
         case .speed: "Speed"
         case .chapters: "Chapters"
         case .info: "Info"
@@ -39,12 +39,18 @@ struct PlayerOptionsPanel: View {
     let model: PlayerViewModel
     @Binding var tab: PlayerPanelTab?
     var actions = PlayerControlActions()
-    /// The crop that takes off the film's own black bars, once known (`PictureSampler`): Picture › Screen then offers No Bars.
-    var barsCrop: VideoCrop?
     /// AI super resolution, for Info: what it is doing or why not, and the frames it scales. Only Info reads it, so its frame count
     /// redraws nothing else.
     var upscaling: SuperResolutionRenderer?
     @State private var scrollPosition = ScrollPosition()
+    /// Video's submenu that is open in place of its page: Zoom Mode or Aspect Ratio.
+    @State private var videoMenu: VideoMenu?
+
+    private enum VideoMenu {
+        case zoomMode, aspectRatio
+
+        var title: String { self == .zoomMode ? "Zoom Mode" : "Aspect Ratio" }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,7 +84,11 @@ struct PlayerOptionsPanel: View {
             .scrollPosition($scrollPosition)
             .scrollIndicators(.visible)
             .scrollBounceBehavior(.basedOnSize)
-            .onChange(of: tab) { _, _ in scrollPosition.scrollTo(edge: .top) }
+            .onChange(of: tab) { _, _ in
+                videoMenu = nil
+                scrollPosition.scrollTo(edge: .top)
+            }
+            .onChange(of: videoMenu) { _, _ in scrollPosition.scrollTo(edge: .top) }
             // Rows never take part in a selection morph or an opening/closing transaction.
             .transaction { $0.animation = nil }
         }
@@ -95,7 +105,8 @@ struct PlayerOptionsPanel: View {
         switch tab ?? .subtitles {
         case .subtitles: subtitles
         case .audio: audio
-        case .picture: picture
+        case .picture:
+            if let videoMenu { videoSubmenu(videoMenu) } else { picture }
         case .speed: speed
         case .chapters: chapters
         case .info: info
@@ -245,12 +256,14 @@ struct PlayerOptionsPanel: View {
 
     private var picture: some View {
         let processing = model.processing
-        let zoom = model.pictureZoom
-        // No Bars once the film's own bars are known (the pinch's third step).
-        let zooms: [PlayerViewModel.PictureZoom] = barsCrop != nil || zoom == .noBars ? [.original, .fill, .noBars] : [.original, .fill]
         return VStack(alignment: .leading, spacing: 18) {
             PanelSection("Frame") {
-                PanelChips(title: "Screen", options: zooms, selection: zoom, label: Self.zoomLabel) { model.setPictureZoom($0, barsCrop: barsCrop) }
+                PanelGroup {
+                    PanelMenuRow(title: VideoMenu.zoomMode.title, value: model.zoomMode.label) { videoMenu = .zoomMode }
+                        .accessibilityIdentifier("player.panel.zoomMode")
+                    PanelMenuRow(title: VideoMenu.aspectRatio.title, value: model.aspectRatio.label) { videoMenu = .aspectRatio }
+                        .accessibilityIdentifier("player.panel.aspectRatio")
+                }
             }
             if model.capabilities.contains(.dolbyVisionSwitch) || model.capabilities.contains(.toneMapping) {
                 PanelSection("Colour") {
@@ -286,11 +299,35 @@ struct PlayerOptionsPanel: View {
         }
     }
 
-    private static func zoomLabel(_ zoom: PlayerViewModel.PictureZoom) -> String {
-        switch zoom {
-        case .original: "Original"
-        case .fill: "Fill Screen"
-        case .noBars: "No Bars"
+    /// Zoom Mode or Aspect Ratio, opened from Video › Frame: a Back row to Video, then every choice, the one in use checked. A choice
+    /// applies at once and the list stays, so its effect shows behind the panel.
+    private func videoSubmenu(_ menu: VideoMenu) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button { videoMenu = nil } label: {
+                Label(PlayerPanelTab.picture.title, systemImage: "chevron.backward")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 4)
+                    .frame(minHeight: 36)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("player.panel.videoMenu.back")
+            PanelSection(menu.title) {
+                PanelGroup {
+                    switch menu {
+                    case .zoomMode:
+                        ForEach(PlayerViewModel.ZoomMode.available) { mode in
+                            PanelOptionRow(title: mode.label, selected: model.zoomMode == mode) { model.setZoomMode(mode) }
+                                .accessibilityIdentifier("player.panel.zoomMode.\(mode.rawValue)")
+                        }
+                    case .aspectRatio:
+                        ForEach(PlayerViewModel.AspectRatioChoice.allCases) { choice in
+                            PanelOptionRow(title: choice.label, selected: model.aspectRatio == choice) { model.setAspectRatio(choice) }
+                                .accessibilityIdentifier("player.panel.aspectRatio.\(choice.rawValue)")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -609,6 +646,37 @@ private struct PanelOptionRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(([title] + [subtitle, detail].compactMap { $0 } + tags).joined(separator: " · "))
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A row that opens a submenu: its name, the choice in use, and a chevron.
+private struct PanelMenuRow: View {
+    let title: String
+    let value: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value)")
     }
 }
 

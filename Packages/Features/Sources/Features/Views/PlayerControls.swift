@@ -17,13 +17,13 @@ struct PlayerControls: View {
     let onNextEpisode: () -> Void
     let pipToggle: () -> Void
     let pipAvailable: Bool
-    /// Opens the episode picker, for a series.
+    /// Opens or closes the episode picker, for a series.
     var onShowEpisodes: () -> Void = {}
+    /// The episodes' panel hangs from the top bar: the transport and the bottom panel step back behind it.
+    var episodesOpen = false
     /// The open menu, shown on the bar that chooses it; nil while none is open.
     @Binding var panel: PlayerPanelTab?
     var actions = PlayerControlActions()
-    /// The crop that takes off the film's own black bars, once known, for Picture › Screen's No Bars.
-    var barsCrop: VideoCrop?
     /// AI upscaling, for the Info menu: what it is doing, and how many frames a second it scales.
     var upscaling: SuperResolutionRenderer?
     var onSelectStream: (Int) -> Void = { _ in }
@@ -50,17 +50,17 @@ struct PlayerControls: View {
                 // Keep transport centered in the *viewport*, independent of the height of the
                 // title, timeline or toolbar at the bottom.
                 transport
-                    .opacity(showsPlayback && !menuOpen ? 1 : 0)
-                    .allowsHitTesting(showsPlayback && !menuOpen)
-                    .accessibilityHidden(!showsPlayback || menuOpen)
+                    .opacity(showsPlayback && !menuOpen && !episodesOpen ? 1 : 0)
+                    .allowsHitTesting(showsPlayback && !menuOpen && !episodesOpen)
+                    .accessibilityHidden(!showsPlayback || menuOpen || episodesOpen)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 VStack(spacing: 0) {
                     if !menuOpen { topBar }
                     Spacer(minLength: 12)
                     bottomPanel
-                        .opacity(showsPlayback ? 1 : 0)
-                        .allowsHitTesting(showsPlayback)
-                        .accessibilityHidden(!showsPlayback)
+                        .opacity(showsPlayback && !episodesOpen ? 1 : 0)
+                        .allowsHitTesting(showsPlayback && !episodesOpen)
+                        .accessibilityHidden(!showsPlayback || episodesOpen)
                         // An open menu takes the height above the bar before the space over it does.
                         .layoutPriority(menuOpen ? 1 : 0)
                 }
@@ -68,6 +68,7 @@ struct PlayerControls: View {
                 .padding(.vertical, 12)
             }
             .animation(.easeInOut(duration: 0.2), value: menuOpen)
+            .animation(.easeInOut(duration: 0.2), value: episodesOpen)
             #if targetEnvironment(macCatalyst)
             .frame(maxWidth: 900)
             #endif
@@ -109,6 +110,7 @@ struct PlayerControls: View {
             .help("Close (Esc)")
             .accessibilityLabel("Close")
             .accessibilityIdentifier("player.close")
+            if showsPlayback { zoomButton }
             Spacer(minLength: 0)
             if pipAvailable || canAirPlay || model.plan.candidates.count > 1 || hasEpisodes {
                 HStack(spacing: 0) {
@@ -168,6 +170,32 @@ struct PlayerControls: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Infuse's zoom button: each tap moves to the next Zoom Mode, and its symbol shows the one in use.
+    private var zoomButton: some View {
+        Button {
+            Haptics.tap()
+            model.cycleZoomMode()
+        } label: {
+            Image(systemName: Self.zoomSymbol(model.zoomMode)).font(.body.weight(.semibold)).frame(width: 44, height: 44)
+                .contentTransition(.symbolEffect(.replace))
+                .glassEffect(.regular.interactive(), in: .circle)
+                .pointerInteraction(cornerRadius: 22)
+        }
+        .help("Zoom Mode: \(model.zoomMode.label)")
+        .accessibilityLabel("Zoom Mode")
+        .accessibilityValue(model.zoomMode.label)
+        .accessibilityIdentifier("player.zoomMode")
+    }
+
+    static func zoomSymbol(_ mode: VideoZoomMode) -> String {
+        switch mode {
+        case .normal: "rectangle.arrowtriangle.2.inward"
+        case .aspectFit: "arrow.left.and.right"
+        case .crop: "arrow.up.left.and.arrow.down.right"
+        case .stretch: "arrow.up.and.down.and.arrow.left.and.right"
+        }
     }
 
     /// The film or series, not the stream's release name. An episode's title is "Series · Episode".
@@ -252,7 +280,7 @@ struct PlayerControls: View {
     private var bottomPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             if menuOpen {
-                PlayerOptionsPanel(model: model, tab: $panel, actions: actions, barsCrop: barsCrop, upscaling: upscaling)
+                PlayerOptionsPanel(model: model, tab: $panel, actions: actions, upscaling: upscaling)
                     .frame(maxWidth: 510, maxHeight: 510)
                     .layoutPriority(1)
                     .transition(.opacity)

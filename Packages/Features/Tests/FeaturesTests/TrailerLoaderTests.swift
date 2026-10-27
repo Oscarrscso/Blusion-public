@@ -132,6 +132,7 @@ private final class Calls {
         let calls = Calls()
         loader.toggle(makeSource(TrailerPlan(trailers: [direct("a"), direct("b")]), calls: calls))
         #expect(loader.phase == .loading, "the spinner shows at once")
+        #expect(!loader.showsPanel, "no empty panel opens while it loads; the button's spinner shows")
         try await waitUntil { loader.isPlaying }
         #expect(loader.phase == .playing(direct("a")))
         #expect(loader.showsPanel)
