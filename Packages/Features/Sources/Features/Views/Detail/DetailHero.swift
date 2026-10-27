@@ -138,7 +138,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
             DetailReviewsPanel(reviews: reviews, shown: model.shownReviews, item: model.detail.preview, isLoading: model.reviewsLoading,
                                onLoaded: model.reviewsDidLoad, onClose: model.closeReviews)
                 .padding(.horizontal, contentMargin)
-                .padding(.top, Theme.Spacing.m)
+                .padding(.top, Theme.Spacing.s)
         }
     }
 

@@ -16,6 +16,8 @@ struct HomeView: View {
     /// In landscape the page runs under it, so the spotlight reaches the screen's edges, and it is added to the page margin, so the
     /// headings and each shelf's first card stay clear of the notch where they were.
     @State private var sideInset: CGFloat = 0
+    /// The full screen width, including landscape side safe areas, used to place the floating Widgets button from the physical edge.
+    @State private var screenWidth: CGFloat = 0
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.scenePhase) private var scenePhase
@@ -46,6 +48,9 @@ struct HomeView: View {
         }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
             .onGeometryChange(for: CGFloat.self) { max($0.safeAreaInsets.leading, $0.safeAreaInsets.trailing) } action: { sideInset = $0 }
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.width + $0.safeAreaInsets.leading + $0.safeAreaInsets.trailing
+            } action: { screenWidth = $0 }
             .navigationTitle(heroIsFirst || isPhoneInLandscape ? "" : "Home")
             .navigationBarTitleDisplayMode(.inline)
             .pageTopBar(hidden: heroIsFirst || isPhoneLandscape)
@@ -241,7 +246,7 @@ struct HomeView: View {
                 .pointerFeedback()
         }
         .buttonStyle(.plain)
-        .padding(.trailing, homeMetrics.pageMargin)
+        .padding(.trailing, (screenWidth * 0.025).rounded())
         // With the spotlight first, the content starts at the top of the screen, so `topInset` (the status bar's height, which the navigation
         // bar starts beneath) puts the button's top where the title page's back button's top sits. Otherwise the bar is above the content.
         .padding(.top, heroIsFirst ? topInset : Theme.Spacing.s)
