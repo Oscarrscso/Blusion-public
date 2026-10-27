@@ -97,6 +97,8 @@ struct BrowseFilterBar<Menus: View>: View {
                     HStack(spacing: Theme.Spacing.s) {
                         menus
                     }
+                    // Match the floating landscape Back button's row so the shorter menu capsules share its vertical centreline.
+                    .frame(minHeight: 44, alignment: .center)
                 }
                 if !chips.isEmpty {
                     ActiveFilterChips(chips: chips, identifier: identifier, clearAll: clearAll)

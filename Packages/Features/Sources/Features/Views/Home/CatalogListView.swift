@@ -21,13 +21,12 @@ struct CatalogListView: View {
     var body: some View {
         ScrollView {
             content
-                .padding(.vertical, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.l)
         }
-        // A phone in landscape has no navigation bar here: the grid runs to the top, starting below the glass Back drawn above Home
-        // (see `RootTabView`), and the title shows beside Home once scrolled.
-        .contentMargins(.top, isPhoneInLandscape ? LandscapeTabBarState.backClearance : 0, for: .scrollContent)
+        // A phone in landscape has no navigation bar here, so the filters and grid use the full height behind the floating Back control.
         .trackLandscapeTabScroll()
         .screenBackground()
+        .browsePageTopMargin()
         .navigationTitle(isPhoneInLandscape ? "" : request.title)
         .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
         .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)

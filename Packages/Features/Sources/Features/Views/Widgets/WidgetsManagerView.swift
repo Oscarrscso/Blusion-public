@@ -317,6 +317,8 @@ struct WidgetsManagerView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityIdentifier("widgets.shuffle")
             }
             Divider().padding(.leading, WidgetsPageRow<EmptyView>.textInset)

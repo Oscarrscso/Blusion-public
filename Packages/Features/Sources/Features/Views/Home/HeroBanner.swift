@@ -31,6 +31,7 @@ struct HeroBannerSection: View {
     private var header: some View {
         if case .loaded(let items) = section.state, !items.isEmpty {
             SectionHeader(section.widget.title, onSeeAll: {
+                Haptics.tap()
                 router.homePath.append(CatalogListRequest(title: section.widget.title, sources: [row.source], presentation: row.presentation))
             })
         } else {

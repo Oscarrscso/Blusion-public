@@ -350,7 +350,10 @@ private struct LandscapeTabControls: View {
             .animation(Self.fade(collapsed: collapsed), value: collapsed)
 
             // This is the same instance in both states: it never moves, scales or changes glass.
-            Button(action: onHome) {
+            Button {
+                Haptics.tap()
+                onHome()
+            } label: {
                 Image(systemName: router.tab == .home ? "play.house.fill" : "play.house")
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(router.tab == .home ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
@@ -365,6 +368,7 @@ private struct LandscapeTabControls: View {
 
     private func tabButton(_ tab: LaunchRoute.Tab, symbol: String, selectedSymbol: String, title: String) -> some View {
         Button {
+            Haptics.tap()
             router.tapTab(tab)
         } label: {
             Image(systemName: router.tab == tab ? selectedSymbol : symbol)
@@ -455,7 +459,10 @@ public struct RootTabView: View {
 
     public var body: some View {
         @Bindable var router = router
-        TabView(selection: Binding(get: { router.tab }, set: { router.tapTab($0) })) {
+        TabView(selection: Binding(get: { router.tab }, set: {
+            Haptics.selection()
+            router.tapTab($0)
+        })) {
             Tab(value: LaunchRoute.Tab.home) {
                 NavigationStack(path: $router.homePath) {
                     HomeView(services: services)
@@ -558,6 +565,7 @@ public struct RootTabView: View {
                                          onHome: { landscapeTabs.reset(); router.tapTab(.home) })
                     Spacer(minLength: 0)
                     Button {
+                        Haptics.tap()
                         router.tapTab(.search)
                     } label: {
                         Image(systemName: "magnifyingglass")
@@ -586,6 +594,7 @@ public struct RootTabView: View {
         .overlay(alignment: .topLeading) {
             if showsLandscapeBack {
                 Button {
+                    Haptics.tap()
                     router.goBackOnTab()
                 } label: {
                     Image(systemName: "chevron.backward")

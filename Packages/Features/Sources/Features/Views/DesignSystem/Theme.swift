@@ -167,11 +167,28 @@ private struct ScreenBackgroundModifier: ViewModifier {
 }
 
 extension View {
+    /// The shared top edge for root browsing grids. In phone landscape the page uses the space normally reserved for a navigation bar,
+    /// then restores the app's standard margin so Library, Discover and category grids start on the same line.
+    func browsePageTopMargin() -> some View {
+        modifier(BrowsePageTopMarginModifier())
+    }
+
     /// A page's navigation bar. On iPhone it is hidden when `hidden` (the page runs under it), and the system's own otherwise. On Mac it is
     /// always visible, with the system's regular material, so the page beneath blurs and the bar never reads as a black band. `hidden` does
     /// not apply on Mac.
     func pageTopBar(hidden: Bool) -> some View {
         modifier(PageTopBarModifier(hidden: hidden))
+    }
+}
+
+private struct BrowsePageTopMarginModifier: ViewModifier {
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+
+    func body(content: Content) -> some View {
+        let usesLandscapeEdge = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
+        content
+            .ignoresSafeArea(.container, edges: usesLandscapeEdge ? .top : [])
+            .contentMargins(.top, Theme.Spacing.l, for: .scrollContent)
     }
 }
 

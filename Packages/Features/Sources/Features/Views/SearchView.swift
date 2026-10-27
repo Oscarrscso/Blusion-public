@@ -158,6 +158,7 @@ struct SearchView: View {
                                 CategoryRow(title: genre.name)
                             }
                             .buttonStyle(PressableCardStyle(lifts: false))
+                            .titleTapHaptic()
                             .accessibilityIdentifier("search.genre.\(genre.name)")
                         }
                     }

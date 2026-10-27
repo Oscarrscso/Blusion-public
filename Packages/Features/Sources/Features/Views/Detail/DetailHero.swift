@@ -5,9 +5,9 @@ import UIKit
 import Observation
 
 /// The title page's hero. In portrait the picture runs under the bar with the logo low on it, and the controls, the trailer's panel and the
-/// synopsis sit beneath it. In landscape the backdrop fills the hero's trailing side and the title, controls, overview and ratings sit over
-/// its lower leading edge, with the trailer's panel, any open reviews and, when the overview is cut, the synopsis under them. The trailer's panel is there only while the trailer has one to show, and then pushes the synopsis down. The page supplies the
-/// controls, the panel and the synopsis, so the state they keep stays on the page and survives a rotation.
+/// synopsis sit beneath it. In landscape the backdrop fills the hero's trailing side and the title, controls, full overview and ratings sit
+/// over its leading edge, with the trailer's panel and any open reviews under them. The trailer's panel is there only while it has one to
+/// show. The page supplies the controls, the panel and the synopsis, so the state they keep stays on the page and survives a rotation.
 struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     let model: DetailViewModel
     let scroll: DetailHeroScrollState
@@ -26,8 +26,6 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     @ViewBuilder let trailer: TrailerPanel
     @ViewBuilder let synopsis: Synopsis
     @State private var renderedLogoHeight: CGFloat = TitleHero.logoMaxHeight
-    /// True when the landscape hero's overview is cut at its three lines; only then does the whole synopsis show under the hero.
-    @State private var overviewIsCut = false
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
 
@@ -72,7 +70,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
         .frame(width: TitleHero.landscapeTextWidth(pageWidth: size.width), alignment: .leading)
         .padding(.leading, contentMargin)
         .padding(.top, Self.landscapeTopClearance)
-        .padding(.bottom, Theme.Spacing.l)
+        .padding(.bottom, Theme.Spacing.l + Self.landscapeContentLift)
         // A minimum, not a fixed height: large text grows the hero rather than clipping it.
         .frame(maxWidth: .infinity, minHeight: landscapeHeroHeight, alignment: .bottomLeading)
         .background { landscapeArt }
@@ -80,6 +78,10 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
 
     /// The least space kept above the text column, clear of the floating back button.
     private static var landscapeTopClearance: CGFloat { 60 }
+    /// Raise the landscape content away from the bottom controls and use more of the empty space above it.
+    private static var landscapeContentLift: CGFloat { 20 }
+    /// Bias the landscape backdrop toward the trailing edge so its focal area sits farther from the text.
+    private static var landscapeBackdropShift: CGFloat { 24 }
 
     /// The ground, an optional wash of the title's colour on the text side, and the backdrop pinned to the trailing edge. It runs to the
     /// top of the screen and under the side safe areas, so no strip of ground shows above it or beside the notch. As in portrait, a pull
@@ -109,6 +111,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
                         .init(color: .black, location: 0.45),
                     ], startPoint: .leading, endPoint: .trailing)
                 }
+                .offset(x: Self.landscapeBackdropShift)
             BottomFade(length: 0.42)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -118,11 +121,11 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
         .ignoresSafeArea(.container, edges: [.top, .horizontal])
     }
 
-    /// The overview, cut to three lines and not expandable. Its full text, with More, shows under the hero only when it is cut.
+    /// The full overview in the landscape hero.
     @ViewBuilder
     private var landscapeOverview: some View {
         if let description = model.detail.preview.description, !description.isEmpty {
-            JustifiedText(text: description, color: UIColor.label.withAlphaComponent(0.85), lineLimit: 3, isTruncated: $overviewIsCut)
+            JustifiedText(text: description, color: UIColor.label.withAlphaComponent(0.85), lineLimit: 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("detail.overview")
         }

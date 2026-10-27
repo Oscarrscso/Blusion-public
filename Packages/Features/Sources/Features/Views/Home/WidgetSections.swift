@@ -51,7 +51,10 @@ struct WidgetRow: View {
         let widget = section.widget
         let presentation = row.presentation
         if case .loaded(let items) = section.state, !items.isEmpty {
-            let shelf = MediaRow(widget.title, hideTitle: widget.hideTitle, onSeeAll: { router.homePath.append(seeAllRequest) }) {
+            let shelf = MediaRow(widget.title, hideTitle: widget.hideTitle, onSeeAll: {
+                Haptics.tap()
+                router.homePath.append(seeAllRequest)
+            }) {
                 ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in
                     MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, size: presentation.cardStyle.cardSize,
                                   showsRating: presentation.showsRatings, usesBetterPosters: presentation.usesBetterPosters)
@@ -201,6 +204,7 @@ struct CollectionRow: View {
                                        aspect: item.imageAspect.cardAspect, hideTitle: item.hideTitle)
                     }
                     .buttonStyle(PressableCardStyle())
+                    .titleTapHaptic()
                 }
             }
             .accessibilityIdentifier("board.row.\(widget.id)")

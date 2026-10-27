@@ -32,13 +32,12 @@ struct DiscoverView: View {
                         EmptyAddonsView(onOpenAddons: onOpenAddons)
                     }
                 }
-                .padding(.top, isPhoneInLandscape ? 0 : Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.l)
                 .id(Self.topID)
             }
             .trackLandscapeTabScroll()
             .screenBackground()
-            .ignoresSafeArea(.container, edges: isPhoneInLandscape ? .top : [])
+            .browsePageTopMargin()
             .navigationTitle("")
             .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
