@@ -189,14 +189,18 @@ struct DetailView: View {
                                     .fill(Theme.separator)
                                     .frame(height: 1)
                                     .padding(.horizontal, contentMargin)
-                                    .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
+                                    // The landscape hero already reserves space below its rating pills. Subtract it so the visible
+                                    // pill-to-line gap matches the line-to-section gap.
+                                    .padding(.top, isLandscape
+                                        ? Theme.Spacing.s - TitleHero.landscapeContentBottomInset
+                                        : metrics.titleRatingsGap)
                                     .accessibilityHidden(true)
                                 if model.isSeries {
                                     DetailEpisodes(model: model, pageWidth: geometry.size.width, contentMargin: contentMargin,
                                                    isHoldingEpisode: $isHoldingEpisode, play: { showStreams($0, from: $1) },
                                                    loadingRequest: streams.loadingRequest, loadingTrigger: loadingTrigger,
                                                    unavailableStreams: unavailableStreams)
-                                        .padding(.top, metrics.titleRatingsGap)
+                                        .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                                 }
                                 VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
                                     if model.isLoadingReviews || !model.reviews.isEmpty {

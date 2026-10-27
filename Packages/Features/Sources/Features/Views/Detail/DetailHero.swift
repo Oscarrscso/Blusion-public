@@ -70,7 +70,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
         .frame(width: TitleHero.landscapeTextWidth(pageWidth: size.width), alignment: .leading)
         .padding(.leading, contentMargin)
         .padding(.top, Self.landscapeTopClearance)
-        .padding(.bottom, Theme.Spacing.l + Self.landscapeContentLift)
+        .padding(.bottom, TitleHero.landscapeContentBottomInset)
         // A minimum, not a fixed height: large text grows the hero rather than clipping it.
         .frame(maxWidth: .infinity, minHeight: landscapeHeroHeight, alignment: .bottomLeading)
         .background { landscapeArt }
@@ -78,8 +78,6 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
 
     /// The least space kept above the text column, clear of the floating back button.
     private static var landscapeTopClearance: CGFloat { 60 }
-    /// Raise the landscape content away from the bottom controls and use more of the empty space above it.
-    private static var landscapeContentLift: CGFloat { 20 }
     /// Bias the landscape backdrop toward the trailing edge so its focal area sits farther from the text.
     private static var landscapeBackdropShift: CGFloat { 24 }
 

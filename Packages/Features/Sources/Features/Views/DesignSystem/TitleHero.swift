@@ -74,6 +74,8 @@ enum TitleHero {
     static func landscapeTextWidth(pageWidth: CGFloat) -> CGFloat {
         max(0, min(pageWidth * 0.46, 480))
     }
+    /// Space reserved below the landscape rating pills inside the hero.
+    static let landscapeContentBottomInset: CGFloat = Theme.Spacing.l + 20
     /// The tallest and widest the landscape logo can be.
     static var landscapeLogoMaxHeight: CGFloat {
         #if targetEnvironment(macCatalyst)
