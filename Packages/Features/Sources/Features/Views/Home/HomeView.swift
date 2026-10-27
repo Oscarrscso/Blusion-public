@@ -18,6 +18,8 @@ struct HomeView: View {
     @State private var sideInset: CGFloat = 0
     /// The full screen width, including landscape side safe areas, used to place the floating Widgets button from the physical edge.
     @State private var screenWidth: CGFloat = 0
+    /// The full screen height, including safe areas, used for the button's matching top-corner inset.
+    @State private var screenHeight: CGFloat = 0
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.scenePhase) private var scenePhase
@@ -51,6 +53,9 @@ struct HomeView: View {
             .onGeometryChange(for: CGFloat.self) {
                 $0.size.width + $0.safeAreaInsets.leading + $0.safeAreaInsets.trailing
             } action: { screenWidth = $0 }
+            .onGeometryChange(for: CGFloat.self) {
+                $0.size.height + $0.safeAreaInsets.top + $0.safeAreaInsets.bottom
+            } action: { screenHeight = $0 }
             .navigationTitle(heroIsFirst || isPhoneInLandscape ? "" : "Home")
             .navigationBarTitleDisplayMode(.inline)
             .pageTopBar(hidden: heroIsFirst || isPhoneLandscape)
@@ -174,32 +179,32 @@ struct HomeView: View {
     private var ready: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: metrics.shelfSpacing) {
-                    if !model.sections.contains(where: { if case .continueWatching = $0.widget.content { true } else { false } }) {
-                        continueRow
-                    }
-                    if model.isOffline {
-                        ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
-                            if case .continueWatching = section.widget.content {
-                                sectionView(section).prioritizesArtwork(order: index)
+                ZStack(alignment: .topTrailing) {
+                    LazyVStack(alignment: .leading, spacing: metrics.shelfSpacing) {
+                        if !model.sections.contains(where: { if case .continueWatching = $0.widget.content { true } else { false } }) {
+                            continueRow
+                        }
+                        if model.isOffline {
+                            ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
+                                if case .continueWatching = section.widget.content {
+                                    sectionView(section).prioritizesArtwork(order: index)
+                                }
+                            }
+                            OfflineBanner()
+                        } else {
+                            ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
+                                if model.isCustomised || !isEmptyRow(section) {
+                                    sectionView(section).prioritizesArtwork(order: index)
+                                }
                             }
                         }
-                        OfflineBanner()
-                    } else {
-                        ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
-                            if model.isCustomised || !isEmptyRow(section) {
-                                sectionView(section).prioritizesArtwork(order: index)
-                            }
-                        }
                     }
+                    .padding(.bottom, Theme.Spacing.xxl)
+                    #if !targetEnvironment(macCatalyst)
+                    // A scroll-content child, so it leaves the viewport with the hero rather than pinning to the screen.
+                    customizeButton
+                    #endif
                 }
-                .padding(.bottom, Theme.Spacing.xxl)
-                // In the content, not the navigation bar: it scrolls away with the page instead of staying pinned, and it is one glass
-                // circle instead of a glass button inside the bar's own glass.
-                #if !targetEnvironment(macCatalyst)
-                // The Mac has Widgets in its sidebar, so Home carries no button for it there.
-                .overlay(alignment: .topTrailing) { customizeButton }
-                #endif
                 .id(Self.topID)
             }
             .accessibilityIdentifier("board.rows")
@@ -247,9 +252,9 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .padding(.trailing, (screenWidth * 0.025).rounded())
-        // With the spotlight first, the content starts at the top of the screen, so `topInset` (the status bar's height, which the navigation
-        // bar starts beneath) puts the button's top where the title page's back button's top sits. Otherwise the bar is above the content.
-        .padding(.top, heroIsFirst ? topInset : Theme.Spacing.s)
+        // With the spotlight first, place the button from the physical top edge to match its percentage inset from the trailing edge.
+        // Otherwise the navigation bar is already above the content.
+        .padding(.top, heroIsFirst ? max(topInset, (screenHeight * 0.025).rounded()) : Theme.Spacing.s)
         .accessibilityLabel("Widgets")
         .help("Widgets")
         .accessibilityIdentifier("home.customize")

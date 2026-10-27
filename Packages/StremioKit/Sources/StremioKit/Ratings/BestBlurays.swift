@@ -166,7 +166,9 @@ public struct BestBluraysClient: Sendable {
             name.replacingOccurrences(of: " 4K Blu-ray Guide", with: "").replacingOccurrences(of: " Blu-ray Guide", with: "")
         }
         let tokens = BestBluraysText.tokens(in: html)
-        guard let headingIndex = tokens.firstIndex(where: { $0.hasPrefix("Best ") && $0.contains(" release") }) else {
+        guard let headingIndex = tokens.firstIndex(where: {
+            $0.hasPrefix("Best ") && $0.localizedCaseInsensitiveContains(" release")
+        }) else {
             return ParsedFilm(imdbID: imdbID, title: title, edition: nil)
         }
         // "Best English-friendly & video release · updated 4 months ago"

@@ -189,7 +189,7 @@ struct DetailView: View {
                                     .fill(Theme.separator)
                                     .frame(height: 1)
                                     .padding(.horizontal, contentMargin)
-                                    .padding(.top, metrics.titleRatingsGap)
+                                    .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                                     .accessibilityHidden(true)
                                 if model.isSeries {
                                     DetailEpisodes(model: model, pageWidth: geometry.size.width, contentMargin: contentMargin,
@@ -213,7 +213,8 @@ struct DetailView: View {
                                     }
                                     DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width)
                                 }
-                                .padding(.top, model.isSeries ? metrics.titleSectionSpacing : metrics.titleRatingsGap)
+                                .padding(.top, model.isSeries ? metrics.titleSectionSpacing
+                                    : isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                                 if model.isLoadingRelated || !model.relatedTitles.isEmpty {
                                     related
                                         .padding(.top, metrics.titleSectionSpacing)

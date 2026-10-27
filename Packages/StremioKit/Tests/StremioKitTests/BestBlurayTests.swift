@@ -74,6 +74,19 @@ import StremioKitTestSupport
         #expect(page.edition == nil && page.title == "Obscure (1999)" && page.imdbID == nil)
     }
 
+    @Test func titleCaseReleaseHeadingFromCurrentSiteIsRecognized() throws {
+        let html = """
+        <html><head><title>The Dark Knight (2008) 4K Blu-ray Guide</title></head><body>
+        <h5>Best English-Friendly Release</h5><p><a>WB</a> <a>4K Blu-ray</a></p>
+        <h5>Best Video Release</h5><p>WB 4K Blu-ray</p>
+        </body></html>
+        """
+        let page = BestBluraysClient.parseFilm(html: html, pageURL: base)
+        let edition = try #require(page.edition)
+        #expect(edition.heading == "Best English-Friendly Release")
+        #expect(edition.release == "WB 4K Blu-ray")
+    }
+
     @Test func scriptsStylesCommentsAndEntitiesNeverReachTheText() {
         let html = #"<p>A &amp; B&#x27;s &#8211; <!-- hidden -->film</p><script>var x = "<p>no</p>";</script><style>p{}</style><p>Next&nbsp;line</p>"#
         #expect(BestBluraysText.tokens(in: html) == ["A & B's \u{2013} film", "Next line"])
