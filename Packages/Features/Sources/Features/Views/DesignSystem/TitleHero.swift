@@ -441,8 +441,8 @@ struct HeroPicture: View {
 
 /// The title on a portrait hero: the logo, or the name when there is no logo or it failed to load. The title page and Home's spotlight both
 /// show it this way, so the logo sits the same distance above the text under it on both. The logo comes from the shared hero loader and is
-/// revealed with the picture. While it is pending the name is not drawn, and its full height is kept, so the text below does not move when it
-/// arrives.
+/// revealed with the picture. While it is pending the name is not drawn and the maximum height is kept; once ready, the prepared logo's
+/// fitted visible bounds determine the height reserved by the hero.
 struct HeroTitleArt: View {
     let name: String
     let slot: HeroSlot
@@ -460,8 +460,12 @@ struct HeroTitleArt: View {
         if case .none = slot { return true }
         return false
     }
-    /// A title keeps the logo's space until the logo is ready or known to be absent.
-    private var reservesLogoHeight: Bool { !isNone || hidden }
+    /// A pending or deliberately hidden logo keeps the placeholder height. A ready logo supplies its own fitted, trimmed height.
+    private var reservedLogoHeight: CGFloat? {
+        if hidden { return logoHeight }
+        if case .pending = slot { return logoHeight }
+        return nil
+    }
 
     var body: some View {
         Group {
@@ -491,8 +495,7 @@ struct HeroTitleArt: View {
                     .transition(.identity)
             }
         }
-        // Bottom-aligned, so a logo shorter than the reserved space sits where it did before, just above the text under it.
-        .frame(minHeight: reservesLogoHeight ? logoHeight : nil, alignment: Alignment(horizontal: alignment.horizontal, vertical: .bottom))
+        .frame(minHeight: reservedLogoHeight, alignment: Alignment(horizontal: alignment.horizontal, vertical: .bottom))
     }
 }
 
@@ -502,11 +505,15 @@ struct LogoLayout: Layout {
     let maxWidth: CGFloat
     let maxHeight: CGFloat
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    static func fittedSize(imageSize: CGSize, proposedWidth: CGFloat?, maxWidth: CGFloat, maxHeight: CGFloat) -> CGSize {
         guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
-        let width = max(0, min(proposal.width ?? maxWidth, maxWidth))
+        let width = max(0, min(proposedWidth ?? maxWidth, maxWidth))
         let scale = min(width / imageSize.width, maxHeight / imageSize.height)
         return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        Self.fittedSize(imageSize: imageSize, proposedWidth: proposal.width, maxWidth: maxWidth, maxHeight: maxHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
