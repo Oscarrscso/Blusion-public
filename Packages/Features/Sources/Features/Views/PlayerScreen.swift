@@ -377,7 +377,7 @@ struct PlayerContent: View {
         .animation(.snappy(duration: 0.24), value: showsEpisodes)
     }
 
-    private static let episodePanelWidth: CGFloat = 420
+    private static let episodePanelWidth: CGFloat = 360
     private static let episodePanelHeight: CGFloat = 560
     /// Below the top bar: its 12 pt margin, the 44 pt buttons and a small gap.
     private static let episodePanelTop: CGFloat = 12 + 44 + 8
