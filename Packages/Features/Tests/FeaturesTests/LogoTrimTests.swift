@@ -1,5 +1,8 @@
 import CoreGraphics
 import Testing
+#if canImport(UIKit)
+import UIKit
+#endif
 @testable import Features
 
 @Suite struct LogoTrimTests {
@@ -61,4 +64,17 @@ import Testing
         let source = try #require(image(width: 20, height: 20, block: CGRect(x: 2, y: 2, width: 16, height: 16), alpha: 0.02))
         #expect(LogoTrim.visibleBounds(of: source) == nil)
     }
+
+    #if canImport(UIKit)
+    @Test func paddedLogoReservesItsTrimmedVisibleHeight() throws {
+        let source = try #require(image(width: 400, height: 400, block: CGRect(x: 50, y: 170, width: 300, height: 60)))
+        let trimmed = LogoTrim.trimmed(source)
+        let prepared = UIImage(cgImage: trimmed)
+
+        #expect(prepared.size == CGSize(width: 300, height: 60))
+        let measured = LogoLayout.fittedSize(imageSize: prepared.size, proposedWidth: 300,
+                                             maxWidth: 300, maxHeight: 100)
+        #expect(measured == CGSize(width: 300, height: 60))
+    }
+    #endif
 }
