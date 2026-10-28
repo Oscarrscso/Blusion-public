@@ -56,6 +56,7 @@ struct PlayerContent: View {
     @State private var showsOpenSubtitles = false
     /// The episode picker's panel is open, dropped from the Episodes button.
     @State private var showsEpisodes = false
+    @State private var showsStreams = false
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
@@ -168,7 +169,7 @@ struct PlayerContent: View {
             PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
                            onShowEpisodes: toggleEpisodes, episodesOpen: showsEpisodes,
                            panel: $panel, actions: controlActions, upscaling: upscalingRenderer,
-                           onSelectStream: { index in Task { await model.selectStream(at: index) } },
+                           onShowStreams: { closeMenus(); model.showControls(); showsStreams = true },
                            isVideoReady: isVideoReady, isStalled: showsStall && model.isStalled)
                 .opacity(controlsAreVisible ? 1 : 0)
                 .allowsHitTesting(controlsAreVisible)
@@ -226,6 +227,30 @@ struct PlayerContent: View {
                     model.setSafeAreaInset(inset)
                 }
             }
+        }
+        .sheet(isPresented: $showsStreams, onDismiss: { model.showControls() }) {
+            NavigationStack {
+                List(Array(model.plan.candidates.enumerated()), id: \.element.id) { entry in
+                    Button {
+                        showsStreams = false
+                        Task { await model.selectStream(at: entry.offset) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.element.title)
+                                Text(entry.element.addonName).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if entry.offset == model.currentStreamIndex { Image(systemName: "checkmark") }
+                        }
+                    }
+                    .disabled(entry.offset == model.currentStreamIndex)
+                    .accessibilityIdentifier("player.stream.\(entry.element.id)")
+                }
+                .navigationTitle("Choose stream")
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showsStreams = false } } }
+            }
+            .presentationDetents([.medium, .large])
         }
         .onChange(of: panel) { old, new in
             // A closed menu leaves the controls up, with a fresh idle delay, whichever way it was closed.
@@ -349,7 +374,7 @@ struct PlayerContent: View {
 
     /// An open menu keeps the controls up: the menu stands on their bar. The episodes' panel hangs from their top bar.
     private var controlsAreVisible: Bool {
-        (model.controlsVisible || panel != nil || showsEpisodes) && model.failureMessage == nil
+        (model.controlsVisible || panel != nil || showsEpisodes || showsStreams) && model.failureMessage == nil
     }
 
     /// The episodes, in a glass panel like the options menu, hanging from the Episodes button at the top trailing corner. It sits under

@@ -33,7 +33,13 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     /// screen must not rebuild the player. Only the parts above and below it differ between portrait and landscape.
     @ViewBuilder
     var body: some View {
-        if isLandscape { landscapeTop } else { portraitTop }
+        if isLandscape {
+            // Lift the complete landscape hero and its layout footprint together. Internal logo, metadata, action,
+            // synopsis and ratings spacing stays unchanged, while the following sections rise with it.
+            landscapeTop.padding(.top, -Self.landscapePageLift)
+        } else {
+            portraitTop
+        }
         if showsDetails && model.trailer.showsPanel {
             trailer
                 .padding(.horizontal, contentMargin)
@@ -78,6 +84,8 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
 
     /// The least space kept above the text column, clear of the floating back button.
     private static var landscapeTopClearance: CGFloat { 60 }
+    /// Moves the whole landscape page upward without changing spacing within the hero.
+    private static var landscapePageLift: CGFloat { Theme.Spacing.xl }
     /// Bias the landscape backdrop toward the trailing edge so its focal area sits farther from the text.
     private static var landscapeBackdropShift: CGFloat { 24 }
 

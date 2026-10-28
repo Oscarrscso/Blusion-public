@@ -1,8 +1,7 @@
 import Foundation
 
-/// Auto Pick and Best match share this ranking. Confirmed Blu-ray REMUX releases have unconditional release priority;
-/// resolution, video, audio and bitrate scores compare releases within the same priority tier.
-/// Contradicted facts earn nothing. Seeder tie-breakers stay within the winning tier.
+/// Additive quality and availability scores shared by Auto Pick and Best Match.
+/// Player policy filters compatibility first; no release tag has absolute priority.
 public enum AutoStreamRanking {
     public struct Assessment: Sendable {
         public let item: RankedStream
@@ -14,7 +13,7 @@ public enum AutoStreamRanking {
 
     public static func assess(_ item: RankedStream, duration: TimeInterval?) -> Assessment {
         let quality = item.quality
-        // A contradicted resolution, source or codec is left out. The bitrate reference depends on the resolution and codec, so it goes too.
+        // Contradicted facts earn no bonus and take a bounded penalty.
         let resolution = quality.hasConflictingResolution ? nil : quality.resolution
         let source = quality.hasConflictingSource ? nil : quality.source
         let codec = quality.hasConflictingVideoCodec ? nil : quality.videoCodec
@@ -22,34 +21,49 @@ public enum AutoStreamRanking {
         var score = resolutionPoints(resolution) + sourcePoints(source) + videoCodecPoints(codec)
         score += bitDepthPoints(quality.bitDepth) + hdrPoints(quality)
         score += bitratePoints(bitrate, resolution: resolution, codec: codec)
-        score += audioPoints(quality)
+        var playableAudio = quality
+        if case .native = item.route {
+            playableAudio.audioCodecs.removeAll { $0.needsFallbackEngine }
+            playableAudio.hasDTSX = false
+        }
+        score += audioPoints(playableAudio)
+        score += quality.provider == nil ? 0 : 3
+        score += quality.hasReputableGroup ? 3 : 0
+        score -= Double([quality.hasConflictingResolution, quality.hasConflictingSource, quality.hasConflictingVideoCodec].filter { $0 }.count) * 8
+        if let declared = quality.declaredBitrateMbps, let measured = sizeOverRuntimeMbps(quality, duration: duration),
+           max(declared, measured) > 2 * min(declared, measured) { score -= 8 }
+        // An implausibly small disc copy should not profit from a REMUX label.
+        if quality.isRemux, let bitrate, bitrate < ((resolution ?? 0) >= 2160 ? 15 : 8) { score -= 18 }
+        let cached = StreamAvailability.isCached(item.stream)
+        score += cached ? 6 : 0
+        if !cached, let seeds = quality.seeders {
+            score += seeds == 0 ? -35 : min(5, log2(Double(max(1, seeds))))
+        }
         // A REMUX name counts only when no other source is named beside it.
         if quality.isRemux && !quality.hasConflictingSource { score += remuxPoints }
         return Assessment(item: item, qualityScore: score, bitrateMbps: bitrate, seeders: quality.seeders, isRemux: quality.isRemux)
     }
 
-    public static func best(from items: [RankedStream], duration: TimeInterval?) -> Assessment? {
-        let items = StreamAvailability.automaticCandidates(from: items)
-        // Restrict every later tie-breaker, including swarm health, to the highest release tier.
-        guard let priority = items.map({ $0.quality.releasePriority }).max() else { return nil }
-        let ranked = items.filter { $0.quality.releasePriority == priority }.map { assess($0, duration: duration) }.sorted {
+    public static func best(from items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init()) -> Assessment? {
+        ranked(items, duration: duration, preferences: preferences).first
+    }
+
+    public static func ranked(_ items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init()) -> [Assessment] {
+        StreamAvailability.automaticCandidates(from: items).map { assess($0, duration: duration) }.sorted {
+            // A resolution explicitly chosen in Settings is a constraint, then compare every release at that distance.
+            if let preferred = preferences.preferredResolution {
+                let a = $0.item.quality
+                let b = $1.item.quality
+                let da = a.hasConflictingResolution ? Int.max : a.resolution.map { abs($0 - preferred) } ?? Int.max
+                let db = b.hasConflictingResolution ? Int.max : b.resolution.map { abs($0 - preferred) } ?? Int.max
+                if da != db { return da < db }
+            }
             if $0.qualityScore != $1.qualityScore { return $0.qualityScore > $1.qualityScore }
             return StreamRanking.isOrdered($0.item, before: $1.item)
         }
-        guard let best = ranked.first else { return nil }
-        // Known-dead torrents lose to available alternatives; unknown counts remain eligible.
-        let available = ranked.filter { $0.seeders != 0 }
-        let leader = best.seeders == 0 ? (available.first ?? best) : best
-        let close = ranked.filter { $0.qualityScore >= leader.qualityScore - 6 && ($0.seeders ?? -1) >= 5 }
-        if let seeds = leader.seeders, seeds < 5, let healthy = close.first { return healthy }
-        // Within a very small quality difference, use a known healthy swarm as the tie-breaker.
-        return close.filter { $0.qualityScore >= leader.qualityScore - 2 }.max {
-            ($0.seeders ?? 0) < ($1.seeders ?? 0)
-        } ?? leader
     }
 
-    /// A score contribution within the release tier; the shared tier enforces REMUX priority.
-    private static let remuxPoints: Double = 4
+    private static let remuxPoints: Double = 10
 
     // MARK: - Video
 
@@ -140,8 +154,11 @@ public enum AutoStreamRanking {
     /// a codec that carries it: an Atmos label beside AAC contradicts itself.
     private static func audioPoints(_ quality: StreamQuality) -> Double {
         var points = quality.audioCodecs.map { audioCodecPoints($0) }.max() ?? 0
-        if let channels = quality.audioChannels { points += channels >= 8 ? 3 : channels >= 6 ? 2 : 0 }
-        if quality.atmosFormat != nil { points += 2 }
+        if let channels = quality.audioChannels { points += channels >= 8 ? 6 : channels >= 6 ? 4 : 0 }
+        if quality.atmosFormat == .lossless { points += 9 }
+        if quality.atmosFormat == .streaming { points += 6 }
+        if quality.hasDTSX { points += 7 }
+        if let kbps = quality.audioBitrateKbps { points += min(3, max(0, log2(kbps / 192))) }
         return points
     }
 
@@ -149,8 +166,8 @@ public enum AutoStreamRanking {
     /// Master Audio form, which is what release names mean by it.
     private static func audioCodecPoints(_ codec: AudioCodec) -> Double {
         switch codec {
-        case .trueHD, .dtsHD, .flac: return 14
-        case .eac3: return 8
+        case .trueHD, .dtsHD, .flac: return 20
+        case .eac3: return 11
         case .dts, .ac3: return 6
         case .aac, .opus: return 5
         case .mp3: return 2

@@ -314,6 +314,33 @@ import StremioKitTestSupport
         #expect(plan.candidates.first?.title == "hd")
     }
 
+    @Test func allSelectionPathsCompareFallbackAndNativeStreams() async throws {
+        let streams = [direct("weak", "https://a.example.com/weak.mp4", "1080p WEBRip AAC"),
+                       direct("best", "https://a.example.com/best.mkv", "1080p AMZN WEB-DL DD+ 5.1")]
+        let services = try await services(bodies: [body(streams)], settings: PlaybackSettings(preferredResolution: 1080), fallbackLinked: true)
+        let model = StreamPickerViewModel(request: request, services: services)
+        await model.load()
+        #expect(model.recommendedStream?.title == "best")
+        #expect(model.automaticStartCandidate?.title == "best")
+        guard case .play(let manual)? = await model.playBest(), case .play(let automatic)? = await model.autoPickBest() else {
+            Issue.record("expected both selection paths to play"); return
+        }
+        #expect(manual.candidates.first?.title == "best")
+        #expect(automatic.candidates.first?.id == manual.candidates.first?.id)
+    }
+
+    @Test func defaultAutomaticWaitIncludesASlowerSuperiorRelease() async throws {
+        let services = try await services(bodies: [body([direct("fast", "https://a.example.com/1.mp4", "1080p WEBRip AAC")]),
+                                                  body([direct("best", "https://b.example.com/2.mp4", "1080p AMZN WEB-DL DD+")])],
+                                          delays: [.zero, .milliseconds(500)])
+        let model = StreamPickerViewModel(request: request, services: services)
+        await model.loadForAutomaticSelection()
+        #expect(!model.isLoading)
+        #expect(model.automaticStartCandidate?.title == "best")
+        #expect(model.recommendedStream?.title == "best")
+        model.cancelLoading()
+    }
+
     @Test func bingeGroupContinuityPicksTheMatchingStream() async throws {
         let withGroup = { (name: String, url: String, group: String) in #"{"name":"\#(name)","url":"\#(url)","behaviorHints":{"bingeGroup":"\#(group)"}}"# }
         let services = try await services(bodies: [body([withGroup("other", "https://a.example.com/1.mp4", "g-other"), withGroup("match", "https://a.example.com/2.mp4", "g-1080")])])
@@ -549,7 +576,7 @@ import StremioKitTestSupport
         guard case .play? = await model.choose(item) else { Issue.record("manual selection must stay available"); return }
     }
 
-    @Test func cachedStreamsLeadUnknownAvailabilityAndBingeNeverStartsUncached() async throws {
+    @Test func unknownAvailabilityCanWinOnQualityAndBingeNeverStartsDownloadPlaceholders() async throws {
         let services = try await services(bodies: [body([
             direct("Unknown REMUX", "https://a.example.com/unknown.mp4", "2160p BluRay REMUX"),
             direct("[RD+] Ready", "https://a.example.com/ready.mp4", "1080p WEB-DL"),
@@ -557,7 +584,7 @@ import StremioKitTestSupport
         ])])
         let model = picker(movie, services)
         await model.load()
-        #expect(model.recommendedStream?.title == "[RD+] Ready")
+        #expect(model.recommendedStream?.title == "Unknown REMUX")
         let next = await model.bingeChoice(continuing: BingeContext(bingeGroup: "series"))
         #expect(next == nil, "show the picker instead of downloading an uncached next episode")
     }
@@ -574,7 +601,7 @@ import StremioKitTestSupport
         #expect(model.autoPickedStream?.id == recommended.id, "the mark in the list is the stream Auto Pick starts")
     }
 
-    @Test func remuxLeadsTheListBestMatchAndAutoPick() async throws {
+    @Test func qualityLeadsBestMatchAndAutoPickWithoutAnAbsoluteRemuxTier() async throws {
         let remuxURL = "https://a.example.com/remux.mkv"
         let services = try await services(bodies: [
             body([direct("web", "https://a.example.com/web.mkv", "2160p WEB-DL HEVC Dolby Vision 10bit TrueHD Atmos 7.1 60 GB")]),
@@ -583,14 +610,14 @@ import StremioKitTestSupport
         let model = picker(movie, services)
         await model.load()
         let first = try #require(model.addonSections.first?.streams.first)
-        #expect(first.quality.isRemux)
+        #expect(first.title == "web")
         #expect(model.recommendedStream?.id == first.id)
         #expect(model.bestToPlay?.id == first.id)
         guard case .openInPlayer(_, let link)? = await model.autoPickBest() else {
             Issue.record("expected an Infuse hand-off"); return
         }
         #expect(model.autoPickedStream?.id == first.id)
-        #expect(value("url", in: query(link)) == remuxURL)
+        #expect(value("url", in: query(link)) == "https://a.example.com/web.mkv")
     }
 
     @Test func autoPickKeepsBuiltInPlayerEvenWhenInfuseIsInstalled() async throws {

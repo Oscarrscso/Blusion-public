@@ -4,7 +4,7 @@ import StremioKit
 import SwiftUI
 import UIKit
 
-/// One title's streams. The header says what is being picked and, while the addons are still answering, that they are. The best stream is
+/// One title's streams. The header says what is being picked. The best stream is
 /// the one main action, and each addon's streams follow as rows of their own. Links to web pages come last. A stream plays in Blusion or,
 /// when the viewer chose that player, opens in another app.
 struct StreamPickerView: View {
@@ -32,9 +32,16 @@ struct StreamPickerView: View {
     @State private var autoPickButtonHeight: CGFloat = 0
     /// The Auto Pick height last measured by any picker, for a picker that has not measured its own yet (see `episodeStepButton`).
     private static var lastAutoPickHeight: CGFloat?
+    /// Keep the last recommendation text and collapsed card heights while the next picker loads.
+    private static var lastAutoPickInfo: String?
+    private static var lastStreamCardHeights: [Int: CGFloat] = [:]
     @State private var autoPickSwitchSize: CGSize = .zero
+    /// The heading's natural size, so its title, rating and logo can shrink together between the fixed chevrons.
+    @State private var episodeHeadingSize: CGSize = .zero
     /// The sharpness the chips narrow the list to; nil shows every stream.
     @State private var resolutionFilter: Band?
+    /// Keep the last visible resolution bar while the next picker's streams load.
+    private static var lastResolutionBands: [Band] = [.uhd, .fullHD, .hd]
     /// The one addon whose streams are listed, or nil for every addon's.
     @State private var addonFilter: UUID?
     /// A stream whose format Blusion can't play: the alert offers another player, or the next stream.
@@ -469,7 +476,6 @@ struct StreamPickerView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                 }
-                status
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -487,10 +493,10 @@ struct StreamPickerView: View {
         #endif
     }
 
-    /// Whether the embedded header has anything to show: which episode, or the status while the streams load. A film's is empty.
-    private var embeddedHeaderShowsText: Bool { episodeHeading != nil || model.isLoading }
+    /// Whether the embedded header has an episode to show. A film's is empty.
+    private var embeddedHeaderShowsText: Bool { episodeHeading != nil }
 
-    /// The header of a title page that shows these streams in place of its details: which episode, then the status. The page above
+    /// The header of a title page that shows these streams in place of its details: which episode. The page above
     /// already has the poster, the title and the picture, so there is no poster here. A series' page has the episode switcher, centred,
     /// in place of the heading text.
     private var embeddedHeader: some View {
@@ -503,7 +509,6 @@ struct StreamPickerView: View {
                     // Under the title page's hero, so this is one line: a longer text is cut short rather than wrapped.
                     episodeLine(episodeHeading, lineLimit: 1)
                 }
-                status
             }
             .frame(maxWidth: .infinity, alignment: switches ? .center : .leading)
         }
@@ -519,35 +524,25 @@ struct StreamPickerView: View {
         return HStack(alignment: .center, spacing: Theme.Spacing.m) {
             episodeStepButton(systemImage: "chevron.left", label: "Previous episode", to: switcher.previous, step: switcher.step)
                 .accessibilityIdentifier("stream.previousEpisode")
-            ZStack {
-                // Room for two-digit numbers and a score, so the chevrons stay put under a finger tapping through the episodes: when the
-                // number grows a digit, and when a score arrives.
+            GeometryReader { proxy in
                 HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    Text("S88E88")
-                        .font(.headline)
-                    scoreContent(DetailViewModel.EpisodeScore(value: 8.8, isIMDb: true))
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .hidden()
-                HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    if let episodeTitle {
-                        Text(episodeTitle)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    Text(episodeTitle == nil ? episodeNumber : "· \(episodeNumber)")
+                    Text(heading)
                         .font(.headline)
                         .foregroundStyle(.white)
-                        .fixedSize()
+                        .lineLimit(1)
                     if let episodeScore {
                         scoreLabel(episodeScore)
                             .transition(.opacity)
                     }
                 }
+                .fixedSize()
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { episodeHeadingSize = $0 }
+                .scaleEffect(min(1, proxy.size.width / max(episodeHeadingSize.width, 1)))
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
+            .frame(height: max(episodeHeadingSize.height, UIFont.preferredFont(forTextStyle: .headline).lineHeight))
+            // The middle fills the row, keeping both chevrons at the stream controls' outer edges.
+            .frame(maxWidth: .infinity)
             .animation(.easeOut(duration: 0.2), value: episodeScore)
             .accessibilityElement(children: .contain)
             .accessibilityLabel(episodeAccessibilityLabel(heading))
@@ -656,27 +651,6 @@ struct StreamPickerView: View {
         [heading, episodeScore.map { "\($0.isIMDb ? "IMDb rating" : "Rating") \($0.text)" }].compactMap { $0 }.joined(separator: ", ")
     }
 
-    /// Only while the addons are still answering: the stream count is not shown once they have.
-    @ViewBuilder
-    private var status: some View {
-        if model.isLoading {
-            HStack(spacing: Theme.Spacing.s) {
-                Spinner()
-                    .controlSize(.small)
-                Text(waitingText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("streams.loading")
-        }
-    }
-
-    private var waitingText: String {
-        "Checking for streams…"
-    }
-
     // MARK: the main action
 
     /// How much the switch is scaled so it is as tall as the Auto Pick button. 1 until both have been measured.
@@ -714,9 +688,10 @@ struct StreamPickerView: View {
 
     @ViewBuilder
     private var playBestButton: some View {
-        if model.listing.items.isEmpty {
+        let autoPickInfo = model.recommendedStreamLabel ?? (model.isLoading ? Self.lastAutoPickInfo : nil)
+        if model.listing.items.isEmpty && !model.isLoading {
             // With no stream to pick, the X still stands where the row would, so the details are one tap away.
-            if !model.isLoading { closeButton.padding(.horizontal, streamMargin) }
+            closeButton.padding(.horizontal, streamMargin)
         } else {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 HStack(spacing: Theme.Spacing.m) {
@@ -733,8 +708,8 @@ struct StreamPickerView: View {
                                 Image(systemName: "sparkles").foregroundStyle(.secondary)
                             }
                             Text("Auto Pick")
-                            // The kind of stream it would start, always there once the addons have answered.
-                            if let kind = model.recommendedStreamLabel {
+                            // Keep the previous recommendation until the new streams have loaded.
+                            if let kind = autoPickInfo {
                                 Text("- \(kind)")
                                     .fontWeight(.regular)
                                     .foregroundStyle(.secondary)
@@ -750,8 +725,11 @@ struct StreamPickerView: View {
                     .buttonStyle(.primaryActionCompact)
                     .controlSize(.small)
                     .disabled(model.isAutoPicking || preparingViaAutoPick)
-                    .accessibilityLabel(model.recommendedStreamLabel.map { "Auto Pick, \($0)" } ?? "Auto Pick")
+                    .accessibilityLabel(autoPickInfo.map { "Auto Pick, \($0)" } ?? "Auto Pick")
                     .accessibilityIdentifier("streams.playBest")
+                    .onChange(of: model.recommendedStreamLabel, initial: true) { _, info in
+                        if let info { Self.lastAutoPickInfo = info }
+                    }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                         autoPickButtonHeight = $0
                         Self.lastAutoPickHeight = $0
@@ -824,9 +802,10 @@ struct StreamPickerView: View {
         return model.addonSections.filter { $0.addon.id == chosenAddon }
     }
 
-    /// The bands the chosen addon's streams listed so far fall in, sharpest first.
+    /// Keep the previous bar while waiting for streams, then use the resolutions actually returned.
     private var availableBands: [Band] {
         let present = Set(addonSections.flatMap(\.streams).compactMap(band(of:)))
+        if present.isEmpty && model.isLoading { return Self.lastResolutionBands }
         return Band.allCases.filter(present.contains)
     }
 
@@ -840,15 +819,18 @@ struct StreamPickerView: View {
         }
     }
 
-    /// "All  4K  1080p  720p": shown once the list holds more than one sharpness, since a single band has nothing to choose between.
+    /// "All  4K  1080p  720p": visible immediately, then adjusted as stream resolutions arrive.
     @ViewBuilder
     private var resolutionChips: some View {
-        if availableBands.count > 1 {
+        if !availableBands.isEmpty {
             QualitySelector(titles: ["All"] + availableBands.map(\.title), selection: Binding {
                 resolutionFilter.flatMap { availableBands.firstIndex(of: $0).map { $0 + 1 } } ?? 0
             } set: { index in
                 resolutionFilter = index > 0 && index <= availableBands.count ? availableBands[index - 1] : nil
             })
+            .onChange(of: availableBands, initial: true) { _, bands in
+                if !bands.isEmpty { Self.lastResolutionBands = bands }
+            }
         }
     }
 
@@ -905,7 +887,7 @@ struct StreamPickerView: View {
     @ViewBuilder
     private var loadingRows: some View {
         if model.isLoading && model.listing.isEmpty {
-            StreamRowsSkeleton()
+            StreamRowsSkeleton(heights: Self.lastStreamCardHeights)
                 .padding(.horizontal, streamMargin)
         }
     }
@@ -1006,6 +988,16 @@ struct StreamPickerView: View {
                           savesToPlayer: savesUnderMark(item),
                           downloadsToPlayer: savesUnderMark(item),
                           isPreparing: preparingItemID == item.id)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        guard order < 3, height > 0 else { return }
+                        #if targetEnvironment(macCatalyst)
+                        Self.lastStreamCardHeights[order] = height
+                        #else
+                        // Include the collapsed footer, regardless of whether this card's details are currently expanded.
+                        Self.lastStreamCardHeights[order] = height + 1 + Theme.Spacing.m * 2
+                            + UIFont.preferredFont(forTextStyle: .footnote).lineHeight.rounded(.up)
+                        #endif
+                    }
             }
             // On a Mac one hover effect: the card's own highlight, without the system's on top of it. iPad keeps both, as before.
             .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight))

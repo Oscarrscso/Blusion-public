@@ -36,7 +36,7 @@ import StremioKitTestSupport
     @Test func anotherSeasonListsItsOwnEpisodes() async throws {
         let model = PlayerEpisodePickerModel(request: playingRequest(), services: try await installedServices())
         await model.load()
-        model.selectSeason(1)
+        await model.selectSeason(1)
         #expect(model.selectedSeason == 1)
         #expect(model.episodes.map(\.id) == ["mock:series1:1:1", "mock:series1:1:2", "mock:series1:1:3"])
         #expect(model.episodes.filter(model.isCurrent).isEmpty, "the playing episode is in the other season")

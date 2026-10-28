@@ -39,7 +39,7 @@ public final class StreamPickerViewModel {
     public private(set) var isAutoPicking = false
     public private(set) var autoPickMessage: String?
     public private(set) var autoPickedStream: RankedStream?
-    /// What "Play best" starts when Auto Pick has nothing to hand over, preserving release priority and player compatibility.
+    /// What "Play best" starts when Auto Pick has nothing to hand over, respecting quality preferences and player compatibility.
     public private(set) var bestToPlay: RankedStream?
 
     private let services: AppServices
@@ -96,8 +96,8 @@ public final class StreamPickerViewModel {
         // The player's routing policy has already applied the saved preference. Auto Pick must
         // rank only these watchable routes, not bypass the preference with an Infuse handoff.
         let candidates = automaticCandidates
-        bestAssessment = listing.isLoading ? nil : AutoStreamRanking.best(from: candidates, duration: request.expectedDuration)
-        bestToPlay = bestAssessment?.item ?? candidates.first
+        bestAssessment = listing.isLoading ? nil : AutoStreamRanking.best(from: candidates, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        bestToPlay = (bestAssessment ?? AutoStreamRanking.best(from: candidates, duration: request.expectedDuration, preferences: settings.rankingPreferences))?.item
     }
 
     public func load() async {
@@ -146,18 +146,18 @@ public final class StreamPickerViewModel {
         await services.settings.save(settings)
     }
 
-    /// Automatic playback has a total selection deadline; slower answers still improve the open picker. When Auto Pick waits for one
+    /// By default, compare every addon response. A caller can impose a deadline; later answers still improve the open picker. When Auto Pick waits for one
     /// addon (see `AutoPickWait`), the wait ends once that addon has a stream to start; `stopsForWaitTarget` false keeps the whole window,
     /// for the next episode, which looks for a stream continuing the last one.
-    public func loadForAutomaticSelection(timeout: Duration = .seconds(5), stopsForWaitTarget: Bool = true) async {
+    public func loadForAutomaticSelection(timeout: Duration? = nil, stopsForWaitTarget: Bool = true) async {
         if !hasLoaded, loadingTask == nil {
             loadingTask = Task { [weak self] in
                 guard let self else { return }
                 await self.load()
             }
         }
-        let deadline = ContinuousClock.now.advanced(by: timeout)
-        while isLoading, !(stopsForWaitTarget && waitTargetHasAnswered()), ContinuousClock.now < deadline,
+        let deadline = timeout.map { ContinuousClock.now.advanced(by: $0) }
+        while isLoading, !(stopsForWaitTarget && waitTargetHasAnswered()), deadline.map({ ContinuousClock.now < $0 }) ?? true,
               !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
@@ -328,7 +328,7 @@ public final class StreamPickerViewModel {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
         }
         guard !Task.isCancelled else { return nil }
-        let assessment = isLoading ? AutoStreamRanking.best(from: automaticCandidates, duration: request.expectedDuration) : bestAssessment
+        let assessment = isLoading ? AutoStreamRanking.best(from: automaticCandidates, duration: request.expectedDuration, preferences: settings.rankingPreferences) : bestAssessment
         guard let pick = assessment else {
             autoPickMessage = "No streams are ready for automatic playback. Choose a stream manually."
             return nil
@@ -345,14 +345,13 @@ public final class StreamPickerViewModel {
         return bestAssessment?.item
     }
 
-    /// What kind of stream Auto Pick would start, as its button says it: "4K · REMUX". Nil while the addons are still answering and when
-    /// there is nothing Auto Pick can start, like `recommendedStream`.
+    /// Known details of Auto Pick's current candidate, refreshed as addons answer. Nil until a candidate has details to show.
     public var recommendedStreamLabel: String? {
-        guard !isLoading, let pick = bestAssessment else { return nil }
-        let sharpness = pick.item.quality.resolutionLabel ?? "stream"
-        let kind = "\(sharpness) · \(pick.isRemux ? "REMUX" : pick.item.quality.source?.rawValue ?? "release")"
-        guard let delivery = StreamDelivery.detect(in: pick.item.stream) else { return kind }
-        return "\(kind) · \(delivery.title)"
+        guard let item = bestToPlay else { return nil }
+        let details = [item.quality.resolutionLabel,
+                       item.quality.isRemux ? "REMUX" : item.quality.source?.label,
+                       StreamDelivery.detect(in: item.stream)?.title].compactMap { $0 }
+        return details.isEmpty ? nil : details.joined(separator: " · ")
     }
 
     /// What Auto Pick goes for, from Settings, said under its button: "Auto Pick prefers Usenet streams".
@@ -366,16 +365,9 @@ public final class StreamPickerViewModel {
     /// The saved Auto Pick source, for the picker's note.
     public var autoPickSource: StreamSourcePreference { settings.autoPickSource }
 
-    /// Auto Pick and the recommendation use the same set of routes as ordinary Play.
-    /// Respect an explicit resolution preference and avoid mixing lower-ranked route classes.
+    /// Policy has already excluded unsupported routes. Compare all remaining engines and cache states.
     private var automaticCandidates: [RankedStream] {
-        // The Usenet, Debrid or Balanced choice narrows the streams first, so quality and resolution then decide within that kind.
-        // Streams marked as still downloading are left out before the choice, so it never picks a kind only they offer.
-        let startable = listing.items.filter { $0.route.isWatchable && StreamAvailability.canStartAutomatically($0) }
-        let watchable = StreamAvailability.automaticCandidates(from: settings.autoPickSource.candidates(from: startable))
-        if settings.rankingPreferences.preferredResolution != nil { return Array(watchable.prefix(1)) }
-        guard let first = watchable.first else { return [] }
-        return watchable.filter { $0.route.sortClass == first.route.sortClass }
+        settings.autoPickSource.candidates(from: StreamAvailability.automaticCandidates(from: listing.items))
     }
 
     /// The addon Auto Pick waits for under the saved choice: one the user named, Auto's fastest, or nil for every addon.

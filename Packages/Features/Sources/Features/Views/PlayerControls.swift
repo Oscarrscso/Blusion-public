@@ -26,7 +26,7 @@ struct PlayerControls: View {
     var actions = PlayerControlActions()
     /// AI upscaling, for the Info menu: what it is doing, and how many frames a second it scales.
     var upscaling: SuperResolutionRenderer?
-    var onSelectStream: (Int) -> Void = { _ in }
+    var onShowStreams: () -> Void = {}
     /// The picture is on screen (`PlayerContent.isVideoReady`). Until then only the startup spinner and Close show.
     var isVideoReady = true
     /// Playback has been waiting for data for a moment: the play button shows a spinner (and still pauses).
@@ -144,16 +144,7 @@ struct PlayerControls: View {
                         .accessibilityLabel("AirPlay").accessibilityIdentifier("player.airplay")
                     #endif
                     if model.plan.candidates.count > 1 {
-                        Menu {
-                            ForEach(Array(model.plan.candidates.enumerated()), id: \.offset) { entry in
-                                Button {
-                                    onSelectStream(entry.offset)
-                                } label: {
-                                    Label(entry.element.title, systemImage: entry.offset == model.currentStreamIndex ? "checkmark" : "play.fill")
-                                }
-                                .disabled(entry.offset == model.currentStreamIndex)
-                            }
-                        } label: {
+                        Button(action: onShowStreams) {
                             Image(systemName: "arrow.trianglehead.2.clockwise")
                                 .font(.body.weight(.semibold))
                                 .frame(width: 44, height: 44)

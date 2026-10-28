@@ -449,6 +449,18 @@ public struct RootTabView: View {
     /// Phones show each tab's icon alone (see `tabItem`). The iPad and the Mac keep the titles, as their sidebar rows need them.
     private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone }
 
+    private var failedHandoffTitle: String {
+        if failedHandoff?.handoff.action == .download { return "Couldn’t start download in Infuse" }
+        if failedHandoff?.handoff.action == .save { return "Couldn’t save to Infuse" }
+        return "Infuse couldn’t play this stream"
+    }
+
+    private var showsFailedHandoff: Binding<Bool> {
+        Binding<Bool>(get: { failedHandoff != nil }, set: { isPresented in
+            if !isPresented { failedHandoff = nil }
+        })
+    }
+
     public init(services: AppServices, route: LaunchRoute = .home, addonLink: Binding<String?> = .constant(nil), userStateRevision: Int = 0) {
         self.services = services
         self.userStateRevision = userStateRevision
@@ -663,9 +675,8 @@ public struct RootTabView: View {
             guard let receipt = notification.object as? PlaybackHandoffReceipt else { return }
             if case .failed = receipt.result { failedHandoff = receipt }
         }
-        .alert(failedHandoff?.handoff.action == .download ? "Couldn’t start download in Infuse"
-               : failedHandoff?.handoff.action == .save ? "Couldn’t save to Infuse" : "Infuse couldn’t play this stream",
-               isPresented: Binding(get: { failedHandoff != nil }, set: { if !$0 { failedHandoff = nil } }),
+        .alert(failedHandoffTitle,
+               isPresented: showsFailedHandoff,
                presenting: failedHandoff) { receipt in
             if receipt.handoff.isPlayback {
                 Button("Choose another stream") {

@@ -98,6 +98,26 @@ final class PlaybackFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testPlayerStreamChooserCanSelectAnotherStreamAndReopen() throws {
+        let app = launchAndOpenStreams()
+        XCTAssertTrue(app.buttons["stream.row.Mock HLS"].firstMatch.waitForExistence(timeout: 15))
+        app.buttons["stream.row.Mock MP4"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["player.screen"].waitForExistence(timeout: 15))
+        showControls(app)
+        app.buttons["player.nextStream"].tap()
+        let alternative = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "player.stream.", "Mock HLS")).firstMatch
+        XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+        XCTAssertTrue(alternative.isEnabled)
+        alternative.tap()
+        XCTAssertTrue(app.otherElements["player.screen"].waitForExistence(timeout: 15))
+        showControls(app)
+        app.buttons["player.nextStream"].tap()
+        XCTAssertTrue(alternative.waitForExistence(timeout: 5))
+        XCTAssertFalse(alternative.isEnabled, "the selected stream is now the current stream")
+        app.buttons["Done"].tap()
+    }
+
+    @MainActor
     func testMP4PlaysTimeAdvancesAndSeeksWithinOneSecond() throws {
         let app = launchAndOpenStreams()
         let row = app.buttons["stream.row.Mock MP4"].firstMatch

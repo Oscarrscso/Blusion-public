@@ -10,7 +10,7 @@ struct DetailTrailerPanel: View {
     let model: DetailViewModel
     /// The panel's width. Its height follows the picture's shape, and in landscape it is never taller than 16:9 at this width.
     let width: CGFloat
-    /// True while the page shows this trailer full screen. A YouTube web view is in one place at a time, so the panel stays empty then.
+    /// The phone's full-screen cover hides the inline panel through dismissal. Mac keeps its inline/native full-screen player.
     var playerIsCovered = false
     @Environment(\.isLandscape) private var isLandscape
     /// The id the page scrolls to when the panel appears.
@@ -18,6 +18,8 @@ struct DetailTrailerPanel: View {
 
     var body: some View {
         content
+            // Keep the player's layout intact while hiding it beneath the phone's cover.
+            .opacity(playerIsCovered ? 0 : 1)
             .id(Self.scrollID)
     }
 

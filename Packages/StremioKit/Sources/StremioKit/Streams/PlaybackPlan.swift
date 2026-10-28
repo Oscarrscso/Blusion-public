@@ -77,7 +77,7 @@ public struct PlaybackPlan: Sendable, Equatable, Identifiable, Hashable {
     /// `nil` when `chosen` isn't playable. The retry follows the same policy that routed the streams, so Settings decides it too.
     public static func make(request: StreamRequest, chosen: RankedStream, from listing: StreamListing) -> PlaybackPlan? {
         guard let first = PlaybackCandidate(chosen) else { return nil }
-        let rest = listing.playable.filter { $0.id != chosen.id && StreamAvailability.canStartAutomatically($0) }.compactMap(PlaybackCandidate.init)
+        let rest = AutoStreamRanking.ranked(listing.playable.filter { $0.id != chosen.id }, duration: request.expectedDuration, preferences: listing.preferences).compactMap { PlaybackCandidate($0.item) }
         return PlaybackPlan(request: request, candidates: [first] + rest, retriesInFallbackEngine: listing.config.fallbackEngineAvailable,
                             retriesInBackupEngine: listing.config.fallbackEngineAvailable && listing.config.backupEngineAvailable)
     }

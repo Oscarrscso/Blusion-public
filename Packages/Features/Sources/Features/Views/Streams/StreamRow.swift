@@ -285,7 +285,8 @@ enum StreamCardMetrics {
     static let providerBox = CGSize(width: 52, height: 36)
     static let providerBoxRadius: CGFloat = 10
     static let logoInset = CGSize(width: 12, height: 14)
-    static let skeletonHeight: CGFloat = 132
+    /// Includes the collapsed technical-details row below the stream information.
+    static let skeletonHeight: CGFloat = 168
     static let addsSystemHighlight = true
     #endif
 }
@@ -481,12 +482,19 @@ struct StreamTechnicalDetails: View {
 
 /// Grey stand-ins for stream cards while the first answers are on their way, so the screen has its shape at once.
 struct StreamRowsSkeleton: View {
+    var heights: [Int: CGFloat] = [:]
+
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
-            ForEach(0..<3, id: \.self) { _ in
+            ForEach(0..<3, id: \.self) { index in
                 RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
                     .fill(Theme.surface)
-                    .frame(height: StreamCardMetrics.skeletonHeight)
+                    .frame(height: heights[index] ?? StreamCardMetrics.skeletonHeight)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+                            .strokeBorder(index == 0 ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.artworkBorder),
+                                          lineWidth: index == 0 ? 1.5 : 0.7)
+                    }
             }
         }
         .shimmering()

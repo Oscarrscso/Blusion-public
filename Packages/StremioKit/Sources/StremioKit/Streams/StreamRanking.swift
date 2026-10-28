@@ -62,7 +62,7 @@ public enum StreamIdentity {
     }
 }
 
-/// Watchable streams first, then Blu-ray REMUX priority, route, resolution and the remaining release facts.
+/// Watchable streams first, then route, resolution and the remaining release facts.
 public enum StreamRanking {
     public static func sorted(_ items: [RankedStream], preferences: RankingPreferences = .init()) -> [RankedStream] {
         items.sorted { isOrdered($0, before: $1, preferences: preferences) }
@@ -71,7 +71,6 @@ public enum StreamRanking {
     public static func isOrdered(_ a: RankedStream, before b: RankedStream, preferences: RankingPreferences = .init()) -> Bool {
         if a.route.isWatchable != b.route.isWatchable { return a.route.isWatchable }
         if !a.route.isWatchable, a.route.sortClass != b.route.sortClass { return a.route.sortClass < b.route.sortClass }
-        if a.quality.releasePriority != b.quality.releasePriority { return a.quality.releasePriority > b.quality.releasePriority }
         if a.route.sortClass != b.route.sortClass { return a.route.sortClass < b.route.sortClass }
         let (ra, rb) = (resolutionKey(a.quality.resolution, preferences), resolutionKey(b.quality.resolution, preferences))
         if ra != rb { return ra < rb }

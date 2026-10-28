@@ -10,7 +10,7 @@ import StremioKitTestSupport
     private func release(_ id: String, _ text: String) -> RankedStream {
         let stream = S.direct(text, "https://e.example.com/\(id).mkv")
         return RankedStream(id: id, stream: stream, addon: S.addon("A"), alsoProvidedBy: [], quality: StreamQuality.parse(stream),
-                            container: nil, route: .native(URL(string: "https://e.example.com/\(id).mkv")!), addonIndex: 0, indexInAddon: 0)
+                            container: nil, route: .fallback(URL(string: "https://e.example.com/\(id).mkv")!, .container(.matroska)), addonIndex: 0, indexInAddon: 0)
     }
 
     private func score(_ text: String) -> Double {
@@ -21,35 +21,110 @@ import StremioKitTestSupport
         AutoStreamRanking.best(from: items, duration: duration)?.item.id
     }
 
-    @Test func aRemuxHasPriorityOverAnEncodeAtTheSameResolution() {
-        // Release priority precedes the remaining video and audio score.
+    @Test func strongAudioEncodeCanBeatALossyRemux() {
+        // A REMUX label cannot outweigh substantially better audio.
         let bluRay = release("bluray", "Movie.2160p.BluRay.x265.HDR.DTS-HD.MA.5.1-GRP 44.66 GB")
         let remux = release("remux", "Movie.2160p.REMUX.HEVC.AAC-GRP 29.71 GB")
-        #expect(best([remux, bluRay], duration: runtime) == "remux")
-        #expect(best([bluRay, remux], duration: runtime) == "remux", "list order does not decide it")
+        #expect(best([remux, bluRay], duration: runtime) == "bluray")
+        #expect(best([bluRay, remux], duration: runtime) == "bluray", "list order does not decide it")
     }
 
-    @Test func remuxPriorityPrecedesResolutionAndHDR() {
+    @Test func weightedQualityCanBeatALowerResolutionRemux() {
         let uhd = release("uhd", "Movie.2160p.BluRay.x265.10bit.HDR.DTS-HD.MA.7.1-GRP 40 GB")
         let remux = release("remux", "Movie.1080p.REMUX.AAC-GRP 25 GB")
-        #expect(best([remux, uhd], duration: runtime) == "remux")
+        #expect(best([remux, uhd], duration: runtime) == "uhd")
     }
 
-    @Test func aRemuxRetainsItsScoreContributionWithinItsTier() {
+    @Test func aRemuxHasABoundedScoreBonus() {
         let bluRay = release("bluray", "Movie.2160p.BluRay.x265.HDR.DTS-HD.MA.5.1-GRP 30 GB")
         let remux = release("remux", "Movie.2160p.REMUX.x265.HDR.DTS-HD.MA.5.1-GRP 30 GB")
         #expect(best([bluRay, remux], duration: runtime) == "remux")
         let nudge = AutoStreamRanking.assess(remux, duration: runtime).qualityScore - AutoStreamRanking.assess(bluRay, duration: runtime).qualityScore
-        #expect(abs(nudge - 4) < 0.000_001, "the REMUX tag is worth a small, fixed indicator")
+        #expect(abs(nudge - 10) < 0.000_001, "the REMUX tag is worth a small, fixed indicator")
     }
 
-    @Test func remuxBeats4KWebDLEvenWithLessMetadataOrFewerSeeders() {
+    @Test func suspiciousSmallRemuxDoesNotBeatAGood4KWebDL() {
         let web = release("web", "Movie 2160p WEB-DL HEVC 10bit Dolby Vision TrueHD Atmos 7.1 60 GB seeders: 100")
         for count in ["", "seeders: 1", "seeders: 0"] {
             let remux = release("remux", "Movie 1080p BluRay REMUX AAC 2 GB " + count)
-            #expect(best([web, remux], duration: runtime) == "remux")
-            #expect(best([remux, web], duration: nil) == "remux")
+            #expect(best([web, remux], duration: runtime) == "web")
+            #expect(best([remux, web], duration: nil) == "web")
         }
+    }
+
+    @Test func cinemaParadisoUHDRemuxWinsInEitherOrder() {
+        let uhd = release("uhd", "Cinema Paradiso 2160p UHD REMUX HEVC HDR DTS-HD MA 5.1 85.88 GB")
+        let hd = release("hd", "Cinema Paradiso 1080p REMUX H.264 23.8 GB")
+        for items in [[hd, uhd], [uhd, hd]] {
+            #expect(best(items, duration: 9_300) == "uhd")
+        }
+        print("Cinema Paradiso:", AutoStreamRanking.ranked([hd, uhd], duration: 9_300).map { ($0.item.id, $0.qualityScore) })
+    }
+
+    @Test func adventureTimeAmazonWebDLWinsInEitherOrder() {
+        let amazon = release("amazon", "Adventure Time Side Quests AMZN 1080p WEB-DL DD+ 938 MB")
+        let rip = release("rip", "Adventure Time Side Quests 1080p WEBRip AAC 454.6 MB")
+        for items in [[rip, amazon], [amazon, rip]] {
+            #expect(best(items, duration: 1_320) == "amazon")
+        }
+        print("Adventure Time:", AutoStreamRanking.ranked([rip, amazon], duration: 1_320).map { ($0.item.id, $0.qualityScore) })
+    }
+
+    @Test func immersiveLosslessAudioCanOutweighResolution() {
+        let hd = release("hd", "1080p BluRay TrueHD Atmos 7.1 30 GB")
+        let uhd = release("uhd", "2160p BluRay AAC 2.0 30 GB")
+        #expect(best([uhd, hd], duration: runtime) == "hd")
+    }
+
+    @Test func cacheIsABonusRatherThanAnExclusiveFilter() {
+        let cached = release("cached", "[RD+] 720p WEBRip AAC")
+        let unknown = release("unknown", "2160p REMUX HEVC HDR TrueHD Atmos 7.1")
+        #expect(best([cached, unknown], duration: nil) == "unknown")
+        let equal = release("equal", "720p WEBRip AAC")
+        #expect(best([equal, cached], duration: nil) == "cached")
+        #expect(best([release("zero", "1080p seeders: 0"), release("unknown", "1080p")], duration: nil) == "unknown")
+    }
+
+    @Test func unsupportedAndDownloadingLinksCannotWin() {
+        let good = release("good", "2160p REMUX HEVC TrueHD Atmos")
+        let low = release("low", "720p")
+        #expect(best([good.rerouted(.unsupported(.matroska)), low], duration: nil) == "low")
+        #expect(best([release("waiting", "uncached 2160p REMUX"), low], duration: nil) == "low")
+        #expect(best([good.rerouted(.fallback(URL(string: "https://e.example.com/good.mkv")!, .container(.matroska))), low], duration: nil) == "good")
+    }
+
+    @Test func uncachedTorrentUsesSeedersWhenAServerCanPlayIt() {
+        let stream = S.torrent("uncached 1080p WEB-DL seeders: 40")
+        let template = release("torrent", "1080p WEB-DL")
+        let torrent = RankedStream(id: template.id, stream: stream, addon: template.addon, alsoProvidedBy: [], quality: StreamQuality.parse(stream),
+                                   container: nil, route: template.route, addonIndex: 0, indexInAddon: 0)
+        #expect(StreamAvailability.automaticCandidates(from: [torrent]).count == 1)
+        #expect(!StreamAvailability.isCached(stream))
+        #expect(best([release("unknown", "1080p WEB-DL"), torrent], duration: nil) == "torrent")
+        #expect(StreamAvailability.automaticCandidates(from: [torrent.rerouted(.unsupported(.matroska))]).isEmpty)
+        #expect(!StreamAvailability.isCached(release("contradicted", "[RD+] Cached: false").stream))
+        #expect(best([release("cached", "[RD+] 1080p WEB-DL seeders: 0"), release("unknown", "1080p WEB-DL")], duration: nil) == "cached")
+    }
+
+    @Test func nativeRouteOnlyScoresAudioItCanDecode() {
+        let url = URL(string: "https://e.example.com/file.mp4")!
+        let mixed = release("mixed", "1080p TrueHD Atmos AAC 5.1").rerouted(.native(url))
+        let aac = release("aac", "1080p AAC 5.1").rerouted(.native(url))
+        #expect(AutoStreamRanking.assess(mixed, duration: nil).qualityScore == AutoStreamRanking.assess(aac, duration: nil).qualityScore)
+    }
+
+    @Test func preferencesCompareEveryReleaseAtTheChosenResolution() {
+        let weak = release("weak", "1080p WEBRip AAC")
+        let good = release("good", "1080p AMZN WEB-DL DD+ 5.1")
+        let uhd = release("uhd", "2160p REMUX TrueHD Atmos")
+        #expect(AutoStreamRanking.best(from: [weak, uhd, good], duration: nil, preferences: .init(preferredResolution: 1080))?.item.id == "good")
+    }
+
+    @Test func reputationIsModestAndLanguageNeutral() {
+        #expect(score("1080p WEB-DL DD+ AMZN-FLUX") > score("1080p WEB-DL DD+"))
+        #expect(score("1080p WEB-DL DD+ Italian") == score("1080p WEB-DL DD+ English"))
+        #expect(score("1080p DTS:X 7.1") > score("1080p DTS-HD MA 7.1"))
+        #expect(score("1080p DD+ 768 kbps") > score("1080p DD+ 192 kbps"))
     }
 
     @Test func losslessAudioBeatsLossyAtTheSameVideo() {
@@ -84,7 +159,7 @@ import StremioKitTestSupport
         #expect(StreamQuality.parse(from: ["Movie 2160p WEB-DL REMUX"]).hasConflictingSource)
         let contradicted = AutoStreamRanking.assess(release("contradicted", "Movie 2160p WEB-DL REMUX DTS-HD 40 GB"), duration: runtime)
         let plain = AutoStreamRanking.assess(release("plain", "Movie 2160p DTS-HD 40 GB"), duration: runtime)
-        #expect(contradicted.qualityScore == plain.qualityScore)
+        #expect(contradicted.qualityScore < plain.qualityScore)
     }
 
     @Test func aCodecTheTextContradictsIsNotTrusted() {
@@ -92,7 +167,7 @@ import StremioKitTestSupport
         #expect(StreamQuality.parse(from: ["Movie 1080p x264 HEVC 10 GB"]).hasConflictingVideoCodec)
         let mixed = AutoStreamRanking.assess(release("mixed", "Movie 1080p x264 HEVC 10 GB"), duration: runtime)
         let h264 = AutoStreamRanking.assess(release("h264", "Movie 1080p x264 10 GB"), duration: runtime)
-        #expect(mixed.qualityScore == h264.qualityScore)
+        #expect(mixed.qualityScore < h264.qualityScore)
     }
 
     @Test func aBareSDDoesNotContradictA1080p() {

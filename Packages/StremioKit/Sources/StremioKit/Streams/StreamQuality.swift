@@ -115,6 +115,9 @@ public struct StreamQuality: Sendable, Equatable {
     /// The most channels the text names: 6 for 5.1, 8 for 7.1.
     public var audioChannels: Int?
     public var hasAtmos = false
+    public var hasDTSX = false
+    public var audioBitrateKbps: Double?
+    public var hasReputableGroup = false
     public var sizeBytes: Int64?
     /// Peers that have the whole file and upload it, as the addon's text gives them.
     public var seeders: Int?
@@ -137,10 +140,6 @@ public struct StreamQuality: Sendable, Equatable {
         self.seeders = seeders
         self.peers = peers
     }
-
-    /// Confirmed Blu-ray REMUX releases outrank other releases before resolution or score is considered.
-    /// Contradictory source labels cannot claim the disc priority.
-    var releasePriority: Int { isRemux && source == .bluray && !hasConflictingSource ? 1 : 0 }
 
     /// True when the only audio the text names is something AVPlayer can't decode. A release that also lists AAC or AC-3 is fine,
     /// because the player picks a decodable track.
@@ -198,6 +197,9 @@ public struct StreamQuality: Sendable, Equatable {
         quality.audioCodecs = audioCodecs(in: text)
         quality.audioChannels = audioChannels(in: text)
         quality.hasAtmos = matches(#"\batmos\b"#, in: text)
+        quality.hasDTSX = matches(dtsxPattern, in: text)
+        quality.audioBitrateKbps = positiveNumber(audioBitratePattern, in: text)
+        quality.hasReputableGroup = matches(groupPattern, in: text)
         quality.sizeBytes = size(in: text)
         // The counted form ("12 seeders") is read before the labelled one, which would otherwise take the next number as the count.
         quality.seeders = swarmCount(seedersPattern, in: text) ?? swarmCount(seedersCountedPattern, in: text)
@@ -344,7 +346,7 @@ public struct StreamQuality: Sendable, Equatable {
                 remaining = regex.stringByReplacingMatches(in: remaining, range: NSRange(remaining.startIndex..., in: remaining), withTemplate: " ")
             }
         }
-        take(.dtsHD, #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .\-]?x)\b"#)
+        take(.dtsHD, #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .:\-]?x)\b"#)
         take(.dts, #"\bdts\b"#)
         take(.trueHD, #"\btrue[ .\-]?hd\b"#)
         take(.eac3, #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+)(?=\W|$)"#)
@@ -390,6 +392,10 @@ public struct StreamQuality: Sendable, Equatable {
         return Int64(value * multiplier)
     }
 
+    private static let dtsxPattern = #"\bdts[ .:\-]?(?:x|hd[ .\-]?ma[ .:\-]?x)\b"#
+    private static let audioBitratePattern = #"([0-9]+(?:\.[0-9]+)?)\s*(?:kbps|kb/s|kbit/s)\b"#
+    // Modest, bounded reputation bonus; unknown groups and filename languages remain neutral.
+    private static let groupPattern = #"(?:-|\bgroup\s*[:=]\s*)(?:framestor|epsilon|wildcat|cinephiles|hdt|bhdstudio|ctrlhd|don|d-z0n3|ebp|ntb|flux|cmrg|playweb|successfulcrab)(?![a-z0-9])"#
     private static let remuxPattern = #"\bremux\b"#
     private static let bitDepthPattern = #"\b(8|10|12)[ .\-]?bits?\b"#
     private static let highBitDepthPattern = #"\bhi10p?\b"#
@@ -408,7 +414,7 @@ public struct StreamQuality: Sendable, Equatable {
             #"\batmos\b"#,
             StreamQuality.hdr10PlusPattern, StreamQuality.hlgPattern, StreamQuality.felPattern, StreamQuality.enhancementLayerPattern,
             StreamQuality.dolbyVisionProfilePattern, StreamQuality.profilePattern,
-            StreamQuality.remuxPattern,
+            StreamQuality.remuxPattern, StreamQuality.dtsxPattern, StreamQuality.audioBitratePattern, StreamQuality.groupPattern,
             StreamQuality.bitDepthPattern,
             StreamQuality.highBitDepthPattern,
             StreamQuality.bitratePattern,
@@ -417,7 +423,7 @@ public struct StreamQuality: Sendable, Equatable {
             StreamQuality.codecWordPattern,
             StreamQuality.codecAdjacentHeightPattern,
             StreamQuality.bareSDPattern,
-            #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .\-]?x)\b"#,
+            #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .:\-]?x)\b"#,
             #"\bdts\b"#,
             #"\btrue[ .\-]?hd\b"#,
             #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+)(?=\W|$)"#,

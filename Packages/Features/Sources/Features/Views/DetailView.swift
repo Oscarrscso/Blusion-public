@@ -54,7 +54,7 @@ struct DetailView: View {
     /// True while a trailer that started on a phone turned sideways is shown full screen. The cover belongs to the page, so it lives as
     /// long as the page does, and the trailer's panel is not what presents it.
     @State private var showsTrailerCover = false
-    /// True from the moment the trailer's cover is shown until it has gone. A YouTube trailer's panel stays empty meanwhile.
+    /// True until the trailer's cover has gone and its landscape playback is closed. The inline panel stays hidden meanwhile.
     @State private var playerIsCovered = false
     /// A phone held sideways, not an iPad or a Mac window: the trailer that starts here plays full screen. Intentionally iOS-only, and
     /// phone-only, since iPad landscape keeps the panel.
@@ -196,7 +196,8 @@ struct DetailView: View {
                                         : metrics.titleRatingsGap)
                                     .accessibilityHidden(true)
                                 if model.isSeries {
-                                    DetailEpisodes(model: model, pageWidth: geometry.size.width, contentMargin: contentMargin,
+                                    DetailEpisodes(model: model, pageWidth: geometry.size.width, pageHeight: geometry.size.height,
+                                                   contentMargin: contentMargin,
                                                    isHoldingEpisode: $isHoldingEpisode, play: { showStreams($0, from: $1) },
                                                    loadingRequest: streams.loadingRequest, loadingTrigger: loadingTrigger,
                                                    unavailableStreams: unavailableStreams)
@@ -393,11 +394,15 @@ struct DetailView: View {
             showsTrailerCover = true
         }
         .fullScreenCover(isPresented: $showsTrailerCover, onDismiss: {
-            playerIsCovered = false
-            model.trailer.isFullScreen = false
-            // Leaving full screen while still sideways closes the trailer, rather than leaving an inline landscape player on the page. The X
-            // gave its haptic, so the Trailer button does not tick as well.
-            if isPhoneInLandscape { model.closeTrailerQuietly() }
+            // Remove the stopped panel without animating its empty frame onto the page.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                model.trailer.isFullScreen = false
+                // The X gave its haptic, so the Trailer button does not tick as well.
+                if isPhoneInLandscape { model.closeTrailerQuietly() }
+                playerIsCovered = false
+            }
         }) {
             TrailerFullScreenView(trailer: model.trailer) { showsTrailerCover = false }
         }

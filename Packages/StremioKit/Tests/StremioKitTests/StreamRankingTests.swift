@@ -22,12 +22,12 @@ import StremioKitTestSupport
         #expect(order(items) == ["uhd", "fhd", "hd", "none"])
     }
 
-    @Test func remuxPriorityPrecedesResolutionAndThePreferredResolution() {
+    @Test func remuxDoesNotOverrideResolutionPreferences() {
         let remux = handed("remux", "1080p BluRay REMUX")
         let web = ranked("web", "2160p WEB-DL Dolby Vision")
         for items in [[web, remux], [remux, web]] {
-            #expect(order(items) == ["remux", "web"])
-            #expect(order(items, RankingPreferences(preferredResolution: 2160)) == ["remux", "web"])
+            #expect(order(items) == ["web", "remux"])
+            #expect(order(items, RankingPreferences(preferredResolution: 2160)) == ["web", "remux"])
         }
         let contradicted = ranked("mixed", "1080p REMUX WEB-DL")
         #expect(order([contradicted, web]) == ["web", "mixed"], "contradictory source tags cannot claim priority")

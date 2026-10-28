@@ -8,6 +8,7 @@ import UIKit
 struct DetailEpisodes: View {
     let model: DetailViewModel
     let pageWidth: CGFloat
+    let pageHeight: CGFloat
     let contentMargin: CGFloat
     /// True while an episode's menu is open, so the page can blur behind it. Cleared when this view leaves the screen.
     @Binding var isHoldingEpisode: Bool
@@ -251,7 +252,7 @@ struct DetailEpisodes: View {
         let airsLater = !video.hasAired()
         let request = model.request(for: video)
         let hasNoStreams = unavailableStreams.contains(request.identity)
-        return Button {
+        let card = Button {
             // As Shuffle does: the episode's streams load on this page, with a spinner on its card only, and replace the details once
             // ready. One lookup at a time, so a second tap does not call it off or open another. A swipe that ends on the card, such as
             // one going back, plays nothing, as on a stream's card.
@@ -271,7 +272,33 @@ struct DetailEpisodes: View {
         // An episode that has not aired cannot be opened: its card shows the air date instead.
         .disabled(airsLater || hasNoStreams)
         .titleTapHaptic()
-        .contextMenu {
+        return card.contextMenu {
+            episodeActions(video)
+        } preview: {
+            // Size the native preview itself, not just the row inside it. Landscape leaves the other half for the menu.
+            let previewWidth = isLandscape ? pageWidth / 2 - Self.previewPadding * 2 : pageWidth - contentMargin * 2
+            let previewHeight: CGFloat? = isLandscape ? pageHeight - Self.previewPadding * 4 : nil
+            episodeCard(video, width: previewWidth - Self.previewPadding * 2, airsLater: airsLater,
+                        stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: isLandscape)
+                .padding(Self.previewPadding)
+                .frame(width: previewWidth, height: previewHeight, alignment: .topLeading)
+                .fixedSize()
+                .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
+                .environment(ratings)
+                .onAppear { isHoldingEpisode = true }
+                .onDisappear { isHoldingEpisode = false }
+        }
+        .accessibilityIdentifier("detail.episode.\(video.id)")
+        // IMDb's episode scores come from OMDb, a season at a time, asked for when its first card comes on screen (and again if the key changes).
+        .task(id: "\(video.id):\(model.reviewServicesRevision):\(model.isLoading):\(model.hasSettledHero)") {
+            guard model.hasSettledHero else { return }
+            await model.episodeAppeared(video)
+        }
+    }
+
+    @ViewBuilder
+    private func episodeActions(_ video: Video) -> some View {
+        let request = model.request(for: video)
             let watched = model.isWatched(video)
             ControlGroup {
                 Button(watched ? "Mark as not watched" : "Mark as watched",
@@ -298,31 +325,10 @@ struct DetailEpisodes: View {
                     await titleActions.refresh()
                 }
             }
-        } preview: {
-            // The same card, the full width between the page margins, inset by its padding so the menu's corners do not cut into it. Its
-            // still's corners follow the panel's, and the panel gets the hairline the app's glass cards have. The preview is on screen
-            // only while the menu is open.
-            // In landscape the still sits beside the text: under it, a still as wide as the page is taller than the screen, and the menu
-            // cut the synopsis off.
-            episodeCard(video, width: pageWidth - contentMargin * 2 - Self.previewPadding * 2, airsLater: airsLater,
-                        stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: isLandscape)
-                .padding(Self.previewPadding)
-                .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
-                // Without the store the IMDb mark forgot the coloured-logos setting and changed colour while the card was held.
-                .environment(ratings)
-                .onAppear { isHoldingEpisode = true }
-                .onDisappear { isHoldingEpisode = false }
-        }
-        .accessibilityIdentifier("detail.episode.\(video.id)")
-        // IMDb's episode scores come from OMDb, a season at a time, asked for when its first card comes on screen (and again if the key changes).
-        .task(id: "\(video.id):\(model.reviewServicesRevision):\(model.isLoading):\(model.hasSettledHero)") {
-            guard model.hasSettledHero else { return }
-            await model.episodeAppeared(video)
-        }
     }
 
     /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes
-    /// `showsWholeOverview`, so a held episode's synopsis is never cut; the list follows the full-width setting.
+    /// `showsWholeOverview` for both expanded layouts. The list follows the full-width setting.
     private func episodeCard(_ video: Video, width: CGFloat, airsLater: Bool, isLoadingStreams: Bool = false,
                              stillRadius: CGFloat = Theme.Radius.small, showsWholeOverview: Bool? = nil, sideBySide: Bool = false) -> EpisodeRow {
         EpisodeRow(video: video, fraction: model.progressFraction(for: video), watched: model.isWatched(video),
@@ -395,7 +401,7 @@ private struct EpisodeRow: View {
             if sideBySide {
                 HStack(alignment: .top, spacing: Theme.Spacing.m) {
                     still
-                    text
+                    text.frame(width: width - stillWidth - Theme.Spacing.m, alignment: .leading)
                 }
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {

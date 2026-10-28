@@ -1,16 +1,20 @@
 import Foundation
 
 /// Addons report cache readiness in their display metadata. Unmarked HTTP streams
-/// remain usable; an explicit download/waiting mark always blocks automatic starts.
+/// remain usable; HTTP download placeholders block automatic starts. Torrents need a playable server route.
 public enum StreamAvailability {
     public static func canStartAutomatically(_ item: RankedStream) -> Bool {
-        !isUncached(item.stream)
+        item.route.isWatchable && (!isUncached(item.stream) || isTorrent(item.stream))
     }
 
     public static func automaticCandidates(from items: [RankedStream]) -> [RankedStream] {
-        let ready = items.filter(canStartAutomatically)
-        let cached = ready.filter { isCached($0.stream) }
-        return cached.isEmpty ? ready : cached
+        items.filter(canStartAutomatically)
+    }
+
+    /// An uncached torrent can play through the configured streaming server; an HTTP download placeholder cannot.
+    private static func isTorrent(_ stream: AddonStream) -> Bool {
+        if case .torrent = stream.source { return true }
+        return false
     }
 
     private static func isUncached(_ stream: AddonStream) -> Bool {
@@ -20,7 +24,8 @@ public enum StreamAvailability {
             || matches(#"\b(?:uncached|not[ _-]?cached)\b|\bcached\s*[:=]\s*(?:no|false|0)\b|\[(?:TB|RD|AD|PM|TRB|TORBOX)\s+download\]"#, text)
     }
 
-    private static func isCached(_ stream: AddonStream) -> Bool {
+    public static func isCached(_ stream: AddonStream) -> Bool {
+        guard !isUncached(stream) else { return false }
         let text = [stream.name, stream.description].compactMap { $0 }.joined(separator: "\n")
         return TorBoxCache.detect(in: stream) == .cached || text.unicodeScalars.contains("\u{26A1}")
             || matches(#"\bcached\b|\[(?:TB|RD|AD|PM|TRB|TORBOX)\+\]"#, text)
