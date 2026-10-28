@@ -510,12 +510,12 @@ struct StreamPickerView: View {
         .padding(.horizontal, streamMargin)
     }
 
-    /// "‹ Season 1 · Episode 1 [IMDb] 89 ›": the episode, its score right before the next chevron, and a small round glass chevron each
+    /// "‹ Episode title · S1E1 [IMDb] 89 ›": the episode, its score right before the next chevron, and a small round glass chevron each
     /// side that loads the episode before or after in place, as its card would. A chevron with no episode to go to (the first episode,
     /// the last, or one that has not aired) is dimmed. A score that arrives later fades in.
     private func episodeSwitcherRow(_ switcher: EpisodeSwitcher, season: Int, episode: Int) -> some View {
-        // Specials are season 0, which the season list calls Specials.
-        let heading = season == 0 ? "Specials · Episode \(episode)" : "Season \(season) · Episode \(episode)"
+        let episodeNumber = "S\(season)E\(episode)"
+        let heading = episodeTitle.map { "\($0) · \(episodeNumber)" } ?? episodeNumber
         return HStack(alignment: .center, spacing: Theme.Spacing.m) {
             episodeStepButton(systemImage: "chevron.left", label: "Previous episode", to: switcher.previous, step: switcher.step)
                 .accessibilityIdentifier("stream.previousEpisode")
@@ -523,7 +523,7 @@ struct StreamPickerView: View {
                 // Room for two-digit numbers and a score, so the chevrons stay put under a finger tapping through the episodes: when the
                 // number grows a digit, and when a score arrives.
                 HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    Text("Season 88 · Episode 88")
+                    Text("S88E88")
                         .font(.headline)
                     scoreContent(DetailViewModel.EpisodeScore(value: 8.8, isIMDb: true))
                 }
@@ -531,11 +531,17 @@ struct StreamPickerView: View {
                 .minimumScaleFactor(0.8)
                 .hidden()
                 HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    Text(heading)
+                    if let episodeTitle {
+                        Text(episodeTitle)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Text(episodeTitle == nil ? episodeNumber : "· \(episodeNumber)")
                         .font(.headline)
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .fixedSize()
                     if let episodeScore {
                         scoreLabel(episodeScore)
                             .transition(.opacity)
@@ -581,6 +587,14 @@ struct StreamPickerView: View {
         // A request without the series' name has it at the front of its title, which is "Series · Episode".
         let series = model.request.seriesName ?? model.request.title.components(separatedBy: " · ").first ?? model.request.title
         return "\(series) · S\(season)E\(episode)"
+    }
+
+    /// The episode portion of “Series · Episode”, shown between the switcher's chevrons.
+    private var episodeTitle: String? {
+        let parts = model.request.title.components(separatedBy: " · ")
+        guard parts.count > 1 else { return nil }
+        let title = parts.dropFirst().joined(separator: " · ")
+        return title.isEmpty ? nil : title
     }
 
     /// The episode's heading, then its score right after the season and episode: the IMDb mark and a whole number, as its card shows it
