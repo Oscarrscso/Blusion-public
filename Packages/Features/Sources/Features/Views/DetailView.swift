@@ -189,10 +189,10 @@ struct DetailView: View {
                                     .fill(Theme.separator)
                                     .frame(height: 1)
                                     .padding(.horizontal, contentMargin)
-                                    // The landscape hero already reserves space below its rating pills. Subtract it so the visible
-                                    // pill-to-line gap matches the line-to-section gap.
+                                    // The hero already reserves space below its rating pills. Account for that inset, then use the
+                                    // same section gap on both sides so the divider actually sits between the two sections.
                                     .padding(.top, isLandscape
-                                        ? Theme.Spacing.s - TitleHero.landscapeContentBottomInset
+                                        ? metrics.titleRatingsGap - TitleHero.landscapeContentBottomInset
                                         : metrics.titleRatingsGap)
                                     .accessibilityHidden(true)
                                 if model.isSeries {
@@ -322,7 +322,6 @@ struct DetailView: View {
         }
         .onDisappear {
             landscapeTabs?.reset()
-            landscapeTabs?.pageTitle = nil
         }
         .task { await model.load(afterHero: { await loadHero() }, priorityStream: pendingStreams, prefetchOnOpen: true) }
         .task(id: "\(heroURL?.absoluteString ?? "-")|\(logoURL?.absoluteString ?? "-")|\(model.isLoadingArtwork)|\(showsBackdrop)") {
