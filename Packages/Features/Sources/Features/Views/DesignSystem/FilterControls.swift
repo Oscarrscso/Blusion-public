@@ -85,8 +85,7 @@ struct BrowseFilterBar<Menus: View>: View {
     static var menuHeight: CGFloat { 34 }
 
     var body: some View {
-        let gap = (Theme.Spacing.s + metrics.shelfSpacing) / 2
-        VStack(alignment: .leading, spacing: gap) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             if let kinds {
                 QualitySelector(titles: kinds.titles, selection: kinds.selection, symbols: ["square.grid.2x2", "film", "tv"],
                                 accessibilityID: kinds.identifier)
@@ -102,13 +101,11 @@ struct BrowseFilterBar<Menus: View>: View {
                 }
                 if !chips.isEmpty {
                     ActiveFilterChips(chips: chips, identifier: identifier, clearAll: clearAll)
-                        .padding(.top, Theme.Spacing.xs)
-                        .padding(.bottom, Theme.Spacing.xl)
                 }
             }
             .padding(.horizontal, metrics.pageMargin)
         }
-        .padding(.bottom, chips.isEmpty ? gap : 0)
+        .padding(.bottom, Theme.Spacing.s)
         .buttonStyle(.plain)
     }
 }
