@@ -12,6 +12,8 @@ public final class PlayerEpisodePickerModel {
     public private(set) var seasons: [Int] = []
     public private(set) var selectedSeason: Int?
     public private(set) var episodes: [Video] = []
+    /// IMDb scores for the selected season, keyed by episode number.
+    public private(set) var imdbScores: [Int: Double] = [:]
     /// The episode whose streams are being readied. While one is, the others take no taps.
     public private(set) var preparingID: Video.ID?
 
@@ -67,12 +69,15 @@ public final class PlayerEpisodePickerModel {
             // A fallback is the preview alone: the addon that knows the series did not answer.
             failure = isFallback ? "The episodes couldn't be loaded." : "This series has no episodes."
         }
+        await loadIMDbScores()
     }
 
-    public func selectSeason(_ season: Int) {
+    public func selectSeason(_ season: Int) async {
         guard season != selectedSeason, let detail else { return }
         selectedSeason = season
         episodes = detail.episodes(inSeason: season)
+        imdbScores = [:]
+        await loadIMDbScores()
     }
 
     /// The season's name as the picker shows it.
@@ -98,5 +103,18 @@ public final class PlayerEpisodePickerModel {
 
     public func endPreparing() {
         preparingID = nil
+    }
+
+    /// Uses the same shared IMDb season lookup as the detail page, so opening this compact picker does not duplicate network work.
+    private func loadIMDbScores() async {
+        guard let detail, let season = selectedSeason else { return }
+        let seriesID = LetterboxdRatings.isIMDbID(detail.preview.id)
+            ? detail.preview.id
+            : detail.videos.lazy.compactMap { Video.seriesIMDbID(fromVideoID: $0.id) }.first
+        guard let seriesID else { return }
+        let expected = Set(episodes.filter { $0.hasAired() }.compactMap(\.episode))
+        let scores = await services.posterRatings.episodeRatings(for: seriesID, season: season, expectedEpisodes: expected)
+        guard !Task.isCancelled, selectedSeason == season else { return }
+        imdbScores = scores
     }
 }
