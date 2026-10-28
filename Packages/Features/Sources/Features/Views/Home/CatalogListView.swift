@@ -12,6 +12,7 @@ struct CatalogListView: View {
     @State private var hasStarted = false
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
+    @Environment(AppRouter.self) private var router
 
     init(request: CatalogListRequest, services: AppServices) {
         self.request = request
@@ -30,9 +31,10 @@ struct CatalogListView: View {
         .navigationTitle(isPhoneInLandscape ? "" : request.title)
         .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
         .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
-        .onAppear { landscapeTabs?.pageTitle = request.title }
+        .onAppear { landscapeTabs?.showPageTitle(request.title) }
         .onDisappear {
-            if landscapeTabs?.pageTitle == request.title { landscapeTabs?.pageTitle = nil }
+            // A detail covers this destination without replacing it. Keep the title for the root navigation state to restore on return.
+            if !router.showsTitlePage, landscapeTabs?.pageTitle == request.title { landscapeTabs?.clearPageTitle() }
         }
         .navigationBarTitleDisplayMode(isPhoneInLandscape ? .inline : .large)
         .task {
@@ -174,8 +176,12 @@ struct CatalogListView: View {
     private var emptyContent: some View {
         switch model.state {
         case .loading, .loadingMore:
-            // The grid's own placeholders, so the titles land where they stand, at the same size.
-            MediaGridPlaceholder(aspect: request.presentation.aspectRatio.cardAspect)
+            VStack(alignment: .leading, spacing: 0) {
+                // Keep the filter bar in its final position during the first load. Its default “Auto” sort is already usable, and the
+                // posters replace placeholders without being pushed down when the controls arrive.
+                filters
+                MediaGridPlaceholder(aspect: request.presentation.aspectRatio.cardAspect)
+            }
         case .loaded:
             EmptyStateView("Nothing here yet", systemImage: "square.stack", message: "This list is empty right now.")
                 .frame(maxWidth: .infinity, minHeight: 360)
