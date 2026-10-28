@@ -87,6 +87,12 @@ import StremioKit
         #expect(close(hdInset.visible, try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fit))).visible))
     }
 
+    @Test func cropIgnoresAStaleSafeInset() throws {
+        let layout = VideoLayout(fit: .fill, inset: 59)
+        let geometry = try #require(VideoGeometry(bounds: phone, source: hd, layout: layout))
+        #expect(close(geometry.visible, CGRect(origin: .zero, size: phone)))
+    }
+
     @Test func noSizeNoGeometry() {
         #expect(VideoGeometry(bounds: .zero, source: hd, layout: VideoLayout()) == nil)
         #expect(VideoGeometry(bounds: phone, source: .zero, layout: VideoLayout()) == nil)
@@ -98,5 +104,73 @@ import StremioKit
         #expect(letterbox.width == 1 && abs(letterbox.height - (16.0 / 9.0) / 2.39) < 1e-9 && abs(letterbox.midY - 0.5) < 1e-9)
         let pillarbox = VideoGeometry.keptFraction(aspect: 16.0 / 9.0, crop: 4.0 / 3.0)
         #expect(pillarbox.height == 1 && abs(pillarbox.width - 0.75) < 1e-9 && abs(pillarbox.midX - 0.5) < 1e-9)
+    }
+
+    @Test(arguments: [16.0 / 9.0, 1.85, 2.0, 2.39])
+    func fitPreservesAllPictureAndCropAddsOnlyTheMinimumScale(_ ratio: Double) throws {
+        let source = CGSize(width: ratio * 1000, height: 1000)
+        let fit = try #require(VideoGeometry(bounds: phone, source: source, layout: VideoLayout(fit: .fit)))
+        #expect(close(fit.content, fit.visible), "Aspect Fit preserves the full picture")
+        #expect(abs(fit.picture.width / fit.picture.height - ratio) < 0.0001)
+        let crop = try #require(VideoGeometry(bounds: phone, source: source, layout: VideoLayout(fit: .fill)))
+        let scale = max(phone.width / fit.picture.width, phone.height / fit.picture.height)
+        #expect(abs(crop.picture.width - fit.picture.width * scale) < 0.001)
+        #expect(abs(crop.picture.height - fit.picture.height * scale) < 0.001)
+        #expect(abs(crop.picture.width - phone.width) < 0.001 || abs(crop.picture.height - phone.height) < 0.001,
+                "one dimension touches the screen exactly: no overshoot")
+    }
+
+    @Test func twoToOneFitsNaturallyWithoutEnlargement() throws {
+        let layout = VideoLayout(fit: .fit, aspect: .ratio2x1)
+        let fit = try #require(VideoGeometry(bounds: phone, source: CGSize(width: 2000, height: 1000), layout: layout))
+        #expect(close(fit.picture, CGRect(x: 33, y: 0, width: 786, height: 393)))
+        let letterboxed = try #require(VideoGeometry(bounds: phone, source: hd,
+                                                     layout: VideoLayout(fit: .fit, aspect: .ratio2x1, crop: .ratio2x1)))
+        #expect(close(letterboxed.visible, fit.visible))
+        #expect(abs(letterboxed.picture.width / letterboxed.picture.height - 16.0 / 9.0) < 0.0001)
+    }
+
+    @Test func displayAspectCannotChangeTheMeasuredSourceCrop() throws {
+        let geometry = try #require(VideoGeometry(bounds: phone, source: hd,
+                                                  layout: VideoLayout(fit: .fit, aspect: .ratio2x1, crop: .ratio239)))
+        #expect(abs(geometry.content.width / geometry.content.height - 2) < 0.0001)
+        #expect(abs(geometry.content.height / geometry.picture.height - (16.0 / 9.0) / 2.39) < 0.0001)
+    }
+
+    @Test(arguments: [16.0 / 9.0, 1.85, 2.0, 2.39, 4.0 / 3.0])
+    func encodedBarsAndANativePictureHaveTheSameVisibleGeometry(_ ratio: Double) throws {
+        for fit in VideoFit.allCases {
+            let encoded = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: fit, crop: .precise(ratio))))
+            let native = try #require(VideoGeometry(bounds: phone, source: CGSize(width: ratio * 1000, height: 1000),
+                                                    layout: VideoLayout(fit: fit)))
+            #expect(close(encoded.content, native.content))
+            #expect(close(encoded.visible, native.visible))
+            #expect(abs(encoded.picture.width / encoded.picture.height - 16.0 / 9.0) < 0.001 || fit == .stretch)
+        }
+    }
+
+    @Test(arguments: [16.0 / 9.0, 1.85, 2.0, 2.39, 4.0 / 3.0])
+    func mpvFittedScalesReconstructTheSameOriginalFrameInEveryMode(_ ratio: Double) throws {
+        for bounds in [phone, CGSize(width: 393, height: 852), CGSize(width: 1024, height: 768)] {
+            let baseline = try #require(VideoGeometry(bounds: bounds, source: hd, layout: VideoLayout()))
+            for fit in VideoFit.allCases {
+                let layout = VideoLayout(fit: fit, aspect: .ratio2x1, crop: .precise(ratio), inset: fit == .fit ? 59 : 0)
+                let geometry = try #require(VideoGeometry(bounds: bounds, source: hd, layout: layout))
+                #expect(abs(baseline.picture.width * geometry.fittedScale.width - geometry.picture.width) < 0.001)
+                #expect(abs(baseline.picture.height * geometry.fittedScale.height - geometry.picture.height) < 0.001)
+            }
+        }
+    }
+
+    @Test func rotationAndModeSwitchesAlwaysReturnToTheOriginalGeometry() throws {
+        let source = CGSize(width: 2000, height: 1000)
+        let fit = VideoLayout(fit: .fit, aspect: .ratio2x1)
+        let original = try #require(VideoGeometry(bounds: phone, source: source, layout: fit))
+        for _ in 0..<10 {
+            for mode in VideoFit.allCases {
+                _ = VideoGeometry(bounds: CGSize(width: 393, height: 852), source: source, layout: VideoLayout(fit: mode, zoom: 3))
+            }
+            #expect(VideoGeometry(bounds: phone, source: source, layout: fit) == original)
+        }
     }
 }

@@ -19,7 +19,7 @@ public enum VideoFit: String, Sendable, Equatable, Hashable, Codable, CaseIterab
 }
 
 /// A display aspect ratio that replaces the one the file states: for a file whose shape is wrong (an anamorphic DVD shown squeezed,
-/// a 4:3 TV rip flagged 16:9). Every engine applies it: mpv itself, AVPlayer and AetherEngine through the video surface.
+/// a 4:3 TV rip flagged 16:9). Every engine applies it to the visible picture, after measured source bars are removed.
 public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, CaseIterable {
     case source
     case ratio1x1 = "1:1"
@@ -48,7 +48,7 @@ public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, Case
 
 /// Crops the picture to a shape, centred: takes off black bars that are part of the video itself (a 2.39:1 film in a 16:9 file, a
 /// 4:3 show pillarboxed in 16:9), so Fit fills the screen with the picture alone and Fill crops less. The shape is the picture's as
-/// shown, after any aspect override. The standard shapes are the ones the crop panel offers; `precise` carries the picture a film
+/// encoded in the original source, before any aspect override. The standard shapes are the ones the crop panel offers; `precise` carries the picture a film
 /// carries inside its own bars, measured by the player and kept to three decimals. Coded as the old raw strings ("4:3", "off") so
 /// saved layouts from earlier versions still load, and as a decimal for a measured shape.
 public struct VideoCrop: Sendable, Equatable, Hashable, Codable {

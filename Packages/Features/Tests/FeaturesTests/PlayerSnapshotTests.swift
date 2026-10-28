@@ -87,6 +87,22 @@ import Testing
         await model.close()
     }
 
+    @Test func restoringALiveSessionUsesTheSamePictureAsRestoringBeforeStart() async throws {
+        let engines = Engines { MockEngine(.plays(duration: 100)) }
+        let model = try await player(engines: engines)
+        await model.start()
+        model.setZoomMode(.stretch)
+        model.setAspectRatio(.widescreenB)
+        let snapshot = PlaybackSnapshot(request: request, stream: PlaybackStreamIdentity(kind: .direct), position: 42,
+                                        layout: VideoLayout(fit: .fill, zoom: 3, crop: .ratio239))
+        model.resumePlayback(from: snapshot)
+        #expect(model.zoomMode == .stretch && model.aspectRatio == .widescreenB)
+        #expect(model.videoLayout == VideoLayout(fit: .stretch, crop: .ratio2x1))
+        model.setSafeAreaInset(59)
+        #expect(model.videoLayout == VideoLayout(fit: .stretch, crop: .ratio2x1))
+        await model.close()
+    }
+
     @Test func aSessionAtItsStartResumesFromProgressAndPlays() async throws {
         let engines = Engines { MockEngine(.plays(duration: 100)) }
         let snapshot = PlaybackSnapshot(request: request, stream: PlaybackStreamIdentity(kind: .direct), position: 0)

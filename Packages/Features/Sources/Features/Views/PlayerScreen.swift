@@ -40,10 +40,11 @@ private struct UpNextEpisode {
 struct PlayerContent: View {
     @State private var model: PlayerViewModel
     @State private var isPreparingNext = false
+    @Environment(\.windowSafeArea) private var windowSafeArea
     #if canImport(UIKit) && canImport(AVKit)
     @State private var pip = PiPProxy()
     @State private var superResolution = SuperResolutionRenderer()
-    /// Small copies of the picture's frames: ambient mode's colours.
+    /// Original picture samples: encoded bars and ambient mode's colours.
     @State private var picture = PictureSampler()
     #endif
     @State private var importsSubtitle = false
@@ -220,13 +221,8 @@ struct PlayerContent: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Zoom Mode's Normal keeps the picture inside the safe area beside a notch or Dynamic Island, centred, as Infuse does.
-        .background {
-            GeometryReader { proxy in
-                let insets = proxy.safeAreaInsets
-                Color.clear.onChange(of: max(insets.leading, insets.trailing), initial: true) { _, inset in
-                    model.setSafeAreaInset(inset)
-                }
-            }
+        .onChange(of: max(windowSafeArea.leading, windowSafeArea.trailing), initial: true) { _, inset in
+            model.setSafeAreaInset(inset)
         }
         .sheet(isPresented: $showsStreams, onDismiss: { model.showControls() }) {
             NavigationStack {
@@ -558,6 +554,9 @@ struct PlayerContent: View {
                       onFirstVideoFrame: {
                           guard let engine, model.coordinator?.engine === engine else { return }
                           nativeFrameEngineID = ObjectIdentifier(engine)
+                      }, onPictureAspect: { ratio in
+                          guard let engine, model.coordinator?.engine === engine else { return }
+                          model.setDetectedPictureAspect(ratio)
                       })
         #if DEBUG
         picture.onTestGeometry = { testVideoGeometry = $0 }
@@ -622,6 +621,7 @@ struct PlayerContent: View {
                     .updating($isDragGestureActive) { _, active, _ in active = true }
                     .onChanged { swipeChanged($0, in: proxy.size) }
                     .onEnded { swipeEnded($0, in: proxy.size) })
+                #endif
                 .simultaneousGesture(MagnifyGesture()
                     .updating($isPinching) { _, pinching, _ in pinching = true }
                     .onEnded { value in
@@ -633,7 +633,6 @@ struct PlayerContent: View {
                             model.pinchZoom(in: false)
                         }
                     })
-                #endif
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)

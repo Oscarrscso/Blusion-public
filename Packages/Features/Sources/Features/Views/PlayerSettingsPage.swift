@@ -73,7 +73,10 @@ struct PlayerSettingsPage: View {
             }
 
             Section {
-                Picker("Zoom Mode", selection: binding(\.zoomMode)) {
+                Picker("Zoom Mode", selection: Binding(get: { player.zoomMode.onThisDevice }, set: { value in
+                    Haptics.selection()
+                    Task { await model.updatePlayer { $0.zoomMode = value.onThisDevice } }
+                })) {
                     ForEach(VideoZoomMode.available) { Text($0.label).tag($0) }
                 }
                 .accessibilityIdentifier("settings.player.zoomMode")

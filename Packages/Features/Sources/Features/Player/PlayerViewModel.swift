@@ -169,7 +169,10 @@ public final class PlayerViewModel {
                                               processing: pendingResume?.processing ?? player.processing,
                                               subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
         coordinator.onEnded = { [weak self] in self?.hasFinished = true }
-        coordinator.onCandidateChange = { [weak self] candidate in self?.lookUpSubtitles(for: candidate) }
+        coordinator.onCandidateChange = { [weak self] candidate in
+            self?.setDetectedPictureAspect(nil)
+            self?.lookUpSubtitles(for: candidate)
+        }
         coordinator.onEngineChange = { [weak self] in self?.engineChanged() }
         coordinator.onTracksChange = { [weak self] in self?.tracksChanged() }
         self.coordinator = coordinator
@@ -275,10 +278,9 @@ public final class PlayerViewModel {
     }
 
     private func applyRestoredPicture(_ snapshot: PlaybackSnapshot) {
-        if var layout = snapshot.layout {
-            if layout.fit == .stretch { layout.fit = .fit }
-            coordinator?.setVideoLayout(layout)
-        }
+        // Settings and the controls remain authoritative, just as when restoring before playback starts.
+        // Old snapshots can contain an accumulated zoom or a crop chosen by the former aspect-ratio implementation.
+        applyPicture()
         if let processing = snapshot.processing { coordinator?.setProcessing(processing) }
     }
 
@@ -613,9 +615,22 @@ public final class PlayerViewModel {
     public private(set) var aspectRatio: AspectRatioChoice = .auto
     /// How far the safe area keeps the picture from each side, in points (beside a notch or Dynamic Island): Normal fits inside it.
     public private(set) var safeAreaInset: Double = 0
+    private var detectedPictureAspect: Double?
 
     /// The picture Zoom Mode and Aspect Ratio make on this screen.
-    var pictureLayout: VideoLayout { VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio, safeInset: safeAreaInset) }
+    var pictureLayout: VideoLayout {
+        var layout = VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio, safeInset: safeAreaInset)
+        if aspectRatio == .auto { layout.crop = detectedPictureAspect.map(VideoCrop.precise) ?? .off }
+        return layout
+    }
+
+    /// Measured against original source frames, independently of the user's display aspect and zoom mode.
+    public func setDetectedPictureAspect(_ ratio: Double?) {
+        let ratio = ratio.flatMap { $0.isFinite && (0.5...4).contains($0) ? $0 : nil }
+        guard ratio != detectedPictureAspect else { return }
+        detectedPictureAspect = ratio
+        applyPicture()
+    }
 
     /// Kept for every video, as in Infuse.
     public func setZoomMode(_ mode: ZoomMode) {
@@ -644,7 +659,7 @@ public final class PlayerViewModel {
         lastInteraction = now()
     }
 
-    /// Kept for this title: the film, or every episode of this season. Crop and Stretch use it; Normal and Aspect Fit show the whole frame.
+    /// The centred source crop in every mode, kept for the film or every episode of its season.
     public func setAspectRatio(_ choice: AspectRatioChoice) {
         defer { showControls() }
         guard choice != aspectRatio else { return }

@@ -21,9 +21,11 @@ final class MPVMetalLayer: CAMetalLayer {
 
 final class MPVHostView: UIView {
     let metalLayer = MPVMetalLayer()
-    /// The view has a new width: side margins given in points are worked out again.
+    /// Geometry is recalculated for both dimensions, including a rotation.
     var onResize: (() -> Void)?
-    private var laidOutWidth: CGFloat = 0
+    private var laidOutSize = CGSize.zero
+    private let pictureMask = CAShapeLayer()
+    var visiblePicture: CGRect? { didSet { setNeedsLayout() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -33,6 +35,9 @@ final class MPVHostView: UIView {
         // Lets mpv hand HDR frames to the display as HDR (EDR) when it is asked to (target-colorspace-hint).
         metalLayer.wantsExtendedDynamicRangeContent = true
         layer.addSublayer(metalLayer)
+        metalLayer.mask = pictureMask
+        pictureMask.frame = bounds
+        pictureMask.path = CGPath(rect: bounds, transform: nil)
         // A player can be readied before its screen shows (the stream picker holds it on its first frame), so the picture layer has a
         // size of its own from the start: mpv makes its video output on a layer with none and could turn the video off. The screen's
         // layout replaces it.
@@ -58,8 +63,10 @@ final class MPVHostView: UIView {
         let scale = max(traitCollection.displayScale, 1)
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        if bounds.width != laidOutWidth {
-            laidOutWidth = bounds.width
+        pictureMask.frame = bounds
+        pictureMask.path = CGPath(rect: visiblePicture ?? bounds, transform: nil)
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
             onResize?()
         }
     }
@@ -89,6 +96,13 @@ private struct MPVProperties: @unchecked Sendable {
     func flag(_ name: String) -> Bool {
         var value: Int32 = 0
         return mpv_get_property(handle, name, MPV_FORMAT_FLAG, &value) >= 0 && value != 0
+    }
+
+    var originalVideoSize: CGSize? {
+        guard let width = int("video-dec-params/w"), let height = int("video-dec-params/h"), width > 0, height > 0 else { return nil }
+        let par = double("video-dec-params/par").flatMap { $0 > 0 ? $0 : nil } ?? 1
+        let size = CGSize(width: Double(width) * par, height: Double(height))
+        return (int("video-dec-params/rotate") ?? 0) % 180 == 0 ? size : CGSize(width: size.height, height: size.width)
     }
 
     struct Tracks {
@@ -306,7 +320,7 @@ private final class MPVEventPump: @unchecked Sendable {
 /// `FallbackBackend` on libmpv (MPVKit, LGPL build). Renders through a CAMetalLayer (gpu-next on MoltenVK) with VideoToolbox hardware decoding,
 /// libplacebo tone mapping and Dolby Vision (profiles 5 and 8, and 7's base layer with its RPU), and libass for styled subtitles.
 @MainActor
-public final class MPVBackend: FallbackBackend {
+public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
     private let host = MPVHostView(frame: MPVHostView.initialFrame)
     private var handle: OpaquePointer?
     private var pump: MPVEventPump?
@@ -315,8 +329,8 @@ public final class MPVBackend: FallbackBackend {
     private var processing = VideoProcessing()
     private var layout = VideoLayout()
     /// What was last set, so a reconfig that follows a change doesn't set it again (setting `vf` reconfigures the video once more).
-    private var appliedCrop: String?
-    private var appliedMargin: String?
+    private var lastSampleTime: Double?
+    private var appliedScale: CGSize?
     private var appliedFilter: String?
     /// The playing video's Dolby Vision profile, read at each reconfig; nil when it has none.
     private var dolbyVisionProfile: Int?
@@ -339,7 +353,7 @@ public final class MPVBackend: FallbackBackend {
         self.continuation = continuation
         Self.activateAudioSession()
         setUp()
-        host.onResize = { [weak self] in self?.applyMargins() }
+        host.onResize = { [weak self] in self?.applyGeometry() }
     }
 
     public func makeEventStream() -> AsyncStream<FallbackEvent> { events }
@@ -378,6 +392,9 @@ public final class MPVBackend: FallbackBackend {
             ("audio-channels", "auto"),
             ("sub-ass-override", "scale"), ("sub-hdr-peak", "203"), ("image-subs-hdr-peak", "203"), ("blend-subtitles", "no"),
             ("deinterlace", "auto"),
+            // Geometry supplies one final scale from the original frame. These must never add another crop or zoom.
+            ("keepaspect", "yes"), ("panscan", "0"), ("video-zoom", "0"), ("video-aspect-override", "no"),
+            ("video-crop", "0x0+0+0"),
         ]
         for (name, value) in options { mpv_set_option_string(handle, name, value) }
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(host.metalLayer).toOpaque()))
@@ -402,6 +419,11 @@ public final class MPVBackend: FallbackBackend {
 
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         guard handle != nil else { return }
+        host.visiblePicture = nil
+        appliedScale = nil
+        lastSampleTime = nil
+        set("video-scale-x", "1")
+        set("video-scale-y", "1")
         set("pause", "yes")
         set("start", startPosition > 0 ? String(startPosition) : "0")
         // List options accept `%length%value` entries so commas inside header values survive.
@@ -461,49 +483,30 @@ public final class MPVBackend: FallbackBackend {
 
     public func apply(layout: VideoLayout) {
         self.layout = layout
-        switch layout.fit {
-        case .fit:
-            set("keepaspect", "yes")
-            set("panscan", "0")
-        case .fill:
-            set("keepaspect", "yes")
-            set("panscan", "1")
-        case .stretch:
-            set("keepaspect", "no")
-            set("panscan", "0")
+        applyGeometry()
+    }
+
+    /// mpv starts with the original source fitted once. The shared geometry supplies its final X/Y scales.
+    /// No source crop, panscan or previous output size participates in this calculation.
+    private func applyGeometry() {
+        guard let handle else { return }
+        let read = MPVProperties(handle: handle)
+        guard let source = read.originalVideoSize else { return }
+        guard let geometry = VideoGeometry(bounds: host.bounds.size, source: source, layout: layout) else { return }
+        if appliedScale != geometry.fittedScale {
+            if set("video-scale-x", String(Double(geometry.fittedScale.width))), set("video-scale-y", String(Double(geometry.fittedScale.height))) {
+                appliedScale = geometry.fittedScale
+            }
         }
-        // video-zoom is a power of two.
-        set("video-zoom", String(log2(layout.zoom)))
-        set("video-aspect-override", layout.aspect.ratio.map { String($0) } ?? "no")
-        applyMargins()
-        applyPicture()
+        if host.visiblePicture != geometry.visible { host.visiblePicture = geometry.visible }
     }
 
-    /// Normal's safe-area inset as mpv's side margins, a share of the view's width. mpv redraws at once: it cannot ease the change in.
-    func applyMargins() {
-        let width = Double(host.bounds.width)
-        let ratio = width > 0 ? min(0.45, layout.inset / width) : 0
-        let value = String(format: "%.4f", ratio)
-        guard value != appliedMargin else { return }
-        if set("video-margin-ratio-left", value), set("video-margin-ratio-right", value) { appliedMargin = value }
-    }
-
-    /// The crop (in source pixels, so it needs the video's size) and the Dolby Vision filter. Run again at each video reconfig.
+    /// Re-read original metadata and the Dolby Vision filter at each video reconfiguration.
     func applyPicture() {
         guard let handle else { return }
         let read = MPVProperties(handle: handle)
         if let profile = read.int("current-tracks/video/dolby-vision-profile"), profile > 0 { dolbyVisionProfile = profile } else { dolbyVisionProfile = nil }
-        var crop = "0x0+0+0"   // no crop
-        if let width = read.int("video-params/w"), let height = read.int("video-params/h"), width > 0, height > 0, layout.crop != .off {
-            // The whole frame's shape from its pixels and their pixel aspect, never from dw/dh, which can already reflect the crop set
-            // here and would undo it on the next reconfig.
-            let pixelAspect = read.double("video-params/par").flatMap { $0 > 0 ? $0 : nil } ?? 1
-            let shown = layout.aspect.ratio ?? Double(width) * pixelAspect / Double(height)
-            let kept = VideoGeometry.keptFraction(aspect: shown, crop: layout.crop.ratio)
-            let keptWidth = Int((Double(width) * kept.width).rounded()), keptHeight = Int((Double(height) * kept.height).rounded())
-            crop = "\(keptWidth)x\(keptHeight)+\((width - keptWidth) / 2)+\((height - keptHeight) / 2)"
-        }
-        if crop != appliedCrop, set("video-crop", crop) { appliedCrop = crop }
+        applyGeometry()
         // Off strips the Dolby Vision metadata, so libplacebo shows the HDR10 base layer; never for profile 5, which has none.
         let filter = !processing.dolbyVision && dolbyVisionProfile != nil && dolbyVisionProfile != 5 ? "format=dolbyvision=no" : ""
         if filter != (appliedFilter ?? ""), set("vf", filter) { appliedFilter = filter }
@@ -608,6 +611,43 @@ public final class MPVBackend: FallbackBackend {
         temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         temporaryFiles = []
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// An unscaled, subtitle-free source screenshot. Never sample the window: that would feed our own geometry back into detection.
+    public func sampleOriginalPicture() -> (frame: VideoLumaFrame, aspect: Double)? {
+        guard let handle else { return nil }
+        let read = MPVProperties(handle: handle)
+        guard let source = read.originalVideoSize, let time = read.double("time-pos"), time != lastSampleTime else { return nil }
+        lastSampleTime = time
+        let arguments = ["screenshot-raw", "video"]
+        let strings = arguments.map { strdup($0) }
+        defer { strings.forEach { free($0) } }
+        var pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer($0) } } + [nil]
+        var result = mpv_node()
+        guard mpv_command_ret(handle, &pointers, &result) >= 0 else { return nil }
+        defer { mpv_free_node_contents(&result) }
+        guard result.format == MPV_FORMAT_NODE_MAP, let list = result.u.list?.pointee,
+              let keys = list.keys, let values = list.values else { return nil }
+        func value(_ key: String) -> mpv_node? {
+            for index in 0..<Int(list.num) where keys[index].map({ String(cString: $0) }) == key { return values[index] }
+            return nil
+        }
+        guard let w = value("w"), w.format == MPV_FORMAT_INT64,
+              let h = value("h"), h.format == MPV_FORMAT_INT64,
+              let row = value("stride"), row.format == MPV_FORMAT_INT64,
+              let format = value("format"), format.format == MPV_FORMAT_STRING, let name = format.u.string,
+              ["bgr0", "bgra"].contains(String(cString: name)),
+              let data = value("data"), data.format == MPV_FORMAT_BYTE_ARRAY, let bytes = data.u.ba?.pointee,
+              let base = bytes.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let width = Int(w.u.int64), height = Int(h.u.int64), stride = Int(row.u.int64)
+        guard width > 2, height > 2, stride >= width * 4, bytes.size >= stride * height else { return nil }
+        let sampleWidth = min(320, width), sampleHeight = max(3, Int(Double(height) * Double(sampleWidth) / Double(width)))
+        let pixels = (0..<(sampleWidth * sampleHeight)).map { index -> UInt8 in
+            let x = (index % sampleWidth) * width / sampleWidth, y = (index / sampleWidth) * height / sampleHeight
+            let p = base + y * stride + x * 4
+            return UInt8((Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8)
+        }
+        return (VideoLumaFrame(width: sampleWidth, height: sampleHeight, pixels: pixels), Double(source.width / source.height))
     }
 
     // MARK: Helpers

@@ -6,9 +6,9 @@ public enum VideoZoomMode: String, Sendable, Equatable, Hashable, Codable, CaseI
     case normal
     /// The whole picture, fitted to the whole screen, notch side included (iPhone only, as in Infuse).
     case aspectFit
-    /// Fills the screen, cropping the overflow. A chosen Aspect Ratio is the shape it fills with.
+    /// Fills the screen proportionally, cropping only the overflow.
     case crop
-    /// Fills the screen exactly, the shape distorted to fit. A chosen Aspect Ratio is the shape it stretches.
+    /// Fills the screen exactly, the visible picture distorted to fit.
     case stretch
 
     public var id: Self { self }
@@ -43,9 +43,8 @@ public enum VideoZoomMode: String, Sendable, Equatable, Hashable, Codable, CaseI
     public var onThisDevice: VideoZoomMode { Self.available.contains(self) ? self : .normal }
 }
 
-/// Video › Aspect Ratio, as in Infuse: the shape of the film inside the frame. Crop and Stretch use it in place of the frame's own shape,
-/// so the frame's baked-in black bars are cropped off (a 1.85:1 film in a 16:9 file, cropped to 1.85:1). Normal and Aspect Fit show the
-/// whole frame and do not use it. It never squeezes the picture. Kept per title: a film, or a TV season.
+/// A centred crop of the original frame, used to trim encoded bars before fitting or filling the screen.
+/// Selecting a ratio preserves the original picture's proportions. Kept per title: a film, or a TV season.
 public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, CaseIterable, Identifiable {
     case auto, sdtv, hdtv16x10, hdtv16x9, widescreenA, widescreenB, anamorphicA, anamorphicB, anamorphicC, ultraWidescreen
 
@@ -66,7 +65,7 @@ public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, C
         }
     }
 
-    /// Width over height of the picture kept; nil for Auto, the frame's own shape.
+    /// Width over height of the area to keep; nil for Auto, which uses detected bars.
     public var ratio: Double? {
         switch self {
         case .auto: nil
@@ -82,8 +81,7 @@ public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, C
         }
     }
 
-    /// The crop it sets in Crop and Stretch; nil for Auto.
-    public var crop: VideoCrop? { ratio.map { .precise($0) } }
+    public var crop: VideoCrop { ratio.map(VideoCrop.precise) ?? .off }
 
     /// Where the choice is kept: the film, or the series' season, so every episode of a season shares it.
     public static func titleKey(for request: StreamRequest) -> String {
@@ -94,14 +92,13 @@ public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, C
 }
 
 extension VideoLayout {
-    /// The picture for a Zoom Mode and Aspect Ratio. `safeInset` is how far the safe area keeps the picture from each side (points):
-    /// Normal fits inside it, the other modes use the whole screen. The display aspect is the file's own and nothing is zoomed.
+    /// Select the source crop, then fit or fill it. The aspect choice never stretches the original frame.
     public init(zoomMode: VideoZoomMode, aspectRatio: AspectRatioChoice, safeInset: Double = 0) {
         switch zoomMode.onThisDevice {
-        case .normal: self.init(fit: .fit, inset: safeInset)
-        case .aspectFit: self.init(fit: .fit)
-        case .crop: self.init(fit: .fill, crop: aspectRatio.crop ?? .off)
-        case .stretch: self.init(fit: .stretch, crop: aspectRatio.crop ?? .off)
+        case .normal: self.init(fit: .fit, crop: aspectRatio.crop, inset: safeInset)
+        case .aspectFit: self.init(fit: .fit, crop: aspectRatio.crop)
+        case .crop: self.init(fit: .fill, crop: aspectRatio.crop)
+        case .stretch: self.init(fit: .stretch, crop: aspectRatio.crop)
         }
     }
 }

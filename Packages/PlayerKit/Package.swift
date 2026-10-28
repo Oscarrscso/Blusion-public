@@ -13,9 +13,10 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../StremioKit"),
+        .package(path: "../PlaybackGeometry"),
     ],
     targets: [
-        .target(name: "PlayerKit", dependencies: ["StremioKit"]),
+        .target(name: "PlayerKit", dependencies: ["StremioKit", "PlaybackGeometry"]),
         .target(name: "PlayerKitTestSupport", dependencies: ["PlayerKit"]),
         .testTarget(
             name: "PlayerKitTests",

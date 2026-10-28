@@ -280,7 +280,9 @@ public final class StreamPickerViewModel {
         guard item.route.isPlayable else { return }
         let saved = await services.progress.progress(for: request.identity)
         let state = PlaybackSaveState(position: ProgressRecorder.resumePosition(for: saved), duration: saved?.duration, isPaused: false,
-                                      layout: settings.player.videoLayout, processing: settings.player.processing)
+                                      layout: VideoLayout(zoomMode: settings.player.zoomMode,
+                                                          aspectRatio: settings.player.aspectRatios[AspectRatioChoice.titleKey(for: request)] ?? .auto),
+                                      processing: settings.player.processing)
         guard let snapshot = PlaybackSnapshot(ranked: item, request: request, state: state) else { return }
         try? await snapshotStore.save(snapshot)
     }

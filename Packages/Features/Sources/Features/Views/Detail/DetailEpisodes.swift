@@ -272,21 +272,26 @@ struct DetailEpisodes: View {
         // An episode that has not aired cannot be opened: its card shows the air date instead.
         .disabled(airsLater || hasNoStreams)
         .titleTapHaptic()
-        return card.contextMenu {
-            episodeActions(video)
-        } preview: {
-            // Size the native preview itself, not just the row inside it. Landscape leaves the other half for the menu.
-            let previewWidth = isLandscape ? pageWidth / 2 - Self.previewPadding * 2 : pageWidth - contentMargin * 2
-            let previewHeight: CGFloat? = isLandscape ? pageHeight - Self.previewPadding * 4 : nil
-            episodeCard(video, width: previewWidth - Self.previewPadding * 2, airsLater: airsLater,
-                        stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: isLandscape)
-                .padding(Self.previewPadding)
-                .frame(width: previewWidth, height: previewHeight, alignment: .topLeading)
-                .fixedSize()
-                .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
-                .environment(ratings)
-                .onAppear { isHoldingEpisode = true }
-                .onDisappear { isHoldingEpisode = false }
+        return Group {
+            if isLandscape {
+                EpisodeContextMenu(content: card, preview: landscapePreview(video),
+                                   previewSize: CGSize(width: max(1, pageWidth / 2 - Self.previewPadding * 2),
+                                                       height: max(1, pageHeight - Self.previewPadding * 4)),
+                                   menu: { landscapeEpisodeMenu(video) }, isPresented: $isHoldingEpisode)
+                    .frame(width: width)
+            } else {
+                card.contextMenu {
+                    episodeActions(video)
+                } preview: {
+                    episodeCard(video, width: pageWidth - contentMargin * 2 - Self.previewPadding * 2, airsLater: airsLater,
+                                stillRadius: Self.previewStillRadius, showsWholeOverview: true)
+                        .padding(Self.previewPadding)
+                        .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
+                        .environment(ratings)
+                        .onAppear { isHoldingEpisode = true }
+                        .onDisappear { isHoldingEpisode = false }
+                }
+            }
         }
         .accessibilityIdentifier("detail.episode.\(video.id)")
         // IMDb's episode scores come from OMDb, a season at a time, asked for when its first card comes on screen (and again if the key changes).
@@ -294,6 +299,48 @@ struct DetailEpisodes: View {
             guard model.hasSettledHero else { return }
             await model.episodeAppeared(video)
         }
+    }
+
+    private func landscapePreview(_ video: Video) -> some View {
+        GeometryReader { geometry in
+            ScrollView {
+                episodeCard(video, width: max(1, geometry.size.width - Self.previewPadding * 2), airsLater: !video.hasAired(),
+                            stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: true)
+                    .padding(Self.previewPadding)
+            }
+        }
+        .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
+        .environment(ratings)
+    }
+
+    /// The same actions as the portrait menu, supplied directly to UIKit for the sized landscape preview (including on Catalyst).
+    private func landscapeEpisodeMenu(_ video: Video) -> UIMenu {
+        let request = model.request(for: video)
+        let watched = model.isWatched(video)
+        let watchedAction = UIAction(title: watched ? "Mark as not watched" : "Mark as watched",
+                                     image: UIImage(systemName: watched ? "xmark.circle" : "checkmark.circle")) { _ in
+            Task { @MainActor in
+                await model.setWatched(!watched, for: request)
+                await titleActions.refresh()
+            }
+        }
+        let imdbAction = UIAction(title: "IMDb", image: UIImage(named: "ReviewIMDb")?
+            .withRenderingMode(ratings?.showsColouredLogos == true ? .alwaysOriginal : .alwaysTemplate)) { _ in
+            Task { @MainActor in
+                guard let ratings else { return }
+                await EpisodeIMDbReviews.open(request, ratings: ratings)
+            }
+        }
+        let watchedThroughAction = UIAction(title: "Mark All Episodes Up to Here as Watched",
+                                            image: UIImage(systemName: "checkmark.circle.fill")) { _ in
+            Task { @MainActor in
+                await model.markEpisodesWatched(through: video)
+                await titleActions.refresh()
+            }
+        }
+        let controls = UIMenu(options: [.displayInline, .displayAsPalette], children: [watchedAction, imdbAction])
+        controls.preferredElementSize = .large
+        return UIMenu(children: [controls, watchedThroughAction])
     }
 
     @ViewBuilder
@@ -387,8 +434,7 @@ private struct EpisodeRow: View {
     var isLoadingStreams = false
     /// The still's corner radius. The menu's preview gives it one that follows its panel's, which is rounder than a card's.
     var stillRadius: CGFloat = Theme.Radius.small
-    /// Set for the menu's preview in landscape: the still takes a little under half the width, with the text beside it, so the whole card
-    /// fits the screen's height.
+    /// Landscape preview: image and title share the top row; the full overview and metadata use the width below it.
     var sideBySide = false
 
     private var stillWidth: CGFloat { sideBySide ? (width * 0.45).rounded() : width }
@@ -399,9 +445,13 @@ private struct EpisodeRow: View {
     var body: some View {
         Group {
             if sideBySide {
-                HStack(alignment: .top, spacing: Theme.Spacing.m) {
-                    still
-                    text.frame(width: width - stillWidth - Theme.Spacing.m, alignment: .leading)
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                        still
+                        title.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    overview
+                    dateAndScore
                 }
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -418,19 +468,36 @@ private struct EpisodeRow: View {
     /// The numbered title, the overview, and the date, length and score.
     private var text: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            if let episode = video.episode {
-                Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.secondary)
-            }
-            Text(video.title)
-                .font(.headline)
-                .lineLimit(2, reservesSpace: true)
-            if let overview = video.overview, !overview.isEmpty {
-                JustifiedText(text: overview, textStyle: .footnote, color: .secondaryLabel,
-                              lineLimit: showsWholeOverview ? 0 : 3, reservesSpace: !showsWholeOverview)
-            }
+            title
+            overview
             dateAndScore
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var title: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            if let episode = video.episode {
+                Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.secondary)
+            }
+            Group {
+                if showsWholeOverview {
+                    Text(video.title)
+                } else {
+                    Text(video.title)
+                        .lineLimit(2, reservesSpace: true)
+                }
+            }
+            .font(.headline)
+        }
+    }
+
+    @ViewBuilder
+    private var overview: some View {
+        if let overview = video.overview, !overview.isEmpty {
+            JustifiedText(text: overview, textStyle: .footnote, color: .secondaryLabel,
+                          lineLimit: showsWholeOverview ? 0 : 3, reservesSpace: !showsWholeOverview)
+        }
     }
 
     /// The episode's own still, or the series' backdrop when the addon sent none.

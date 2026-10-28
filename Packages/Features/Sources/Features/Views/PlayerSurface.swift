@@ -31,7 +31,8 @@ final class PlayerLayerView: UIView {
         didSet {
             guard layout != oldValue else { return }
             // Crop changes apply immediately; other Zoom Mode or Aspect Ratio changes ease the picture into place.
-            if sourceSize != nil, window != nil, layout.fit != .fill, oldValue.fit != .fill {
+            if sourceSize != nil, window != nil, layout.fit != .fill, oldValue.fit != .fill,
+               layout.fit != oldValue.fit || layout.aspect != oldValue.aspect || layout.zoom != oldValue.zoom {
                 animatesNextLayout = true
             }
             setNeedsLayout()
@@ -101,21 +102,9 @@ final class PlayerLayerView: UIView {
         }
     }
 
-    /// Crop and Stretch: the picture is fitted in the view as in Normal, and the view is scaled up (`VideoGeometry.fillScale`), so the
-    /// result never depends on the frame AVPlayer is handed matching the picture's shape.
-    private var scalesFittedPicture: Bool { sourceSize != nil && layout.fit != .fit && layout.aspect.ratio == nil }
-
-    /// The gravity the picture is drawn with: fitted while Crop or Stretch scales the view, else stretched into the frame the geometry
-    /// sizes for it.
+    /// Once the source size is known, geometry supplies the final frame in every mode.
     var videoGravity: AVLayerVideoGravity {
-        guard sourceSize != nil else {
-            return switch layout.fit {
-            case .fit: .resizeAspect
-            case .fill: .resizeAspectFill
-            case .stretch: .resize
-            }
-        }
-        return scalesFittedPicture ? .resizeAspect : .resize
+        sourceSize == nil ? .resizeAspect : .resize
     }
 
     override func layoutSubviews() {
@@ -142,22 +131,14 @@ final class PlayerLayerView: UIView {
             CATransaction.setDisableActions(true)
         }
         videoView.transform = .identity
-        if scalesFittedPicture, let sourceSize {
-            let scale = VideoGeometry.fillScale(bounds: bounds.size, source: sourceSize, crop: layout.crop.ratio,
-                                                stretch: layout.fit == .stretch, zoom: layout.zoom)
-            clipView.frame = bounds
-            videoView.bounds = CGRect(origin: .zero, size: bounds.size)
-            videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
-            videoView.transform = CGAffineTransform(scaleX: scale.width, y: scale.height)
-        } else if let sourceSize, let geometry = VideoGeometry(bounds: bounds.size, source: sourceSize, layout: layout) {
+        if let sourceSize, let geometry = VideoGeometry(bounds: bounds.size, source: sourceSize, layout: layout) {
             clipView.frame = geometry.visible
             videoView.frame = geometry.picture.offsetBy(dx: -geometry.visible.minX, dy: -geometry.visible.minY)
         } else {
-            // No picture size yet: the layer places it by gravity, zoomed about the centre.
+            // Until metadata arrives, preserve the whole frame without guessing a crop or zoom.
             clipView.frame = bounds
             videoView.bounds = CGRect(origin: .zero, size: bounds.size)
             videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
-            videoView.transform = CGAffineTransform(scaleX: layout.zoom, y: layout.zoom)
         }
         playerLayer.videoGravity = videoGravity
         superResolutionLayer?.frame = videoView.bounds
@@ -239,6 +220,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     var superResolution: SuperResolutionRenderer?
     var sampler: PictureSampler?
     var onFirstVideoFrame: () -> Void = {}
+    var onPictureAspect: (Double?) -> Void = { _ in }
     #if DEBUG
     var onTestGeometry: ((String) -> Void)?
     #endif
@@ -260,6 +242,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         view.onFirstVideoFrame = onFirstVideoFrame
+        sampler?.onPictureAspect = onPictureAspect
         #if DEBUG
         view.onTestGeometry = onTestGeometry
         #endif

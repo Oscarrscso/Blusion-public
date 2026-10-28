@@ -506,28 +506,41 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// Video › Aspect Ratio, as in Infuse: Crop and Stretch use it as the shape of the picture inside the frame, so a 1.85:1 film in a
-    /// 16:9 file loses its baked-in bars; Normal and Aspect Fit show the whole frame. It never reshapes the picture.
-    @Test func aspectRatioIsUsedByCropAndStretchOnly() async throws {
+    @Test func aspectRatioTrimsTheSourceInEveryModeWithoutReshapingIt() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
-        model.setAspectRatio(.widescreenA)
-        #expect(model.aspectRatio == .widescreenA && model.videoLayout == VideoLayout(fit: .fit), "Normal shows the whole frame")
-        model.setZoomMode(.crop)
-        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio185), "Crop fills the screen with the 1.85:1 picture")
-        model.setAspectRatio(.anamorphicB)
-        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
-        model.setZoomMode(.stretch)
-        #expect(model.videoLayout == VideoLayout(fit: .stretch, crop: .ratio239))
-        model.setZoomMode(.normal)
-        #expect(model.videoLayout == VideoLayout(fit: .fit), "Normal shows the whole frame")
-        model.setZoomMode(.crop)
-        model.setAspectRatio(.sdtv)
-        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio4x3), "4:3 crops the sides of a 16:9 frame")
+        model.setAspectRatio(.widescreenB)
+        for mode in PlayerViewModel.ZoomMode.available {
+            model.setZoomMode(mode)
+            #expect(model.videoLayout.aspect == .source)
+            #expect(model.videoLayout.crop == .ratio2x1)
+            #expect(model.videoLayout.zoom == 1)
+        }
         model.setAspectRatio(.auto)
-        #expect(model.videoLayout == VideoLayout(fit: .fill))
-        #expect(engines.made["a"]?.layouts.allSatisfy { $0.aspect == .source } == true, "the display aspect is never changed")
+        #expect(model.videoLayout.aspect == .source && model.videoLayout.crop == .off)
+        await model.close()
+    }
+
+    @Test func manualCropStaysSelectedWhilePinchingRotatingAndDetectingBars() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        model.setDetectedPictureAspect(2)
+        model.setAspectRatio(.anamorphicB)
+        for _ in 0..<3 {
+            model.pinchZoom(in: true)
+            model.setSafeAreaInset(59)
+            #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
+            model.pinchZoom(in: false)
+            #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239, inset: 59))
+            model.setSafeAreaInset(0)
+        }
+        model.setDetectedPictureAspect(nil)
+        #expect(model.videoLayout.crop == .ratio239 && model.videoLayout.aspect == .source)
+        model.setDetectedPictureAspect(2)
+        model.setAspectRatio(.auto)
+        #expect(model.videoLayout.crop == .ratio2x1 && model.videoLayout.aspect == .source)
         await model.close()
     }
 
@@ -538,8 +551,9 @@ import StremioKitTestSupport
         engines.made["a"]?.simulate(position: 40)
         try await waitUntil { model.position == 40 }
         await model.skip(by: 10)
+        try await waitUntil { model.position == 50 }
         await model.skip(by: -10)
-        #expect(engines.made["a"]?.seeks == [50, 30])
+        #expect(engines.made["a"]?.seeks == [50, 40])
         await model.close()
     }
 

@@ -394,9 +394,8 @@ private struct UncheckedBuffer: @unchecked Sendable {
 }
 #endif
 
-/// Small copies of the picture's frames, read twice a second from the AVPlayer playing it (AVPlayer, or AetherEngine through its
-/// AVPlayer), while ambient mode is on: its colours, taken just inside the picture rather than from its bars. There is nothing to read
-/// when another renderer draws the picture (mpv, AetherEngine's software path).
+/// Original frames sampled twice a second: persistent encoded bars for geometry, plus AVPlayer edge colours for ambient mode.
+/// mpv supplies native source screenshots. Aether's software path preserves the complete frame when samples are unavailable.
 @MainActor
 @Observable
 final class PictureSampler {
@@ -405,21 +404,27 @@ final class PictureSampler {
 
     @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
     @ObservationIgnored private weak var item: AVPlayerItem?
+    @ObservationIgnored private weak var measuredItem: AVPlayerItem?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var detector = VideoBlackBars()
+    @ObservationIgnored private var detectedAspect: Double?
+    @ObservationIgnored private var ambient = false
+    @ObservationIgnored var onPictureAspect: ((Double?) -> Void)?
 
-    /// The copy's size: enough to find where the picture's own bars end, so the colours come from the picture.
+    /// Enough detail to distinguish the thin bars of 1.85:1 from a 16:9 frame.
     private static let width = 256, height = 144
 
-    /// Reads frames only while ambient mode is on: a frame copy makes the player convert every frame for it, which a UHD remux can feel.
     func update(source: (any AVPlayerFrameSource)?, ambient: Bool) {
-        guard let source, ambient else {
-            stop()
-            return
-        }
+        self.ambient = ambient
+        if !ambient, !colours.isEmpty { colours = [] }
+        guard let source else { stop(); return }
         if source !== self.source {
             stop()
             self.source = source
+            detector = VideoBlackBars()
+            measuredItem = nil
+            detectedAspect = nil
         }
         guard task == nil else { return }
         task = Task { [weak self] in
@@ -454,10 +459,18 @@ final class PictureSampler {
         // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session.
         guard let item = source?.framePlayer?.currentItem else {
             detach()
+            if let sample = (source as? OriginalPictureSampling)?.sampleOriginalPicture() {
+                _ = detect(sample.frame, aspect: sample.aspect)
+            }
             return
         }
         if item !== self.item || output == nil {
             if item !== self.item { detach() }
+            if item !== measuredItem {
+                measuredItem = item
+                detector = VideoBlackBars()
+                if detectedAspect != nil { detectedAspect = nil; onPictureAspect?(nil) }
+            }
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: Self.width, kCVPixelBufferHeightKey as String: Self.height,
@@ -468,8 +481,15 @@ final class PictureSampler {
         }
         guard let output else { return }
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
-        guard let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
+        guard output.hasNewPixelBuffer(forItemTime: time),
+              let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
         read(buffer)
+    }
+
+    private func detect(_ frame: VideoLumaFrame, aspect: Double) -> Double? {
+        let detected = detector.sample(frame, pictureAspect: aspect)
+        if detected != detectedAspect { detectedAspect = detected; onPictureAspect?(detected) }
+        return detected
     }
 
     private func read(_ buffer: CVPixelBuffer) {
@@ -483,21 +503,16 @@ final class PictureSampler {
             let p = pixels + y * stride + x * 4
             return (Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8
         }
-        // A black line: dark on average and with no bright point (noise and compression keep bars from being exactly 0).
-        func isBlack(_ count: Int, _ value: (Int) -> Int) -> Bool {
-            var sum = 0, peak = 0
-            for index in 0..<count {
-                let level = value(index)
-                sum += level
-                peak = max(peak, level)
-            }
-            return sum < 18 * count && peak < 48
-        }
-        var top = 0, bottom = 0, left = 0, right = 0
-        while top < height / 2, isBlack(width, { luma($0, top) }) { top += 1 }
-        while bottom < height / 2, isBlack(width, { luma($0, height - 1 - bottom) }) { bottom += 1 }
-        while left < width / 2, isBlack(height, { luma(left, $0) }) { left += 1 }
-        while right < width / 2, isBlack(height, { luma(width - 1 - right, $0) }) { right += 1 }
+        let frame = VideoLumaFrame(width: width, height: height,
+                                   pixels: (0..<(width * height)).map { UInt8(luma($0 % width, $0 / width)) })
+        let presented = item?.presentationSize ?? .zero
+        let aspect = presented.width > 0 && presented.height > 0 ? Double(presented.width / presented.height) : Double(width) / Double(height)
+        let detected = detect(frame, aspect: aspect)
+        guard ambient else { return }
+        // Ambient colours use the same confirmed bars as display geometry, rather than a dark scene's temporary edges.
+        let kept = VideoGeometry.keptFraction(aspect: aspect, crop: detected)
+        let left = Int((kept.minX * Double(width)).rounded()), right = Int(((1 - kept.maxX) * Double(width)).rounded())
+        let top = Int((kept.minY * Double(height)).rounded()), bottom = Int(((1 - kept.maxY) * Double(height)).rounded())
         // The colours just inside this frame's picture, not of its bars.
         let x0 = min(left, width - 1), x1 = max(x0 + 1, width - right)
         let y0 = min(top, height - 1), y1 = max(y0 + 1, height - bottom)

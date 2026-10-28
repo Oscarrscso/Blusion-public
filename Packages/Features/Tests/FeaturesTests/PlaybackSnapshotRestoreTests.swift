@@ -45,6 +45,11 @@ import Testing
     @Test func startingAStreamSavesTheSession() async throws {
         let store = InMemoryPlaybackSnapshotStore()
         let services = try await services(bodies: [body([direct("4K REMUX", "https://a.example.com/1/f.mkv?token=one")])])
+        var settings = await services.settings.load()
+        settings.player.zoomMode = .stretch
+        settings.player.aspectRatios[AspectRatioChoice.titleKey(for: request)] = .widescreenB
+        settings.player.videoLayout = VideoLayout(fit: .fill, zoom: 3, crop: .ratio239) // stale legacy setting
+        await services.settings.save(settings)
         let picker = StreamPickerViewModel(request: request, services: services, snapshotStore: store)
         await picker.load()
         let item = try #require(picker.listing.items.first)
@@ -56,6 +61,7 @@ import Testing
         #expect(saved.stream.kind == .direct)
         #expect(saved.stream.urlPath == "https://a.example.com/1/f.mkv", "the link itself, with its token, was never saved")
         #expect(saved.wasPaused == false && saved.audioTrack == nil, "nothing was chosen yet at the start")
+        #expect(saved.layout == VideoLayout(fit: .stretch, crop: .ratio2x1), "save the settings shown to the user, not a legacy zoom")
     }
 
     @Test func aStreamHandedOutsideBlusionSavesNoSession() async throws {

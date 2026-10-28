@@ -1,9 +1,6 @@
-/// Grayscale samples of one picture: one byte of luma per pixel, rows from the top.
-struct LumaFrame: Equatable {
-    let width: Int
-    let height: Int
-    let pixels: [UInt8]
-}
+import PlayerKit
+
+typealias LumaFrame = VideoLumaFrame
 
 /// Finds the black bars baked into a picture (letterboxing) from samples of its frames, so the inline player can show only the content.
 /// A bar counts only when it is black in every sample, so a dark moment in one frame, or a 16:9 shot among the scope ones, never cuts the
@@ -68,12 +65,6 @@ enum TrailerLetterbox {
 
     private static func isBlackRow(_ frame: LumaFrame, _ row: Int) -> Bool {
         let start = row * frame.width
-        var sum = 0
-        var peak: UInt8 = 0
-        for pixel in frame.pixels[start..<(start + frame.width)] {
-            sum += Int(pixel)
-            peak = max(peak, pixel)
-        }
-        return peak <= blackPeak && Double(sum) / Double(frame.width) <= blackAverage
+        return VideoBlackBars.isBlackLine(count: frame.width) { frame.pixels[start + $0] }
     }
 }

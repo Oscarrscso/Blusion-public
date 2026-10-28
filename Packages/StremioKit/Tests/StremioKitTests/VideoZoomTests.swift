@@ -5,14 +5,14 @@ import Testing
 /// Zoom Mode and Aspect Ratio as Infuse has them: the layout each makes, where each is kept, and older saved settings.
 @Suite struct VideoZoomTests {
     @Test func eachModeMakesItsLayout() {
-        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, inset: 59))
+        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239, inset: 59))
         #expect(VideoLayout(zoomMode: .crop, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fill, crop: .ratio239))
         #expect(VideoLayout(zoomMode: .stretch, aspectRatio: .widescreenA) == VideoLayout(fit: .stretch, crop: .ratio185))
         #expect(VideoLayout(zoomMode: .crop, aspectRatio: .auto) == VideoLayout(fit: .fill), "Auto: the frame's own shape")
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit))
+        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239))
         #else
-        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, inset: 59),
+        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239, inset: 59),
                 "a Mac has no Aspect Fit: it plays as Normal")
         #endif
     }

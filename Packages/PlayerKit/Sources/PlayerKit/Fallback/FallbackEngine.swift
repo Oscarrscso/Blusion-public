@@ -325,6 +325,12 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     }
 }
 
+extension FallbackEngine: OriginalPictureSampling {
+    public func sampleOriginalPicture() -> (frame: VideoLumaFrame, aspect: Double)? {
+        (backend as? OriginalPictureSampling)?.sampleOriginalPicture()
+    }
+}
+
 #if canImport(AVFoundation)
 /// The backend's AVPlayer, when its picture plays through one (AetherEngine's usual path; mpv draws its own).
 extension FallbackEngine: AVPlayerFrameSource {

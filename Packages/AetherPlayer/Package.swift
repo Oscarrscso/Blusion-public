@@ -8,6 +8,7 @@ import PackageDescription
 // static FFmpeg into the app, whose symbols would otherwise answer AetherEngine's FFmpeg calls (AetherEngine docs/api.md, "One FFmpeg").
 // Linked here, its `_av*` references bind to its own AetherLib* frameworks. This package must therefore never depend on MPVKit, nor on
 // PlayerKit (a second copy of PlayerKit's types would live in this framework): its API is plain Swift and Blusion adapts it in FallbackPlayer.
+// PlaybackGeometry contains only internal value calculations; its types never cross this framework's public API.
 let package = Package(
     name: "AetherPlayer",
     platforms: [.iOS("26.0"), .macOS(.v15)],
@@ -15,13 +16,14 @@ let package = Package(
         .library(name: "AetherPlayer", type: .dynamic, targets: ["AetherPlayer"]),
     ],
     dependencies: [
+        .package(path: "../PlaybackGeometry"),
         // Normal SwiftPM resolution; the fallback scheme applies the pinned
         // release's synchronous decode-probe fix before compilation.
         .package(url: "https://github.com/superuser404notfound/AetherEngine", exact: "7.47.0",
                  traits: ["TrueHDObjectAudio", "DTSXObjectAudio", "DualLayerDolbyVision"]),
     ],
     targets: [
-        .target(name: "AetherPlayer", dependencies: [.product(name: "AetherEngine", package: "AetherEngine")]),
+        .target(name: "AetherPlayer", dependencies: ["PlaybackGeometry", .product(name: "AetherEngine", package: "AetherEngine")]),
     ],
     swiftLanguageModes: [.v6]
 )
