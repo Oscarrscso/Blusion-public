@@ -118,7 +118,7 @@ struct PlayerEpisodePicker: View {
     private var seasonMenu: some View {
         Menu {
             ForEach(model.seasons, id: \.self) { season in
-                Button(PlayerEpisodePickerModel.seasonName(season)) { model.selectSeason(season) }
+                Button(PlayerEpisodePickerModel.seasonName(season)) { Task { await model.selectSeason(season) } }
             }
         } label: {
             HStack(spacing: 6) {
@@ -147,9 +147,21 @@ struct PlayerEpisodePicker: View {
                     .frame(width: 96, height: 54)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    if let number = video.episode {
-                        Text("Episode \(number)").font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 6) {
+                        if let number = video.episode {
+                            Text("Episode \(number)")
+                        }
+                        if let number = video.episode, let score = model.imdbScores[number] {
+                            HStack(spacing: 3) {
+                                ReviewSiteIcon(site: .imdb, size: 14)
+                                Text(String(Int((score * 10).rounded())))
+                                    .monospacedDigit()
+                            }
+                            .accessibilityLabel("IMDb rating \(score, format: .number.precision(.fractionLength(1))) out of 10")
+                        }
                     }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.6))
                     Text(video.title).font(.subheadline.weight(.semibold)).lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
