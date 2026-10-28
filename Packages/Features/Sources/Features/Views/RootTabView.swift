@@ -191,11 +191,23 @@ final class LandscapeTabBarState {
     var collapsed = false
     /// The current pushed browse/picker page, shown on top of the landscape panel.
     var pageTitle: String?
+    /// The browse-page title hidden while a title detail is on top of it.
+    private var suspendedPageTitle: String?
     /// A detail page stays tucked away through its initial downward scroll and expands only when the user reverses upward.
     private var waitsForUpwardScroll = false
     private var previousOffset: CGFloat?
     private var distanceDown: CGFloat = 0
     private var distanceUp: CGFloat = 0
+
+    func showPageTitle(_ title: String) {
+        pageTitle = title
+        suspendedPageTitle = nil
+    }
+
+    func clearPageTitle() {
+        pageTitle = nil
+        suspendedPageTitle = nil
+    }
 
     func reset() {
         collapsed = false
@@ -208,10 +220,17 @@ final class LandscapeTabBarState {
     func prepareForDetailPage() {
         collapsed = true
         waitsForUpwardScroll = true
+        if let pageTitle { suspendedPageTitle = pageTitle }
         pageTitle = nil
         previousOffset = nil
         distanceDown = 0
         distanceUp = 0
+    }
+
+    func restoreAfterDetailPage() {
+        reset()
+        pageTitle = suspendedPageTitle
+        suspendedPageTitle = nil
     }
 
     func update(offset: CGFloat) {
@@ -614,7 +633,14 @@ public struct RootTabView: View {
         }
         .onChange(of: router.tab) { _, _ in
             landscapeTabs.reset()
-            landscapeTabs.pageTitle = nil
+            landscapeTabs.clearPageTitle()
+        }
+        .onChange(of: router.showsTitlePage) { _, showsTitlePage in
+            if showsTitlePage {
+                landscapeTabs.prepareForDetailPage()
+            } else {
+                landscapeTabs.restoreAfterDetailPage()
+            }
         }
         .onChange(of: isPhoneInLandscape) { _, landscape in
             if landscape, router.showsTitlePage {
