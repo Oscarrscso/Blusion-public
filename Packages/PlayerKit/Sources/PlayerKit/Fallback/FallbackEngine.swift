@@ -102,6 +102,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     /// The first frame came while the start was held. It is shown when playback starts, so the startup spinner covers the wait.
     private var heldFirstFrame = false
     private var loadBegan = ContinuousClock.now
+    private var loadCount = 0
 
     public init(backend: any FallbackBackend) {
         self.backend = backend
@@ -121,6 +122,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     // MARK: PlaybackEngine
 
     public func load(_ item: PlaybackItem) {
+        loadCount &+= 1
         isLoaded = false
         isPaused = true
         isBuffering = false
@@ -207,6 +209,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     }
 
     public func stop() {
+        loadCount &+= 1
         isStopped = true
         startHold?.cancel()
         startHold = nil
@@ -326,6 +329,11 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 }
 
 extension FallbackEngine: OriginalPictureSampling {
+    public var pictureSamplingRevision: Int {
+        let backendRevision = (backend as? OriginalPictureSampling)?.pictureSamplingRevision ?? 0
+        return backendRevision &+ loadCount
+    }
+
     public func sampleOriginalPicture() -> (frame: VideoLumaFrame, aspect: Double)? {
         (backend as? OriginalPictureSampling)?.sampleOriginalPicture()
     }
@@ -335,6 +343,10 @@ extension FallbackEngine: OriginalPictureSampling {
 /// The backend's AVPlayer, when its picture plays through one (AetherEngine's usual path; mpv draws its own).
 extension FallbackEngine: AVPlayerFrameSource {
     public var framePlayer: AVPlayer? { (backend as? AVPlayerFrameSource)?.framePlayer }
+    public var frameSourceRevision: Int {
+        let backendRevision = (backend as? AVPlayerFrameSource)?.frameSourceRevision ?? pictureSamplingRevision
+        return backendRevision &+ loadCount
+    }
 }
 
 /// The backend's room for a layer over its picture (AetherEngine); mpv has none and ignores it.

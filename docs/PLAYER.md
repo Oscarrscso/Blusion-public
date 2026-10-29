@@ -28,10 +28,12 @@ start still takes the audio session, so music from another app stops when a stre
 a picture layer to draw on before the screen lays it out. The picture itself can only be drawn once the player's screen is up, so the
 player's spinner takes over from the button's until the first frame: a spinner shows from the tap until the picture.
 
-**Swipe to seek (iPhone and iPad, 2026-10-25):** a sideways swipe anywhere on the picture seeks, right forward and left back. A swipe across
-the whole width moves two minutes, or the whole of a shorter video (`SwipeSeek`). It drives the timeline's own scrub, so the timeline shows
-where it will land, and it seeks once, when the finger lifts. A drag's first movement decides it: up or down at the sides stays brightness
-and volume (that Settings switch covers only those two), and a drag that is part of a pinch never seeks.
+**Swipe to seek (iPhone and iPad, 2026-10-29):** a sideways swipe anywhere on the picture seeks live, right forward and left back, in every
+orientation. Finger height continuously sets the sensitivity: two minutes across the width at the top, ten seconds at the bottom
+(`SwipeSeek`), capped at the video's duration. Moving vertically alone does not jump the target. Once seeking starts, it stays seeking
+anywhere on screen until release; vertical swipes that start at the sides still control brightness and volume. A pinch stops further
+seeks at the last live position. Picture dragging is intentionally disabled on Mac at the user's request; Mac retains timeline and
+keyboard seeking.
 
 **Picture tab (all engines, iPhone and Mac):** Fit / Fill / Stretch, Zoom, **Aspect Ratio** (Original, 1:1, 5:4, 4:3, 3:2, 1.66, 16:10,
 16:9, 1.85, 1.90, 2:1, 2.20, 2.35, 2.39, 2.40, 2.55, 2.76) and **Crop** (4:3 to 2.76:1, centred, takes off bars burned into the video). mpv
@@ -102,14 +104,18 @@ a buffer that is still filling is not treated as a stall.
 ## Mac/iPhone parity
 
 The Mac app has every control above that its engine supports, with the same options panel, Settings page and OpenSubtitles account (synced through
-iCloud Keychain). Intentionally iPhone/iPad-only:
+iCloud Keychain). Both install scripts use `scripts/enable-fallback.sh`: AVPlayer handles native streams and mpv handles MKV, WebM, AVI,
+DTS/TrueHD and software AV1, styled ASS and bitmap subtitles, external audio, audio delay, deinterlacing and tone mapping. Both apps pin the
+LGPL MPVKit build to [1.0.0](https://github.com/mpvkit/MPVKit/releases/tag/1.0.0), whose Libuavs3d dependency uses the Catalyst-capable
+[1.2.1-fix build](https://github.com/mpvkit/libuavs3d-build/blob/1.2.1-fix/Sources/BuildScripts/XCFrameworkBuild/main.swift).
+The Aether adapter lives in the app, and its dynamic framework dependency is filtered to iOS, so Mac builds do not link its unsupported binaries.
+This packaging change has not been built or run on either device; the user does that validation.
+
+Intentionally iPhone/iPad-only:
 
 - **Preloading.** It is AetherEngine's (`prewarm`), and the Mac has no AetherEngine; AVPlayer offers no way to hand it fetched bytes.
 - **AetherEngine.** Its FFmpegBuild, LibDovi and LibTrueHD xcframeworks ship iOS, tvOS, visionOS and macOS slices but no Mac Catalyst
   slice, so the Catalyst app cannot link it either. FEL composition and TrueHD/DTS:X spatial audio are therefore iPhone/iPad-only.
-- **The fallback engine.** MPVKit 0.41's `Libuavs3d` (AVS3 decoder) and `Libluajit` binaries have no Mac Catalyst slice, so the Catalyst
-  build cannot link `_FFmpeg`. Until a build of MPVKit without them exists, the Mac plays MP4/MOV/HLS only; mpv-only features (full ASS
-  styling, PGS/VobSub in MKV, TrueHD/DTS, audio delay, deinterlacing, tone-mapping choice) follow from that.
 - **Brightness and volume swipes, swipe to seek, and pinch zoom.** No touch screen; the Mac's keyboard already sets the volume (↑ ↓ M) and
   seeks 10 s (← →), the timeline can be dragged, and an app cannot set a Mac display's brightness. Zoom is in the Picture tab on both.
 

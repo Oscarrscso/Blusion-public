@@ -7,10 +7,17 @@
 public protocol AVPlayerFrameSource: AnyObject {
     /// The AVPlayer playing the picture now; nil when none does. It can change during playback.
     var framePlayer: AVPlayer? { get }
+    /// Increments only when a new video stream is loaded, so mid-stream loopback rebuilds keep confirmed bar geometry.
+    var frameSourceRevision: Int { get }
+}
+
+public extension AVPlayerFrameSource {
+    var frameSourceRevision: Int { 0 }
 }
 
 extension AVEngine: AVPlayerFrameSource {
     public var framePlayer: AVPlayer? { player }
+    public var frameSourceRevision: Int { loadRevision }
 }
 
 /// An engine that draws its own picture but can carry a layer over it, placed and sized with it: AI super resolution's scaled frames.

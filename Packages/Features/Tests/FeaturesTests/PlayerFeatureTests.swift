@@ -202,9 +202,13 @@ import StremioKitTestSupport
                                     services: try await services(store: store, engines: engines))
         await model.start()
         model.setZoomMode(.crop)
+        model.setDetectedPictureAspect(1.85)
+        #expect(engines.made[0].layouts.last == VideoLayout(fit: .fit, crop: .ratio185))
+        model.setZoomMode(.fill)
+        #expect(engines.made[0].layouts.last == VideoLayout(fit: .fill, crop: .ratio185))
+        model.setZoomMode(.crop)
         model.setSubtitleStyle(SubtitleStyle(scale: 1.5, colour: .yellow))
         model.setProcessing(VideoProcessing(toneMapping: .spline, upscaling: .ai))
-        #expect(engines.made[0].layouts.last?.fit == .fill)
         #expect(engines.made[0].subtitleStyles.last?.colour == .yellow)
         #expect(model.preferences.processing.upscaling == .ai)
         await model.waitForSavedPreferences()
@@ -245,7 +249,7 @@ import StremioKitTestSupport
                                      services: try await services(store: store, engines: engines))
         await second.start()
         #expect(second.zoomMode == .crop && second.aspectRatio == .anamorphicB, "the same season keeps its Aspect Ratio")
-        #expect(second.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
+        #expect(second.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
         await second.close()
 
         let film = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),

@@ -14,12 +14,17 @@ import StremioKitTestSupport
     @MainActor
     private final class Engines {
         var made: [String: MockEngine] = [:]
+        var fallbackMade: [String: MockEngine] = [:]
         let outcomes: [String: MockEngine.Outcome]
         init(_ outcomes: [String: MockEngine.Outcome]) { self.outcomes = outcomes }
         func make(_ candidate: PlaybackCandidate) -> (any PlaybackEngine)? {
             guard let outcome = outcomes[candidate.id] else { return nil }
             let engine = MockEngine(outcome)
-            made[candidate.id] = engine
+            if case .fallback = candidate.route {
+                fallbackMade[candidate.id] = engine
+            } else {
+                made[candidate.id] = engine
+            }
             return engine
         }
     }
@@ -64,7 +69,6 @@ import StremioKitTestSupport
     }
 
     @Test func theSpinnerShowsOnlyForAStallOnceTheStreamHasStartedAndTheControlsAreHidden() async throws {
-        // Starting: the stream hangs, so the coordinator is still starting and the play button stands alone.
         let hanging = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("h")]),
                                       services: try await services(engines: Engines(["h": .hangs])))
         let starting = Task { await hanging.start() }
@@ -192,7 +196,7 @@ import StremioKitTestSupport
     @Test func theDefaultLanguageIsSelectedAndDrawnAtTheRightTimes() async throws {
         let engines = Engines(["a": .plays(duration: 60)])
         let services = try await services(settings: PlaybackSettings(subtitleLanguage: "en"), engines: engines, subtitleBody: srt)
-        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a", subtitles: [english, french])]), services: services)
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a", subtitles: [english, french])], ), services: services)
         await model.start()
         await model.waitForSubtitles()
         #expect(model.subtitleChoice == .external(model.subtitleOptions[0].id), "English matches the preference")
@@ -451,13 +455,14 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// The pinch is a shortcut for Zoom Mode: out fills the screen (Crop), in shows the whole picture (Normal). It never steps further.
+    /// The pinch is a shortcut for Zoom Mode: out trims bars and enlarges proportionally without overshooting (Crop), in shows the whole picture (Normal).
     @Test func pinchingSwitchesBetweenNormalAndCrop() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
+        model.setDetectedPictureAspect(1.85)
         model.pinchZoom(in: true)
-        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fill))
+        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
         model.pinchZoom(in: true)
         #expect(model.zoomMode == .crop, "Crop is the last step")
         model.pinchZoom(in: false)
@@ -468,8 +473,8 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// As in Infuse: Normal and Aspect Fit show the whole frame, Crop fills the screen, Stretch fills it exactly. Normal keeps clear of
-    /// the notch (the safe area); the others use the whole screen.
+    /// Normal and Aspect Fit show the uncropped frame (unless a manual Aspect Ratio is chosen), Crop trims bars and fits proportionally,
+    /// Fill covers the viewport intentionally sacrificing outer edges, and Stretch fills non-uniformly.
     @Test func zoomModesSetTheRenderersLayout() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
@@ -484,9 +489,13 @@ import StremioKitTestSupport
             #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit, inset: 59), "a Mac has no Aspect Fit")
         }
         model.setZoomMode(.crop)
-        #expect(model.videoLayout == VideoLayout(fit: .fill), "Auto: Crop fills with the whole frame, nothing detected")
+        #expect(model.videoLayout == VideoLayout(fit: .fit), "Auto with no detected bars preserves the whole frame without overshooting")
+        model.setDetectedPictureAspect(1.85)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185), "Crop trims detected bars and proportionally fits")
+        model.setZoomMode(.fill)
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio185), "Fill covers the screen intentionally")
         model.setZoomMode(.stretch)
-        #expect(model.videoLayout == VideoLayout(fit: .stretch))
+        #expect(model.videoLayout == VideoLayout(fit: .stretch, crop: .ratio185))
         model.setZoomMode(.normal)
         #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59))
         await model.close()
@@ -517,6 +526,7 @@ import StremioKitTestSupport
             #expect(model.videoLayout.crop == .ratio2x1)
             #expect(model.videoLayout.zoom == 1)
         }
+        model.setZoomMode(.normal)
         model.setAspectRatio(.auto)
         #expect(model.videoLayout.aspect == .source && model.videoLayout.crop == .off)
         await model.close()
@@ -531,7 +541,7 @@ import StremioKitTestSupport
         for _ in 0..<3 {
             model.pinchZoom(in: true)
             model.setSafeAreaInset(59)
-            #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
+            #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
             model.pinchZoom(in: false)
             #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239, inset: 59))
             model.setSafeAreaInset(0)
@@ -539,8 +549,31 @@ import StremioKitTestSupport
         model.setDetectedPictureAspect(nil)
         #expect(model.videoLayout.crop == .ratio239 && model.videoLayout.aspect == .source)
         model.setDetectedPictureAspect(2)
+        model.setZoomMode(.crop)
         model.setAspectRatio(.auto)
-        #expect(model.videoLayout.crop == .ratio2x1 && model.videoLayout.aspect == .source)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio2x1))
+        await model.close()
+    }
+
+    @Test func detectedBarsResetCleanlyOnStreamSwitchAndFallbackEngineSwitch() async throws {
+        let engines = Engines(["a": .plays(duration: 200), "b": .plays(duration: 200)])
+        let plan = PlaybackPlan(request: request, candidates: [candidate("a"), candidate("b")], retriesInFallbackEngine: true)
+        let model = PlayerViewModel(plan: plan, services: try await services(engines: engines))
+        await model.start()
+        model.setZoomMode(.crop)
+        model.setDetectedPictureAspect(2.39)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
+
+        // Reopening in the fallback engine clears stale automatic bar detection immediately.
+        await model.openInAdvancedPlayer()
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .off))
+        #expect(engines.fallbackMade["a"] != nil)
+
+        // Switching to the next stream also clears stale automatic bar detection immediately.
+        model.setDetectedPictureAspect(1.85)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
+        await model.nextStream()
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .off))
         await model.close()
     }
 
@@ -572,7 +605,7 @@ import StremioKitTestSupport
             nextID: "tt9:1:2", nextTitle: "Show · Two", nextSeason: 1, nextEpisode: 2)
         let engines = Engines(["a": .plays(duration: 10)])
         let services = try await services(engines: engines, streamBodies: [next])
-        let model = PlayerViewModel(plan: PlaybackPlan(request: episode, candidates: [candidate("a", binge: "g-1080")]), services: services)
+        let model = PlayerViewModel(plan: PlaybackPlan(request: episode, candidates: [candidate("a", binge: "g-1080")], ), services: services)
         #expect(model.hasNextEpisode)
         await model.start()
         let nextPlan = await model.prepareNextEpisode()
@@ -585,12 +618,12 @@ import StremioKitTestSupport
         let next = #"{"streams":[{"name":"x","url":"https://a.example.com/e2.mp4","behaviorHints":{"bingeGroup":"different"}}]}"#
         let episode = StreamRequest(type: "series", id: "tt9:1:1", title: "Show · One", nextID: "tt9:1:2", nextTitle: "Show · Two")
         let services = try await services(engines: Engines(["a": .plays(duration: 10)]), streamBodies: [next])
-        let model = PlayerViewModel(plan: PlaybackPlan(request: episode, candidates: [candidate("a", binge: "g-1080")]), services: services)
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a", binge: "g-1080")]), services: services)
         await model.start()
         #expect(await model.prepareNextEpisode() == nil)
         await model.close()
-        let movie = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: services)
-        #expect(!movie.hasNextEpisode)
+        let movie = PlayerViewModel(plan: PlaybackPlan(request: episode, candidates: [candidate("a", binge: "g-1080")]), services: services)
+        #expect(movie.hasNextEpisode)
         #expect(await movie.prepareNextEpisode() == nil)
     }
 

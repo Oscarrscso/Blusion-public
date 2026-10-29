@@ -11,24 +11,34 @@ import StremioKit
 
     @Test(arguments: AspectRatioChoice.allCases)
     func aspectChoicesTrimWithoutDistortingOrMovingTheOriginalPicture(_ choice: AspectRatioChoice) throws {
-        for fit in [VideoFit.fit, .fill] {
-            let layout = VideoLayout(fit: fit, crop: choice.crop)
+        for mode in [VideoZoomMode.crop, .fill] {
+            let layout = VideoLayout(zoomMode: mode, aspectRatio: choice)
             let shown = try #require(VideoGeometry(bounds: phone, source: hd, layout: layout))
             #expect(layout.aspect == .source)
             #expect(abs(shown.picture.width / shown.picture.height - 16.0 / 9.0) < 0.001)
             #expect(abs(shown.picture.midX - phone.width / 2) < 0.001)
             #expect(abs(shown.picture.midY - phone.height / 2) < 0.001)
             #expect(abs(shown.content.width / shown.content.height - (choice.ratio ?? 16.0 / 9.0)) < 0.001)
+            if mode == .crop {
+                #expect(abs(shown.visible.width - shown.content.width) < 0.001 && abs(shown.visible.height - shown.content.height) < 0.001,
+                        "Crop never discards movie content inside the trimmed source rectangle")
+            } else {
+                #expect(abs(shown.visible.width - phone.width) < 0.001 && abs(shown.visible.height - phone.height) < 0.001,
+                        "Fill intentionally covers the entire viewport")
+            }
         }
     }
 
-    @Test func choosingTwoToOneTrimsTheBarsAndFitsTheWholePicture() throws {
-        let fit = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fit, crop: .ratio2x1)))
-        #expect(abs(fit.visible.width - 786) < 0.001 && abs(fit.visible.height - 393) < 0.001)
-        #expect(abs(fit.picture.width / fit.picture.height - 16.0 / 9.0) < 0.001)
-        let crop = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(fit: .fill, crop: .ratio2x1)))
-        #expect(abs(crop.picture.width - 852) < 0.001)
-        #expect(abs(crop.picture.height - 852 * 9.0 / 16.0) < 0.001)
-        #expect(abs(crop.content.height - 426) < 0.001)
+    @Test func cropFitsTrimmedFilmWhileFillCoversTheScreen() throws {
+        let cropMode = try #require(VideoGeometry(bounds: phone, source: hd,
+                                                  layout: VideoLayout(zoomMode: .crop, aspectRatio: .widescreenB)))
+        #expect(abs(cropMode.visible.width - 786) < 0.001 && abs(cropMode.visible.height - 393) < 0.001)
+        #expect(abs(cropMode.visibleSourceRect.width - 1920) < 0.01 && abs(cropMode.visibleSourceRect.height - 960) < 0.01)
+
+        let fillMode = try #require(VideoGeometry(bounds: phone, source: hd,
+                                                  layout: VideoLayout(zoomMode: .fill, aspectRatio: .widescreenB)))
+        #expect(abs(fillMode.picture.width - 852) < 0.001)
+        #expect(abs(fillMode.picture.height - 852 * 9.0 / 16.0) < 0.001)
+        #expect(abs(fillMode.content.height - 426) < 0.001)
     }
 }

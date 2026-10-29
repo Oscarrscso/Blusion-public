@@ -37,7 +37,6 @@ struct StreamPickerView: View {
     private static var lastStreamCardHeights: [Int: CGFloat] = [:]
     @State private var autoPickSwitchSize: CGSize = .zero
     /// The heading's natural size, so its title, rating and logo can shrink together between the fixed chevrons.
-    @State private var episodeHeadingSize: CGSize = .zero
     /// The sharpness the chips narrow the list to; nil shows every stream.
     @State private var resolutionFilter: Band?
     /// Keep the last visible resolution bar while the next picker's streams load.
@@ -524,23 +523,18 @@ struct StreamPickerView: View {
         return HStack(alignment: .center, spacing: Theme.Spacing.m) {
             episodeStepButton(systemImage: "chevron.left", label: "Previous episode", to: switcher.previous, step: switcher.step)
                 .accessibilityIdentifier("stream.previousEpisode")
-            GeometryReader { proxy in
-                HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    Text(heading)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let episodeScore {
-                        scoreLabel(episodeScore)
-                            .transition(.opacity)
-                    }
+            HStack(alignment: .center, spacing: Theme.Spacing.s) {
+                Text(heading)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                if let episodeScore {
+                    scoreLabel(episodeScore)
+                        .fixedSize()
+                        .transition(.opacity)
                 }
-                .fixedSize()
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { episodeHeadingSize = $0 }
-                .scaleEffect(min(1, proxy.size.width / max(episodeHeadingSize.width, 1)))
-                .frame(width: proxy.size.width, height: proxy.size.height)
             }
-            .frame(height: max(episodeHeadingSize.height, UIFont.preferredFont(forTextStyle: .headline).lineHeight))
             // The middle fills the row, keeping both chevrons at the stream controls' outer edges.
             .frame(maxWidth: .infinity)
             .animation(.easeOut(duration: 0.2), value: episodeScore)
@@ -576,12 +570,12 @@ struct StreamPickerView: View {
         .help(label)
     }
 
-    /// "Time · S1E3" for an episode: the series and which episode, on one line. Nothing for a film.
+    /// The episode's name and number, falling back to the series name. Nothing for a film.
     private var episodeHeading: String? {
         guard let season = model.request.season, let episode = model.request.episode else { return nil }
         // A request without the series' name has it at the front of its title, which is "Series · Episode".
         let series = model.request.seriesName ?? model.request.title.components(separatedBy: " · ").first ?? model.request.title
-        return "\(series) · S\(season)E\(episode)"
+        return "\(episodeTitle ?? series) · S\(season)E\(episode)"
     }
 
     /// The episode portion of “Series · Episode”, shown between the switcher's chevrons.

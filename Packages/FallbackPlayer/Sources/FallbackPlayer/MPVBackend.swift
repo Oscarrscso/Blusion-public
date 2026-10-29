@@ -8,7 +8,7 @@ import StremioKit
 import UIKit
 
 // The only file in the project that touches the third-party player (ADR-006). If something here does not compile or render, fix this file
-// only: the engine, the state mapping and the tests live behind `FallbackBackend` in PlayerKit. Built against MPVKit 0.41 (mpv 0.40 with
+// only: the engine, the state mapping and the tests live behind `FallbackBackend` in PlayerKit. Uses MPVKit 1.0.0 (mpv 0.41 with
 // libplacebo, libdovi and libass); every option and property used below is present in that build's libmpv.
 
 /// mpv sets the drawable size itself; ignore the degenerate sizes UIKit layout produces.
@@ -321,6 +321,7 @@ private final class MPVEventPump: @unchecked Sendable {
 /// libplacebo tone mapping and Dolby Vision (profiles 5 and 8, and 7's base layer with its RPU), and libass for styled subtitles.
 @MainActor
 public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
+    public private(set) var pictureSamplingRevision = 0
     private let host = MPVHostView(frame: MPVHostView.initialFrame)
     private var handle: OpaquePointer?
     private var pump: MPVEventPump?
@@ -328,9 +329,11 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
     private let continuation: AsyncStream<FallbackEvent>.Continuation
     private var processing = VideoProcessing()
     private var layout = VideoLayout()
+    private var subtitleStyle = SubtitleStyle()
     /// What was last set, so a reconfig that follows a change doesn't set it again (setting `vf` reconfigures the video once more).
     private var lastSampleTime: Double?
     private var appliedScale: CGSize?
+    private var appliedSubMarginY: Int?
     private var appliedFilter: String?
     /// The playing video's Dolby Vision profile, read at each reconfig; nil when it has none.
     private var dolbyVisionProfile: Int?
@@ -419,8 +422,10 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
 
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         guard handle != nil else { return }
+        pictureSamplingRevision &+= 1
         host.visiblePicture = nil
         appliedScale = nil
+        appliedSubMarginY = nil
         lastSampleTime = nil
         set("video-scale-x", "1")
         set("video-scale-y", "1")
@@ -499,6 +504,23 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
             }
         }
         if host.visiblePicture != geometry.visible { host.visiblePicture = geometry.visible }
+        applySubtitleMargin(visible: geometry.visible)
+    }
+
+    /// Keeps mpv's rendered subtitles inside `pictureMask` (`visible`) rather than inside cropped-off letterbox margins.
+    private func applySubtitleMargin(visible: CGRect?) {
+        let boundsHeight = Double(host.bounds.height)
+        let marginY: Int
+        if let visible, boundsHeight > 0, visible.height > 0 {
+            let clippedBottom = max(0, boundsHeight - Double(visible.maxY))
+            let liftPoints = clippedBottom + Double(visible.height) * (subtitleStyle.bottomMargin / 100)
+            marginY = Int((liftPoints / boundsHeight * 720).rounded())
+        } else {
+            marginY = Int((subtitleStyle.bottomMargin / 100 * 720).rounded())
+        }
+        if appliedSubMarginY != marginY, set("sub-margin-y", String(marginY)) {
+            appliedSubMarginY = marginY
+        }
     }
 
     /// Re-read original metadata and the Dolby Vision filter at each video reconfiguration.
@@ -535,6 +557,7 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
     }
 
     public func apply(subtitleStyle style: SubtitleStyle) {
+        subtitleStyle = style
         set("sub-scale", String(style.scale))
         let rgb = style.colour.rgb
         set("sub-color", String(format: "#%02X%02X%02X", Int(rgb.red * 255), Int(rgb.green * 255), Int(rgb.blue * 255)))
@@ -544,8 +567,8 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
         } else {
             set("sub-border-style", "outline-and-shadow")
         }
-        // sub-margin-y counts pixels of a 720-line picture.
-        set("sub-margin-y", String(Int((style.bottomMargin / 100 * 720).rounded())))
+        appliedSubMarginY = nil
+        applySubtitleMargin(visible: host.visiblePicture)
         set("sub-ass-override", style.overridesFileStyles ? "force" : "scale")
         set("sub-hdr-peak", String(style.hdrPeakNits))
         set("image-subs-hdr-peak", String(style.hdrPeakNits))
@@ -641,9 +664,10 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
               let base = bytes.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
         let width = Int(w.u.int64), height = Int(h.u.int64), stride = Int(row.u.int64)
         guard width > 2, height > 2, stride >= width * 4, bytes.size >= stride * height else { return nil }
-        let sampleWidth = min(320, width), sampleHeight = max(3, Int(Double(height) * Double(sampleWidth) / Double(width)))
+        let sampleWidth = min(480, width), sampleHeight = max(3, Int((Double(height) * Double(sampleWidth) / Double(width)).rounded()))
         let pixels = (0..<(sampleWidth * sampleHeight)).map { index -> UInt8 in
-            let x = (index % sampleWidth) * width / sampleWidth, y = (index / sampleWidth) * height / sampleHeight
+            let x = min(width - 1, ((index % sampleWidth) * 2 + 1) * width / (sampleWidth * 2))
+            let y = min(height - 1, ((index / sampleWidth) * 2 + 1) * height / (sampleHeight * 2))
             let p = base + y * stride + x * 4
             return UInt8((Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8)
         }

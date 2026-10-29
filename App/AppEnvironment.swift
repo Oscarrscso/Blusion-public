@@ -101,7 +101,7 @@ final class AppEnvironment {
         }
         let settings = DefaultsSettingsStore(defaults: settingsDefaults, secrets: secrets, logger: logger)
         let registry = AddonRegistry(store: store, secrets: secrets, client: client, logger: logger)
-        // AVPlayer for MP4/MOV/M4V/HLS. MKV, AVI, DTS, AV1 and friends go to the fallback engine when it is built in (ADR-006; the iPhone install builds it in).
+        // AVPlayer for MP4/MOV/M4V/HLS. MKV, AVI, DTS, AV1 and friends go to the fallback engine on iPhone and Mac (ADR-006).
         let makeEngine: EngineFactory = { candidate in
             switch candidate.route {
             case .native:
@@ -113,6 +113,7 @@ final class AppEnvironment {
                 return engine
             case .fallback(_, let reason):
                 #if BLUSION_FALLBACK_ENGINE
+                #if !targetEnvironment(macCatalyst)
                 // AetherEngine first (native Dolby Vision, profile 7 FEL, Atmos), unless the listener chose mpv; mpv for full subtitle
                 // styling and as the backup when AetherEngine can't start a stream (`.fullFeaturedEngine`, PlaybackCoordinator).
                 let player = Self.playerPreferences(settingsDefaults)
@@ -121,6 +122,7 @@ final class AppEnvironment {
                                               preferredAudioLanguages: player.audioLanguage.map { [$0] } ?? []) {
                     return FallbackEngine(backend: aether)
                 }
+                #endif
                 return FallbackEngine(backend: MPVBackend())
                 #else
                 return nil
@@ -130,9 +132,9 @@ final class AppEnvironment {
             }
         }
         // The stream a player is opening on starts downloading at once, while its screen animates in. AetherEngine can take such bytes;
-        // AVPlayer and mpv fetch their own (and the Mac build has neither AetherEngine nor mpv), so only AetherEngine's streams warm.
+        // AVPlayer and mpv fetch their own, so only AetherEngine's streams warm.
         let preloadStream: StreamPreloader = { candidate in
-            #if BLUSION_FALLBACK_ENGINE
+            #if BLUSION_FALLBACK_ENGINE && !targetEnvironment(macCatalyst)
             guard case .fallback(_, let reason) = candidate.route, reason != .fullFeaturedEngine, let url = candidate.url,
                   Self.playerPreferences(settingsDefaults).advancedEngine == .aether else { return }
             AetherBackend.prewarm(url: url, headers: candidate.headers)
@@ -140,9 +142,12 @@ final class AppEnvironment {
         }
         #if BLUSION_FALLBACK_ENGINE
         let fallbackLinked = true
-        let aetherLinked = true
         #else
         let fallbackLinked = false
+        #endif
+        #if BLUSION_FALLBACK_ENGINE && !targetEnvironment(macCatalyst)
+        let aetherLinked = true
+        #else
         let aetherLinked = false
         #endif
         // The Home layout is a preference, not a secret: it names addons by manifest id and host, never by URL.

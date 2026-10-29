@@ -311,6 +311,7 @@ private struct TabBarStyle: ViewModifier {
 /// the panel, title and icons away and leaves Home alone in the corner; scrolling up brings them straight back. Home is mounted at one
 /// size and position for the whole scroll, and the panel grows upward from the bottom row, so Home never moves and no native tab-bar
 /// relayout occurs.
+/// Slide selection is iPhone-only because the Mac uses native tab and sidebar navigation instead of this compact bar.
 private struct LandscapeTabControls: View {
     let router: AppRouter
     let collapsed: Bool
@@ -356,6 +357,8 @@ private struct LandscapeTabControls: View {
                     tabButton(.library, symbol: "books.vertical", selectedSymbol: "books.vertical.fill", title: "Library")
                     tabButton(.settings, symbol: "gearshape", selectedSymbol: "gearshape.fill", title: "Settings")
                 }
+                .contentShape(Rectangle())
+                .highPriorityGesture(tabDrag)
             }
             .frame(width: Self.panelContentWidth)
             .padding(.leading, 10)
@@ -382,7 +385,27 @@ private struct LandscapeTabControls: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Home")
             .accessibilityIdentifier("landscape.home")
+            .highPriorityGesture(tabDrag)
         }
+        .coordinateSpace(name: "landscapeTabs")
+    }
+
+    private var tabDrag: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .named("landscapeTabs"))
+            .onChanged { drag in
+                guard !collapsed, abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                // Boundaries sit halfway between the existing 44-point buttons, including Home's separate circle.
+                let tab: LaunchRoute.Tab
+                switch drag.location.x {
+                case ..<55: tab = .home
+                case ..<116: tab = .discover
+                case ..<172: tab = .library
+                default: tab = .settings
+                }
+                guard tab != router.tab else { return }
+                Haptics.selection()
+                if tab == .home { onHome() } else { router.tapTab(tab) }
+            }
     }
 
     private func tabButton(_ tab: LaunchRoute.Tab, symbol: String, selectedSymbol: String, title: String) -> some View {

@@ -47,6 +47,9 @@ public final class PlayerViewModel {
     public private(set) var controlsVisible = true
     public private(set) var isScrubbing = false
     public private(set) var scrubFraction = 0.0
+    /// Picture drags keep only the newest target while the engine finishes its current seek.
+    private var pendingScrubSeek: TimeInterval?
+    private var scrubSeekTask: Task<Void, Never>?
     public private(set) var settings = PlaybackSettings()
     public private(set) var hasFinished = false
     /// A styled (ASS) file the overlay draws simplified; the advanced player would draw its effects.
@@ -202,6 +205,7 @@ public final class PlayerViewModel {
 
     public func close() async {
         isClosed = true
+        cancelScrub()
         subtitleTask?.cancel()
         lookupTasks.forEach { $0.cancel() }
         await coordinator?.stop()
@@ -469,12 +473,23 @@ public final class PlayerViewModel {
         lastInteraction = now()
     }
 
-    public func updateScrub(fraction: Double) {
+    public func updateScrub(fraction: Double, seekImmediately: Bool = false) {
         scrubFraction = min(1, max(0, fraction))
         lastInteraction = now()
+        guard seekImmediately, isScrubbing, !isClosed, let duration = state.duration, duration > 0 else { return }
+        pendingScrubSeek = scrubFraction * duration
+        guard scrubSeekTask == nil else { return }
+        scrubSeekTask = Task {
+            while let target = pendingScrubSeek {
+                pendingScrubSeek = nil
+                await coordinator?.seek(to: target)
+            }
+            scrubSeekTask = nil
+        }
     }
 
     public func endScrub() async {
+        await scrubSeekTask?.value
         guard isScrubbing else { return }
         // With no length known there is no time to go to: letting go must not send the film back to its start.
         guard let duration = state.duration, duration > 0 else {
@@ -486,8 +501,9 @@ public final class PlayerViewModel {
         await recordSessionSnapshot(force: true)
     }
 
-    /// Lets go of a scrub without seeking: a sideways swipe on the picture that turned out to be a pinch.
+    /// Stops scrubbing and drops queued seeks. A live seek already sent to the engine keeps its position.
     public func cancelScrub() {
+        pendingScrubSeek = nil
         isScrubbing = false
     }
 
@@ -619,9 +635,8 @@ public final class PlayerViewModel {
 
     /// The picture Zoom Mode and Aspect Ratio make on this screen.
     var pictureLayout: VideoLayout {
-        var layout = VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio, safeInset: safeAreaInset)
-        if aspectRatio == .auto { layout.crop = detectedPictureAspect.map(VideoCrop.precise) ?? .off }
-        return layout
+        VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio,
+                    detectedAspect: detectedPictureAspect, safeInset: safeAreaInset)
     }
 
     /// Measured against original source frames, independently of the user's display aspect and zoom mode.
@@ -645,12 +660,12 @@ public final class PlayerViewModel {
         savePreferences { $0.zoomMode = mode }
     }
 
-    /// The zoom button: the next Zoom Mode, round to the first (Normal, Aspect Fit, Crop, Stretch; a Mac has no Aspect Fit).
+    /// The zoom button: the next Zoom Mode, round to the first (Normal, Aspect Fit, Crop, Fill, Stretch; a Mac has no Aspect Fit).
     public func cycleZoomMode() {
         setZoomMode(zoomMode.next)
     }
 
-    /// A pinch: out fills the screen (Crop), in shows the whole picture again (Normal). It changes Zoom Mode and is kept like it.
+    /// A pinch: out trims bars and enlarges proportionally without overshooting (Crop), in shows the uncropped picture again (Normal).
     public func pinchZoom(in zoomsIn: Bool) {
         let mode: ZoomMode = zoomsIn ? .crop : .normal
         guard mode != zoomMode else { return }
@@ -942,9 +957,10 @@ public final class PlayerViewModel {
         })
     }
 
-    /// The new engine either draws files itself (the coordinator loads the current one into it again) or does not: then an engine-drawn
-    /// file moves to the overlay. An overlay file moves into an engine that draws files, for its styling and HDR brightness.
+    /// Reset automatic bar detection whenever the active engine changes (fallback switch or reopen), and move external subtitles
+    /// between engine-drawn and overlay-drawn paths as capabilities change.
     private func engineChanged() {
+        setDetectedPictureAspect(nil)
         guard case .external(let id) = subtitleChoice else { return }
         let engineDraws = capabilities.contains(.engineSubtitles)
         if (engineDrawnOptionID != nil) != engineDraws {

@@ -532,9 +532,9 @@ struct DetailView: View {
             ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
                 if model.isLoadingRelated && model.relatedTitles.isEmpty {
                     ForEach(0..<6, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: Theme.Radius.poster)
+                        RoundedRectangle(cornerRadius: Theme.Radius.card)
                             .fill(Theme.placeholder)
-                            .frame(width: metrics.posterWidth, height: metrics.posterWidth / CardAspect.poster.ratio)
+                            .frame(width: metrics.landscapePosterWidth, height: metrics.landscapePosterWidth / CardAspect.wide.ratio)
                             .loadingCardSpinner()
                             .reportsShelfEdge(id: index)
                             .accessibilityLabel("Loading related title")
@@ -542,7 +542,7 @@ struct DetailView: View {
                 }
                 ForEach(model.relatedTitles) { title in
                     NavigationLink(value: title.titleDestination) {
-                        MediaCard(item: title.preview, aspect: .poster, showsRating: false)
+                        RelatedTitleCard(title: title, services: services)
                     }
                     .buttonStyle(PressableCardStyle())
                     .titleTapHaptic()

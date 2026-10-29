@@ -11,11 +11,12 @@ struct SubtitleOverlay: View {
     let bitmap: BitmapSubtitleCue?
     let style: SubtitleStyle
     let controlsVisible: Bool
+    var layout = VideoLayout()
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                if let bitmap { BitmapSubtitleView(cue: bitmap, size: proxy.size) }
+                if let bitmap { BitmapSubtitleView(cue: bitmap, size: proxy.size, layout: layout) }
                 let placed = cues.filter { $0.position != nil }
                 let rows = Dictionary(grouping: cues.filter { $0.position == nil }, by: \.row)
                 ForEach(Row.allCases, id: \.self) { row in
@@ -105,27 +106,48 @@ private extension SubtitleAlignment {
     }
 }
 
-/// A PGS display set, placed where the disc puts it in the video frame (fitted into the view the way the picture is).
+/// A PGS display set, placed in the active `VideoGeometry` picture frame and clamped vertically inside the viewport when bars are cropped.
 private struct BitmapSubtitleView: View {
     let cue: BitmapSubtitleCue
     let size: CGSize
+    let layout: VideoLayout
 
     var body: some View {
         let frame = CGSize(width: CGFloat(max(1, cue.frameWidth)), height: CGFloat(max(1, cue.frameHeight)))
-        let scale = min(size.width / frame.width, size.height / frame.height)
-        let origin = CGPoint(x: (size.width - frame.width * scale) / 2, y: (size.height - frame.height * scale) / 2)
+        let cleanLayout = VideoLayout(fit: layout.fit, zoom: layout.zoom, aspect: layout.aspect, crop: layout.crop)
+        let pictureRect = Self.resolvedPictureRect(bounds: size, frame: frame, layout: cleanLayout)
+        let scaleX = pictureRect.width / frame.width
+        let scaleY = pictureRect.height / frame.height
         ZStack(alignment: .topLeading) {
             ForEach(Array(cue.images.enumerated()), id: \.offset) { index, image in
                 if let picture = BitmapImageCache.image(for: cue, index: index) {
+                    let itemWidth = CGFloat(image.width) * scaleX
+                    let itemHeight = CGFloat(image.height) * scaleY
+                    let rawX = pictureRect.minX + CGFloat(image.x) * scaleX
+                    let rawY = pictureRect.minY + CGFloat(image.y) * scaleY
+                    let clampedY = size.height > itemHeight + 16
+                        ? min(max(8, rawY), size.height - itemHeight - 8)
+                        : rawY
                     Image(uiImage: picture)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
-                        .offset(x: origin.x + CGFloat(image.x) * scale, y: origin.y + CGFloat(image.y) * scale)
+                        .frame(width: itemWidth, height: itemHeight)
+                        .offset(x: rawX, y: clampedY)
                 }
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private static func resolvedPictureRect(bounds: CGSize, frame: CGSize, layout: VideoLayout) -> CGRect {
+        if let geometry = VideoGeometry(bounds: bounds, source: frame, layout: layout) {
+            return geometry.picture
+        }
+        let scale = min(bounds.width / frame.width, bounds.height / frame.height)
+        return CGRect(x: (bounds.width - frame.width * scale) / 2,
+                      y: (bounds.height - frame.height * scale) / 2,
+                      width: frame.width * scale,
+                      height: frame.height * scale)
     }
 }
 

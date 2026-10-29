@@ -184,7 +184,8 @@ struct PlayerControls: View {
         switch mode {
         case .normal: "rectangle.arrowtriangle.2.inward"
         case .aspectFit: "arrow.left.and.right"
-        case .crop: "arrow.up.left.and.arrow.down.right"
+        case .crop: "crop"
+        case .fill: "arrow.up.left.and.arrow.down.right"
         case .stretch: "arrow.up.and.down.and.arrow.left.and.right"
         }
     }

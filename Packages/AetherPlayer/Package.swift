@@ -7,7 +7,7 @@ import PackageDescription
 // composer) can only be switched on in a package manifest, as XcodeGen drops them. And it has to be a DYNAMIC framework: MPVKit links a
 // static FFmpeg into the app, whose symbols would otherwise answer AetherEngine's FFmpeg calls (AetherEngine docs/api.md, "One FFmpeg").
 // Linked here, its `_av*` references bind to its own AetherLib* frameworks. This package must therefore never depend on MPVKit, nor on
-// PlayerKit (a second copy of PlayerKit's types would live in this framework): its API is plain Swift and Blusion adapts it in FallbackPlayer.
+// PlayerKit (a second copy of PlayerKit's types would live in this framework): its API is plain Swift and App/AetherBackend.swift adapts it.
 // PlaybackGeometry contains only internal value calculations; its types never cross this framework's public API.
 let package = Package(
     name: "AetherPlayer",

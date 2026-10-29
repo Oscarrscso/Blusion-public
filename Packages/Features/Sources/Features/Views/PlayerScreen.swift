@@ -61,8 +61,9 @@ struct PlayerContent: View {
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
-    /// The timeline fraction a sideways swipe is seeking from; nil while no swipe seeks.
-    @State private var seekSwipeStart: Double?
+    /// The accumulated timeline fraction of a sideways drag; nil while no drag seeks.
+    @State private var seekSwipeFraction: Double?
+    @State private var seekSwipeTranslation: Double = 0
     /// A pinch is under way. A drag that is part of one neither seeks nor sets a level.
     @GestureState private var isPinching = false
     @State private var isDragging = false
@@ -143,7 +144,8 @@ struct PlayerContent: View {
                 }
             }
             .animation(.easeOut(duration: 0.15), value: isVideoReady)
-            SubtitleOverlay(cues: model.activeCues, bitmap: model.activeBitmapCue, style: model.subtitleStyle, controlsVisible: model.controlsVisible)
+            SubtitleOverlay(cues: model.activeCues, bitmap: model.activeBitmapCue, style: model.subtitleStyle,
+                            controlsVisible: model.controlsVisible, layout: model.videoLayout)
                 .opacity(isVideoReady ? 1 : 0)
             ZStack {
                 if showsStall && model.showsBufferingIndicator && isVideoReady {
@@ -585,8 +587,8 @@ struct PlayerContent: View {
     }
 
     /// Tap toggles the controls; double-tap on the left or right third skips back or forward 10 s; press and hold plays at double speed
-    /// until the finger lifts (the Mac: click and hold). On iPhone and iPad a sideways swipe
-    /// anywhere on the picture seeks, right forward and left back (`SwipeSeek`), a vertical swipe on the left third sets the brightness
+    /// until the finger lifts (the Mac: click and hold). On iPhone and iPad a sideways drag anywhere on the picture seeks live,
+    /// coarsely at the top and finely at the bottom (`SwipeSeek`); a vertical swipe on the left third sets the brightness
     /// and on the right third the volume (Settings can turn those two off), a swipe down in the middle closes, and a pinch zooms.
     /// The layer covers the whole screen, edges included, under the controls: a drag that starts on a control (the timeline, the menu
     /// bar, a button) stays that control's own, so the system slider and segmented control keep their native touch handling.
@@ -626,7 +628,7 @@ struct PlayerContent: View {
                     .updating($isPinching) { _, pinching, _ in pinching = true }
                     .onEnded { value in
                         pictureGestureEndedAt = Date()
-                        // A shortcut for Zoom Mode: a pinch out fills the screen (Crop), a pinch in shows the whole picture (Normal).
+                        // A shortcut for Zoom Mode: a pinch out trims bars and enlarges proportionally (Crop), a pinch in restores Normal.
                         if value.magnification > 1.08 {
                             model.pinchZoom(in: true)
                         } else if value.magnification < 0.92 {
@@ -638,6 +640,7 @@ struct PlayerContent: View {
         .accessibilityHidden(true)
     }
 
+    // Picture drag seeking is intentionally touch-only; Mac keeps its timeline and keyboard controls, as requested.
     #if !targetEnvironment(macCatalyst)
     /// A sideways swipe seeks once the film plays on screen and has a length, with no panel open.
     private var canSwipeSeek: Bool {
@@ -666,7 +669,8 @@ struct PlayerContent: View {
                 if canSwipeSeek {
                     let startingFraction = model.fraction
                     model.beginScrub()
-                    seekSwipeStart = startingFraction
+                    seekSwipeFraction = startingFraction
+                    seekSwipeTranslation = 0
                 }
             } else if dy >= 14 && dy > dx * 1.2 {
                 dragDirection = .vertical
@@ -674,9 +678,14 @@ struct PlayerContent: View {
                 return
             }
         }
-        if let start = seekSwipeStart {
-            model.updateScrub(fraction: SwipeSeek.fraction(from: start, translation: value.translation.width, width: size.width,
-                                                           duration: model.duration ?? 0))
+        if let start = seekSwipeFraction {
+            let fraction = SwipeSeek.fraction(from: start, translation: value.translation.width - seekSwipeTranslation,
+                                              width: size.width, duration: model.duration ?? 0,
+                                              heightFraction: value.location.y / max(1, size.height))
+            seekSwipeFraction = fraction
+            seekSwipeTranslation = value.translation.width
+            guard fraction != start else { return }
+            model.updateScrub(fraction: fraction, seekImmediately: true)
             return
         }
         guard dragDirection == .vertical, model.preferences.swipeGestures else { return }
@@ -708,31 +717,33 @@ struct PlayerContent: View {
             dragIsHold = false
             return
         }
+        // Use the existing seek state to include the final movement before clearing the gesture.
+        if seekSwipeFraction != nil { swipeChanged(value, in: size) }
         let wasPinch = dragIsPinch
         isDragging = false
         dragIsPinch = false
         dragDirection = nil
-        if seekSwipeStart != nil {
-            // Lifting the finger seeks, once, to where the swipe took the timeline.
-            seekSwipeStart = nil
+        if seekSwipeFraction != nil {
+            // Finish at the live drag's final target.
+            seekSwipeFraction = nil
             Task { await model.endScrub() }
             return
         }
+        guard !wasPinch else { return }
         let wasLevel = swipeStart != nil
         swipeStart = nil
         withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
-        guard !wasPinch else { return }
         let third = size.width / 3
         let inMiddle = value.startLocation.x >= third && value.startLocation.x <= 2 * third
         if !wasLevel, value.translation.height > 140, inMiddle || !model.preferences.swipeGestures { close() }
     }
 
-    /// A pinch began. A drag under way is part of it: a seek it started is dropped without seeking, and the rest of it does nothing.
+    /// A pinch takes over a drag: keep the last live position and stop issuing seeks.
     private func pinchBegan() {
         guard isDragging else { return }
         dragIsPinch = true
-        if seekSwipeStart != nil {
-            seekSwipeStart = nil
+        if seekSwipeFraction != nil {
+            seekSwipeFraction = nil
             model.cancelScrub()
         }
     }
@@ -741,8 +752,8 @@ struct PlayerContent: View {
     /// to do. Otherwise a seek still open is made where the swipe left the timeline, whichever of the two runs first, and a level indicator
     /// fades, so the next drag starts clean.
     private func dragFinished() {
-        if seekSwipeStart != nil {
-            seekSwipeStart = nil
+        if seekSwipeFraction != nil {
+            seekSwipeFraction = nil
             Task { await model.endScrub() }
         }
         if swipeStart != nil {

@@ -30,8 +30,9 @@ final class SuperResolutionRenderer {
     @ObservationIgnored private var pipeline: (any VideoScalingPipeline)?
     @ObservationIgnored private var link: CADisplayLink?
     @ObservationIgnored private var displayScale: CGFloat = 1
-    /// The picture's size, in pixels, when the scale was last decided; a new size (a rotation) decides again.
+    /// The picture's size, in pixels, when the scale was last decided; a new size (a rotation or zoom mode change) decides again.
     @ObservationIgnored private var decidedSize = CGSize.zero
+    @ObservationIgnored private var activeFactor: Float?
     @ObservationIgnored private var wanted = false
     @ObservationIgnored private var blockedBySubtitles = false
     @ObservationIgnored private var observation: NSKeyValueObservation?
@@ -104,8 +105,14 @@ final class SuperResolutionRenderer {
             return
         }
         guard player !== self.player || player.currentItem !== item else {
-            // The same video: a picture laid out at a new size (the first layout, a rotation) decides the scale again.
-            if pipeline == nil, pictureSize != decidedSize { prepare() }
+            // The same video: a picture laid out at a new size (the first layout, a rotation, a zoom mode change) decides the scale again.
+            if pictureSize != decidedSize {
+                if pipeline == nil {
+                    prepare()
+                } else {
+                    recheckRunningScale()
+                }
+            }
             return
         }
         stop(reason: "Waiting for the video…")
@@ -114,6 +121,30 @@ final class SuperResolutionRenderer {
         observation = item?.observe(\.presentationSize, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor in self?.prepare() }
         }
+    }
+
+    /// Re-evaluates scale factor after rotation or zoom-mode layout changes without rebuilding when the target factor stays identical.
+    private func recheckRunningScale() {
+        #if !targetEnvironment(simulator)
+        guard let item, item.presentationSize.width > 0, item.presentationSize.height > 0 else { return }
+        let source = item.presentationSize
+        let width = Int(source.width), height = Int(source.height)
+        let shown = pictureSize
+        guard shown.width > 0, shown.height > 0 else { return }
+        decidedSize = shown
+        let ratios = (shown.width / source.width, shown.height / source.height)
+        let needed = displayLayer.videoGravity == .resizeAspect ? min(ratios.0, ratios.1) : max(ratios.0, ratios.1)
+        if needed <= 1.15 {
+            stop(reason: "Not needed: the \(width)×\(height) video is shown at \(Int(shown.width))×\(Int(shown.height)) or smaller")
+            return
+        }
+        let factors = VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors(frameWidth: width, frameHeight: height).sorted()
+        let nextFactor = factors.first(where: { CGFloat($0) >= needed * 0.9 }) ?? factors.last
+        if nextFactor != activeFactor {
+            stop(reason: "Adjusting scale…")
+            prepare()
+        }
+        #endif
     }
 
     /// The size the picture is shown at, in pixels: the display layer's frame, which its host keeps on the picture.
@@ -210,6 +241,7 @@ final class SuperResolutionRenderer {
         item.add(output)
         self.output = output
         self.pipeline = pipeline
+        self.activeFactor = factor
         let link = CADisplayLink(target: DisplayLinkTarget { [weak self] link in self?.tick(link) }, selector: #selector(DisplayLinkTarget.fire(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -258,6 +290,7 @@ final class SuperResolutionRenderer {
         output = nil
         pipeline?.end()
         pipeline = nil
+        activeFactor = nil
         displayLayer.sampleBufferRenderer.flush(removingDisplayedImage: true) {}
         displayLayer.isHidden = true
         isRendering = false
@@ -404,7 +437,7 @@ final class PictureSampler {
 
     @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
     @ObservationIgnored private weak var item: AVPlayerItem?
-    @ObservationIgnored private weak var measuredItem: AVPlayerItem?
+    @ObservationIgnored private var sourceRevision: Int?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var detector = VideoBlackBars()
@@ -412,19 +445,24 @@ final class PictureSampler {
     @ObservationIgnored private var ambient = false
     @ObservationIgnored var onPictureAspect: ((Double?) -> Void)?
 
-    /// Enough detail to distinguish the thin bars of 1.85:1 from a 16:9 frame.
-    private static let width = 256, height = 144
+    /// Quarter-HD (480×270) gives ~5.3 clean rows for 1.85:1's ~21px bars on 1080p without excessive memory or CPU work.
+    private static let width = 480, height = 270
 
     func update(source: (any AVPlayerFrameSource)?, ambient: Bool) {
         self.ambient = ambient
         if !ambient, !colours.isEmpty { colours = [] }
-        guard let source else { stop(); return }
+        guard let source else {
+            let hadAspect = detectedAspect != nil
+            stop()
+            if hadAspect { onPictureAspect?(nil) }
+            return
+        }
         if source !== self.source {
+            let hadAspect = detectedAspect != nil
             stop()
             self.source = source
-            detector = VideoBlackBars()
-            measuredItem = nil
-            detectedAspect = nil
+            self.sourceRevision = source.frameSourceRevision
+            if hadAspect { onPictureAspect?(nil) }
         }
         guard task == nil else { return }
         task = Task { [weak self] in
@@ -441,6 +479,9 @@ final class PictureSampler {
         task = nil
         detach()
         source = nil
+        sourceRevision = nil
+        detector.reset()
+        detectedAspect = nil
         if !colours.isEmpty { colours = [] }
     }
 
@@ -456,21 +497,24 @@ final class PictureSampler {
     }
 
     private func sample() {
-        // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session.
-        guard let item = source?.framePlayer?.currentItem else {
+        guard let source else { return }
+        if sourceRevision != source.frameSourceRevision {
             detach()
-            if let sample = (source as? OriginalPictureSampling)?.sampleOriginalPicture() {
+            sourceRevision = source.frameSourceRevision
+            detector.reset()
+            if !colours.isEmpty { colours = [] }
+            if detectedAspect != nil { detectedAspect = nil; onPictureAspect?(nil) }
+        }
+        // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session within the same load.
+        guard let item = source.framePlayer?.currentItem else {
+            detach()
+            if let native = source as? OriginalPictureSampling, let sample = native.sampleOriginalPicture() {
                 _ = detect(sample.frame, aspect: sample.aspect)
             }
             return
         }
         if item !== self.item || output == nil {
             if item !== self.item { detach() }
-            if item !== measuredItem {
-                measuredItem = item
-                detector = VideoBlackBars()
-                if detectedAspect != nil { detectedAspect = nil; onPictureAspect?(nil) }
-            }
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: Self.width, kCVPixelBufferHeightKey as String: Self.height,

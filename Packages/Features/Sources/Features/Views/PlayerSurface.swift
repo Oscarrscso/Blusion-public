@@ -21,7 +21,7 @@ final class PlayerLayerView: UIView {
     let videoView = PlayerVideoView()
     var playerLayer: AVPlayerLayer { videoView.playerLayer }
     /// Clips the picture to its visible part, so a crop hides the bars.
-    private let clipView = UIView()
+    let clipView = UIView()
 
     private weak var embedded: UIView?
     /// Draws scaled frames over the player layer while AI super resolution runs. It moves and scales with the picture.
@@ -30,18 +30,17 @@ final class PlayerLayerView: UIView {
     var layout = VideoLayout() {
         didSet {
             guard layout != oldValue else { return }
-            // Crop changes apply immediately; other Zoom Mode or Aspect Ratio changes ease the picture into place.
-            if sourceSize != nil, window != nil, layout.fit != .fill, oldValue.fit != .fill,
-               layout.fit != oldValue.fit || layout.aspect != oldValue.aspect || layout.zoom != oldValue.zoom {
+            if sourceSize != nil, window != nil, embedded == nil {
                 animatesNextLayout = true
             }
             setNeedsLayout()
         }
     }
     private var animatesNextLayout = false
+    private var laidOutSize = CGSize.zero
     /// How long a zoom change takes to ease into place.
     static let zoomAnimationDuration: TimeInterval = 0.3
-    private var sourceSize: CGSize? { didSet { if sourceSize != oldValue { setNeedsLayout() } } }
+    var sourceSize: CGSize? { didSet { if sourceSize != oldValue { setNeedsLayout() } } }
     private var sizeObservation: NSKeyValueObservation?
     private var frameObservation: NSKeyValueObservation?
     var onFirstVideoFrame: (() -> Void)?
@@ -77,6 +76,7 @@ final class PlayerLayerView: UIView {
         observationGeneration += 1
         let generation = observationGeneration
         reportedFirstFrame = false
+        animatesNextLayout = false
         sizeObservation = nil
         frameObservation = nil
         sourceSize = nil
@@ -109,10 +109,12 @@ final class PlayerLayerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let animates = animatesNextLayout
+        let sizeChanged = bounds.size != laidOutSize
+        laidOutSize = bounds.size
+        let animates = animatesNextLayout && !sizeChanged && embedded == nil
         animatesNextLayout = false
         guard animates else {
-            // No animation: the picture stays where it is while the controls or the size change.
+            // Rotation, resize, and engine switches apply immediately without animating stale bounds.
             UIView.performWithoutAnimation { placePicture(animated: false) }
             return
         }
@@ -133,7 +135,7 @@ final class PlayerLayerView: UIView {
         videoView.transform = .identity
         if let sourceSize, let geometry = VideoGeometry(bounds: bounds.size, source: sourceSize, layout: layout) {
             clipView.frame = geometry.visible
-            videoView.frame = geometry.picture.offsetBy(dx: -geometry.visible.minX, dy: -geometry.visible.minY)
+            videoView.frame = geometry.picture.offsetBy(dx: -layoutClipOriginX(geometry), dy: -layoutClipOriginY(geometry))
         } else {
             // Until metadata arrives, preserve the whole frame without guessing a crop or zoom.
             clipView.frame = bounds
@@ -159,6 +161,9 @@ final class PlayerLayerView: UIView {
         #endif
     }
 
+    private func layoutClipOriginX(_ geometry: VideoGeometry) -> CGFloat { geometry.visible.minX }
+    private func layoutClipOriginY(_ geometry: VideoGeometry) -> CGFloat { geometry.visible.minY }
+
     func host(superResolution layer: AVSampleBufferDisplayLayer) {
         // The layer may have gone over AetherEngine's picture in the meantime: it is taken back.
         guard layer.superlayer !== videoView.layer else { return }
@@ -171,6 +176,7 @@ final class PlayerLayerView: UIView {
     /// Hosts the view a fallback engine renders into (nil removes it).
     func embed(_ surface: UIView?) {
         guard surface !== embedded else { return }
+        animatesNextLayout = false
         embedded?.removeFromSuperview()
         embedded = surface
         guard let surface else { return }
@@ -278,7 +284,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
                 superResolution.update(source: engine as? any AVPlayerFrameSource, wanted: wanted, displayScale: Self.displayScale(of: view),
                                        gravity: host?.pictureGravity ?? .resizeAspect, embeddedSubtitlesOn: false)
             }
-            // AetherEngine plays through an AVPlayer most of the time; mpv draws its own picture and has none.
+            // AetherEngine plays through an AVPlayer most of the time; mpv supplies native original-frame screenshots.
             sampler?.update(source: engine as? any AVPlayerFrameSource, ambient: ambientMode)
         } else {
             view.playerLayer.player = nil

@@ -1,4 +1,4 @@
-#if canImport(AetherPlayer) && canImport(UIKit)
+#if BLUSION_FALLBACK_ENGINE && !targetEnvironment(macCatalyst)
 import AetherPlayer
 import AVFoundation
 import Foundation
@@ -10,7 +10,7 @@ import StremioKit
 /// composes Dolby Vision profile 7 FEL on the GPU, and renders TrueHD Atmos and DTS:X objects to spatial audio.
 ///
 /// AetherPlayer is a separate dynamic framework so that its FFmpeg calls bind to its own FFmpeg, not to the static one MPVKit links into
-/// the app. This file only translates between AetherPlayer's plain types and PlayerKit's.
+/// the app. The iPhone/iPad app adapts its plain types here so the Mac's mpv package does not depend on Aether's iOS-only binaries.
 @MainActor
 public final class AetherBackend: FallbackBackend {
     /// Whether this build carries the optional parts, for the settings screen.

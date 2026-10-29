@@ -2,7 +2,7 @@
 import PackageDescription
 
 // OPT-IN (ADR-006). Not part of the default app build: `scripts/enable-fallback.sh` adds it to the generated Xcode project.
-// Keeping the third-party binary dependencies (MPVKit, AetherEngine) out of the default build means a version or API mismatch here can never break the main app.
+// AetherPlayer is linked separately by the iPhone/iPad app: its binaries do not contain Mac Catalyst slices.
 let package = Package(
     name: "FallbackPlayer",
     platforms: [.iOS("26.0")],
@@ -12,16 +12,13 @@ let package = Package(
     dependencies: [
         .package(path: "../PlayerKit"),
         .package(path: "../StremioKit"),
-        // The LGPL build of MPVKit. Built and run on device with 0.41.0 (Package.resolved); MPVBackend uses mpv 0.40 options.
-        .package(url: "https://github.com/mpvkit/MPVKit", from: "0.40.0"),
-        // AetherEngine, wrapped in its own dynamic framework (see Packages/AetherPlayer/Package.swift for why).
-        .package(path: "../AetherPlayer"),
+        // The LGPL build. 1.0.0 includes the Libuavs3d fix with Mac Catalyst support; both apps use the same mpv build.
+        .package(url: "https://github.com/mpvkit/MPVKit", exact: "1.0.0"),
     ],
     targets: [
         .target(
             name: "FallbackPlayer",
-            dependencies: ["PlayerKit", .product(name: "StremioKit", package: "StremioKit"), .product(name: "MPVKit", package: "MPVKit"),
-                           .product(name: "AetherPlayer", package: "AetherPlayer")]
+            dependencies: ["PlayerKit", .product(name: "StremioKit", package: "StremioKit"), .product(name: "MPVKit", package: "MPVKit")]
         ),
     ],
     swiftLanguageModes: [.v6]

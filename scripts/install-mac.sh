@@ -35,11 +35,12 @@ trash_bundle() {
 }
 mkdir -p "$WORK"
 
-# The real project.yml, built without a provisioning profile. A throwaway overlay. No fallback engine here: the MPVKit versions the package allows (0.40.0, 0.41.0) fetch a Libuavs3d with no
-# Mac Catalyst slice (docs/CLAUDE_HANDOFF.md, iOS-only exceptions), so the Mac app plays AVPlayer's formats only.
+# Use the same advanced-player spec as iPhone. mpv supports Catalyst; AetherPlayer is linked only on iPhone/iPad.
+./scripts/enable-fallback.sh >/dev/null || fail "could not generate the advanced-player Xcode project"
+# A throwaway signing overlay, built without a provisioning profile.
 cat > "$WORK/project.install.yml" <<YAML
 include:
-  - path: ../../project.yml
+  - path: ../../project.fallback.generated.yml
 targets:
   Blusion:
     settings:

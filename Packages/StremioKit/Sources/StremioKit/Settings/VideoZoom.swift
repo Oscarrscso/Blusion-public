@@ -1,14 +1,16 @@
 import Foundation
 
-/// Video › Zoom Mode, as in Infuse: how the picture is scaled into the screen. One global setting, kept for every video.
+/// Video › Zoom Mode: how the source content is cropped and scaled into the screen. One global setting, kept for every video.
 public enum VideoZoomMode: String, Sendable, Equatable, Hashable, Codable, CaseIterable, Identifiable {
-    /// The whole picture, fitted inside the safe area: clear of an iPhone's notch or Dynamic Island.
+    /// Uncropped container frame (unless an explicit Aspect Ratio is chosen), fitted inside the safe area clear of notch or Dynamic Island.
     case normal
-    /// The whole picture, fitted to the whole screen, notch side included (iPhone only, as in Infuse).
+    /// Uncropped container frame (unless an explicit Aspect Ratio is chosen), fitted to the whole screen (iPhone/iPad only).
     case aspectFit
-    /// Fills the screen proportionally, cropping only the overflow.
+    /// Trims encoded black bars (detected automatically in Auto, or from the chosen Aspect Ratio) and fits the remaining movie proportionally without overshooting.
     case crop
-    /// Fills the screen exactly, the visible picture distorted to fit.
+    /// Proportionally scales until the picture covers every edge of the screen, intentionally sacrificing outer image content.
+    case fill
+    /// Fills the screen non-uniformly, distorting the visible picture to match the viewport.
     case stretch
 
     public var id: Self { self }
@@ -18,7 +20,16 @@ public enum VideoZoomMode: String, Sendable, Equatable, Hashable, Codable, CaseI
         case .normal: "Normal"
         case .aspectFit: "Aspect Fit"
         case .crop: "Crop"
+        case .fill: "Fill"
         case .stretch: "Stretch"
+        }
+    }
+
+    /// Modes that automatically apply detected black-bar trimming when Aspect Ratio is Auto.
+    public var trimsDetectedBars: Bool {
+        switch self {
+        case .normal, .aspectFit: false
+        case .crop, .fill, .stretch: true
         }
     }
 
@@ -65,7 +76,7 @@ public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, C
         }
     }
 
-    /// Width over height of the area to keep; nil for Auto, which uses detected bars.
+    /// Width over height of the area to keep; nil for Auto, which uses detected bars in bar-trimming modes.
     public var ratio: Double? {
         switch self {
         case .auto: nil
@@ -92,13 +103,25 @@ public enum AspectRatioChoice: String, Sendable, Equatable, Hashable, Codable, C
 }
 
 extension VideoLayout {
-    /// Select the source crop, then fit or fill it. The aspect choice never stretches the original frame.
-    public init(zoomMode: VideoZoomMode, aspectRatio: AspectRatioChoice, safeInset: Double = 0) {
-        switch zoomMode.onThisDevice {
-        case .normal: self.init(fit: .fit, crop: aspectRatio.crop, inset: safeInset)
-        case .aspectFit: self.init(fit: .fit, crop: aspectRatio.crop)
-        case .crop: self.init(fit: .fill, crop: aspectRatio.crop)
-        case .stretch: self.init(fit: .stretch, crop: aspectRatio.crop)
+    /// Separates source bar cropping from display scaling:
+    /// - Manual `aspectRatio` choices always take precedence over `detectedAspect`.
+    /// - `Crop` trims encoded bars and proportionally fits the remaining picture (`fit: .fit`) without discarding movie content.
+    /// - `Fill` intentionally scales to cover the entire viewport (`fit: .fill`), sacrificing outer edges when ratios differ.
+    public init(zoomMode: VideoZoomMode, aspectRatio: AspectRatioChoice, detectedAspect: Double? = nil, safeInset: Double = 0) {
+        let mode = zoomMode.onThisDevice
+        let detected = detectedAspect.flatMap { $0.isFinite && (0.5...4).contains($0) ? VideoCrop.precise($0) : nil }
+        let crop: VideoCrop = if aspectRatio != .auto {
+            aspectRatio.crop
+        } else if mode.trimsDetectedBars {
+            detected ?? .off
+        } else {
+            .off
+        }
+        switch mode {
+        case .normal: self.init(fit: .fit, crop: crop, inset: safeInset)
+        case .aspectFit, .crop: self.init(fit: .fit, crop: crop)
+        case .fill: self.init(fit: .fill, crop: crop)
+        case .stretch: self.init(fit: .stretch, crop: crop)
         }
     }
 }

@@ -6,7 +6,7 @@ import Foundation
 import PlaybackGeometry
 import UIKit
 
-/// One AetherEngine playback session, driven by Blusion's `AetherBackend` (FallbackPlayer). Owns the engine, the view it draws into and
+/// One AetherEngine playback session, driven by the app's `AetherBackend`. Owns the engine, the view it draws into and
 /// the subtitle overlay (AetherEngine publishes subtitle cues; the host draws them). Everything it reports goes out as `AetherEvent`s.
 @MainActor
 public final class AetherSession {
@@ -93,6 +93,7 @@ public final class AetherSession {
         wantsPlaying = false
         pendingAudio = nil
         pendingSubtitle = nil
+        host.displaySize = nil
         host.overlay.show(cues: [], at: 0)
         Self.activateAudioSession()
         #if DEBUG
@@ -144,11 +145,13 @@ public final class AetherSession {
         host.displaySize = presentedSize()
     }
 
-    /// The picture's presented size: measured on the software path, else the coded size under the pixel aspect.
+    /// The picture's presented size: measured on the software path, else the coded size under a valid pixel aspect ratio.
     private func presentedSize() -> CGSize? {
-        if let size = engine.softwareDisplaySize { return size }
+        if let size = engine.softwareDisplaySize, size.width > 0, size.height > 0 { return size }
         guard engine.sourceVideoWidth > 0, engine.sourceVideoHeight > 0 else { return nil }
-        return CGSize(width: Double(engine.sourceVideoWidth) * engine.sourceVideoPixelAspectRatio, height: Double(engine.sourceVideoHeight))
+        let par = engine.sourceVideoPixelAspectRatio
+        let validPAR = par.isFinite && par > 0 ? par : 1
+        return CGSize(width: Double(engine.sourceVideoWidth) * validPAR, height: Double(engine.sourceVideoHeight))
     }
 
     // MARK: Transport
@@ -229,18 +232,23 @@ public final class AetherSession {
         Task { [weak self] in
             guard let self, generation == self.generation else { return }
             _ = try? await self.engine.reloadAtCurrentPosition { $0.dolbyVisionHandling = enabled ? .automatic : .baseLayerOnly }
+            guard generation == self.generation, self.isLoaded else { return }
+            self.host.displaySize = self.presentedSize()
+            self.host.setNeedsLayout()
         }
     }
 
     /// `aspect` sets the visible picture's display shape; `crop` measures content in the original source. nil leaves either alone. `inset` keeps
     /// Fit that far from the left and the right (points). A change of any of them moves the picture smoothly into its new place.
     public func apply(fit: AetherFit, zoom: Double, aspect: Double? = nil, crop: Double? = nil, inset: Double = 0) {
-        let changes = host.fit != fit || host.zoom != max(1, zoom) || host.aspect != aspect || host.crop != crop
+        let clampedZoom = zoom.isFinite ? max(1, zoom) : 1
+        let clampedInset = inset.isFinite ? max(0, inset) : 0
+        let changes = host.fit != fit || host.zoom != clampedZoom || host.aspect != aspect || host.crop != crop || host.inset != clampedInset
         host.fit = fit
-        host.zoom = max(1, zoom)
+        host.zoom = clampedZoom
         host.aspect = aspect
         host.crop = crop
-        host.inset = inset
+        host.inset = clampedInset
         if changes { host.animateNextLayout() }
     }
 
@@ -352,6 +360,7 @@ public final class AetherSession {
         engine.$hasFirstFrameReadyForDisplay.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] ready in
             MainActor.assumeIsolated {
                 guard let self, self.isLoaded, ready else { return }
+                self.host.displaySize = self.presentedSize()
                 self.continuation.yield(.videoFrameReady)
             }
         }.store(in: &subscriptions)
@@ -579,10 +588,11 @@ final class AetherHostView: UIView {
     var aspect: Double? { didSet { if aspect != oldValue { setNeedsLayout() } } }
     /// Width over height to crop the picture to, centred; nil keeps it whole.
     var crop: Double? { didSet { if crop != oldValue { setNeedsLayout() } } }
-    /// Points Fit and Fill keep clear on the left and the right.
+    /// Points Fit keeps clear on the left and the right.
     var inset = 0.0 { didSet { if inset != oldValue { setNeedsLayout() } } }
     /// The next layout is a change of the zoom, not of the size: it eases the picture into place.
     private var animatesNextLayout = false
+    private var laidOutSize = CGSize.zero
     /// How long a zoom change takes to ease into place.
     static let zoomAnimationDuration: TimeInterval = 0.3
     /// The picture's presented size, when the engine says it.
@@ -620,7 +630,9 @@ final class AetherHostView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let animates = animatesNextLayout
+        let sizeChanged = bounds.size != laidOutSize
+        laidOutSize = bounds.size
+        let animates = animatesNextLayout && !sizeChanged
         animatesNextLayout = false
         guard animates else {
             // A new size never animates: the engine's layer would otherwise slide the picture up or down for a moment, as it animates
@@ -652,12 +664,14 @@ final class AetherHostView: UIView {
             playerView.frame = layout.picture.offsetBy(dx: -layout.visible.minX, dy: -layout.visible.minY)
             overlay.frame = bounds
             overlay.videoRect = layout.visible
+            overlay.pictureRect = layout.picture
             gravity = .resize
         } else {
             clipView.frame = bounds
             playerView.frame = bounds
             overlay.frame = bounds
             overlay.videoRect = bounds
+            overlay.pictureRect = bounds
             gravity = .resizeAspect
         }
         // Sent on every layout, not only on a change: the engine can make a new video layer when a file loads, which starts at its
@@ -686,6 +700,7 @@ final class AetherHostView: UIView {
 final class AetherSubtitleOverlay: UIView {
     var style = AetherSubtitleStyle() { didSet { needsRestyle = true } }
     var videoRect: CGRect = .zero { didSet { if videoRect != oldValue { setNeedsLayout() } } }
+    var pictureRect: CGRect = .zero { didSet { if pictureRect != oldValue { setNeedsLayout() } } }
     private var shown: [SubtitleCue] = []
     private var textViews: [UILabel] = []
     private var imageViews: [UIImageView] = []
@@ -721,6 +736,7 @@ final class AetherSubtitleOverlay: UIView {
         textViews = []
         imageViews = []
         let rect = videoRect.isEmpty ? bounds : videoRect
+        let fullPicture = pictureRect.isEmpty ? rect : pictureRect
         guard rect.width > 0, rect.height > 0 else { return }
         let fontSize = max(14, rect.height * 0.05 * style.scale)
         var bottom = rect.maxY - rect.height * style.bottomMarginPercent / 100
@@ -729,7 +745,7 @@ final class AetherSubtitleOverlay: UIView {
             switch cue.body {
             case .image(let image):
                 let view = UIImageView(image: UIImage(cgImage: image.cgImage))
-                view.frame = Self.imageRect(image, in: rect)
+                view.frame = Self.imageRect(image, in: fullPicture, viewport: bounds)
                 addSubview(view)
                 imageViews.append(view)
             case .text(let text):
@@ -804,19 +820,24 @@ final class AetherSubtitleOverlay: UIView {
         return result
     }
 
-    /// `position` is normalised against the subtitle canvas, which maps onto the picture width-aligned and centred vertically
-    /// (AetherEngine's `SubtitleImage` contract; a cropped rip's canvas is taller than the picture).
-    static func imageRect(_ image: SubtitleImage, in rect: CGRect) -> CGRect {
+    /// `position` is normalised against the subtitle canvas, mapped onto the scaled source picture (`rect`), and clamped vertically
+    /// inside `viewport` when bottom black bars are cropped beyond the screen edge.
+    static func imageRect(_ image: SubtitleImage, in rect: CGRect, viewport: CGRect = .zero) -> CGRect {
         let position = image.position
         let canvas = image.canvasSize
-        guard canvas.width > 0, canvas.height > 0 else {
-            return CGRect(x: rect.minX + position.minX * rect.width, y: rect.minY + position.minY * rect.height,
-                          width: position.width * rect.width, height: position.height * rect.height)
+        let raw: CGRect
+        if canvas.width > 0, canvas.height > 0 {
+            let scale = rect.width / canvas.width
+            raw = CGRect(x: rect.minX + position.minX * canvas.width * scale,
+                         y: rect.midY + (position.minY * canvas.height - canvas.height / 2) * scale,
+                         width: position.width * canvas.width * scale, height: position.height * canvas.height * scale)
+        } else {
+            raw = CGRect(x: rect.minX + position.minX * rect.width, y: rect.minY + position.minY * rect.height,
+                         width: position.width * rect.width, height: position.height * rect.height)
         }
-        let scale = rect.width / canvas.width
-        return CGRect(x: rect.minX + position.minX * canvas.width * scale,
-                      y: rect.midY + (position.minY * canvas.height - canvas.height / 2) * scale,
-                      width: position.width * canvas.width * scale, height: position.height * canvas.height * scale)
+        guard !viewport.isEmpty, viewport.height > raw.height + 16 else { return raw }
+        let clampedY = min(max(viewport.minY + 8, raw.minY), viewport.maxY - raw.height - 8)
+        return CGRect(x: raw.minX, y: clampedY, width: raw.width, height: raw.height)
     }
 
     /// ASS numpad alignment (1–3 bottom, 4–6 middle, 7–9 top); with a position, the point is the anchor. Top-left coordinates.

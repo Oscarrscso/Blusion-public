@@ -64,6 +64,10 @@ Accepted risks, all recorded rather than hidden:
 
 ## Update 2026-10-13: in-app codec coverage
 
+Superseded for Mac packaging on 2026-10-28: both install scripts now use the advanced-player spec. `FallbackPlayer` pins LGPL MPVKit 1.0.0
+with the Catalyst-capable Libuavs3d fix; AetherPlayer is linked separately on iPhone/iPad only. See `docs/PLAYER.md`. This change was not built
+or run by the agent.
+
 - **The iPhone install builds the engine in.** `scripts/install-iphone.sh` generates its spec with `scripts/enable-fallback.sh`, so the
   iPhone app links MPVKit (LGPL build). `scripts/install-mac.sh` does not: the MPVKit versions `from: "0.40.0"` allows fetch a Libuavs3d with no Mac Catalyst slice
   (`docs/CLAUDE_HANDOFF.md`, iOS-only exceptions). `project.yml` and `scripts/archive.sh` keep the

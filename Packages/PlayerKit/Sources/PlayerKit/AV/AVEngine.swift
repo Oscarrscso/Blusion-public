@@ -30,6 +30,7 @@ public final class AVEngine: PlaybackEngine {
     private var hasPlayed = false
     private var pendingStart: TimeInterval = 0
     private var generation = 0
+    var loadRevision: Int { generation }
     /// What the tracks' format descriptions say, read once per item for the statistics panel.
     private var mediaInfo = MediaInfo()
 
