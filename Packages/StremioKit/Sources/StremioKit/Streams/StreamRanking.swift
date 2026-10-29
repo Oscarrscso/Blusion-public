@@ -27,9 +27,12 @@ public struct RankedStream: Sendable, Equatable, Identifiable {
 public struct RankingPreferences: Sendable, Equatable {
     /// When set, streams closest to this resolution win (ties go to the higher one). When nil, higher is better.
     public var preferredResolution: Int?
+    /// The kind of stream Settings prefers. A near-tie breaker only (see `AutoStreamRanking.preferenceBonus`); Balanced when nil.
+    public var sourcePreference: StreamSourcePreference
 
-    public init(preferredResolution: Int? = nil) {
+    public init(preferredResolution: Int? = nil, sourcePreference: StreamSourcePreference = .balanced) {
         self.preferredResolution = preferredResolution
+        self.sourcePreference = sourcePreference
     }
 }
 
@@ -102,13 +105,13 @@ public struct BingeContext: Sendable, Equatable, Hashable, Codable {
 }
 
 public enum BingeSelection {
-    /// The stream to auto-select for the next episode: one in the same `bingeGroup`, best-ranked first, preferring the same addon.
-    /// `nil` when nothing matches, so the picker is shown instead.
-    public static func pick(from ranked: [RankedStream], continuing previous: BingeContext?) -> RankedStream? {
+    /// The stream to auto-select for the next episode: the best-ranked stream in the same `bingeGroup` under the same quality model as
+    /// Auto Pick. The addon the previous episode came from is a near-tie breaker only (`AutoStreamRanking.preferenceBonus`), so continuity
+    /// never keeps a clearly weaker release. `nil` when nothing matches, so the picker is shown instead.
+    public static func pick(from ranked: [RankedStream], continuing previous: BingeContext?, duration: TimeInterval? = nil,
+                            preferences: RankingPreferences = .init()) -> RankedStream? {
         guard let previous else { return nil }
-        let candidates = StreamAvailability.automaticCandidates(from: ranked.filter {
-            $0.route.isPlayable && $0.stream.behaviorHints.bingeGroup == previous.bingeGroup
-        })
-        return candidates.first { $0.addon.id == previous.addonID } ?? candidates.first
+        let group = ranked.filter { $0.route.isPlayable && $0.stream.behaviorHints.bingeGroup == previous.bingeGroup }
+        return AutoStreamRanking.best(from: group, duration: duration, preferences: preferences, continuing: previous)?.item
     }
 }

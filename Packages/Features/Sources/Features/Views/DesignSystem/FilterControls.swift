@@ -74,11 +74,12 @@ struct BrowseFilterBar<Menus: View>: View {
     @ViewBuilder let menus: Menus
     @Environment(\.layoutMetrics) private var metrics
 
-    /// The type selector's titles (the first is "All"), the index it shows, and its identifier.
+    /// The type selector's titles (the first is "All"), the index it shows, and its identifier. `symbols` go with the titles in order.
     struct Kinds {
         let titles: [String]
         let selection: Binding<Int>
         let identifier: String
+        var symbols: [String] = ["square.grid.2x2", "film", "tv"]
     }
 
     /// The height of a menu's label in the bar.
@@ -87,7 +88,7 @@ struct BrowseFilterBar<Menus: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             if let kinds {
-                QualitySelector(titles: kinds.titles, selection: kinds.selection, symbols: ["square.grid.2x2", "film", "tv"],
+                QualitySelector(titles: kinds.titles, selection: kinds.selection, symbols: kinds.symbols,
                                 accessibilityID: kinds.identifier)
                     .padding(.horizontal, metrics.pageMargin)
             }

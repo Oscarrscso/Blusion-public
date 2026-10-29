@@ -15,6 +15,11 @@ public struct PlaybackCandidate: Sendable, Equatable, Identifiable {
     public let videoHash: String?
     public let videoSize: Int64?
     public let bingeContext: BingeContext?
+    public let quality: StreamQuality
+    public let cacheStatus: StreamCacheStatus
+    public let delivery: StreamDelivery?
+    public let torBox: TorBoxCache?
+    public let releaseTitle: String?
 
     public init?(_ ranked: RankedStream) {
         guard ranked.route.isPlayable else { return nil }
@@ -28,11 +33,17 @@ public struct PlaybackCandidate: Sendable, Equatable, Identifiable {
         self.videoHash = ranked.stream.behaviorHints.videoHash
         self.videoSize = ranked.stream.behaviorHints.videoSize
         self.bingeContext = ranked.bingeContext
+        self.quality = ranked.quality
+        self.cacheStatus = StreamAvailability.cacheStatus(for: ranked.stream)
+        self.delivery = StreamDelivery.detect(in: ranked.stream)
+        self.torBox = TorBoxCache.detect(in: ranked.stream)
+        self.releaseTitle = Self.releaseTitle(for: ranked)
     }
 
     public init(id: String, title: String, addonName: String = "", route: PlaybackRoute, headers: [String: String] = [:],
                 subtitles: [SubtitleItem] = [], filename: String? = nil, videoHash: String? = nil, videoSize: Int64? = nil,
-                bingeContext: BingeContext? = nil) {
+                bingeContext: BingeContext? = nil, quality: StreamQuality = .init(), cacheStatus: StreamCacheStatus = .unknown,
+                delivery: StreamDelivery? = nil, torBox: TorBoxCache? = nil, releaseTitle: String? = nil) {
         self.id = id
         self.title = title
         self.addonName = addonName
@@ -43,14 +54,37 @@ public struct PlaybackCandidate: Sendable, Equatable, Identifiable {
         self.videoHash = videoHash
         self.videoSize = videoSize
         self.bingeContext = bingeContext
+        self.quality = quality
+        self.cacheStatus = cacheStatus
+        self.delivery = delivery
+        self.torBox = torBox
+        self.releaseTitle = releaseTitle
     }
 
     public var url: URL? { route.playableURL }
 
+    /// Declared or parsed file size in bytes when positive; nil when the stream reports none.
+    public var effectiveSizeBytes: Int64? {
+        if let size = quality.sizeBytes, size > 0 { return size }
+        if let size = videoSize, size > 0 { return size }
+        return nil
+    }
+
     /// The same stream on another route, with the same id, title and headers. The coordinator uses it to retry a stream in another engine.
     public func rerouted(to route: PlaybackRoute) -> PlaybackCandidate {
         PlaybackCandidate(id: id, title: title, addonName: addonName, route: route, headers: headers, subtitles: subtitles, filename: filename,
-                          videoHash: videoHash, videoSize: videoSize, bingeContext: bingeContext)
+                          videoHash: videoHash, videoSize: videoSize, bingeContext: bingeContext, quality: quality, cacheStatus: cacheStatus,
+                          delivery: delivery, torBox: torBox, releaseTitle: releaseTitle)
+    }
+
+    private static func releaseTitle(for item: RankedStream) -> String? {
+        if let filename = item.stream.behaviorHints.filename?.trimmingCharacters(in: .whitespacesAndNewlines), !filename.isEmpty {
+            return (filename as NSString).lastPathComponent
+        }
+        if case .direct(let url) = item.stream.source, !url.pathExtension.isEmpty {
+            return url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent
+        }
+        return item.stream.description?.split(whereSeparator: \.isNewline).first.map(String.init)
     }
 }
 

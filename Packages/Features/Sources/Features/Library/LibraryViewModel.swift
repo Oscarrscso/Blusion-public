@@ -16,6 +16,10 @@ public final class LibraryViewModel {
     public var filter = LibraryFilter() {
         didSet { applyFilter() }
     }
+    /// True while the page shows the device's downloads in place of the Library's titles. Downloads keep their own filter (`downloadFilter`),
+    /// so switching between the two never changes either selection.
+    public var showsDownloads = false
+    public var downloadFilter = DownloadFilter()
 
     private let services: AppServices
     /// Everything the Library knows, before any filter. The sections above are the visible part of these.
@@ -104,14 +108,19 @@ public final class LibraryViewModel {
         await load()
     }
 
-    /// Clears every filter, keeping the sort.
+    /// Clears every filter of the page in view, keeping the sort.
     public func clearFilters() {
-        filter.clearFilters()
+        if showsDownloads { downloadFilter.clearFilters() } else { filter.clearFilters() }
     }
 
     /// Clears the filter one chip stands for.
     public func removeFilter(_ chip: FilterChip) {
         filter.remove(chip.target)
+    }
+
+    /// Clears the Downloads filter one chip stands for.
+    public func removeDownloadFilter(_ chip: DownloadFilterChip) {
+        downloadFilter.remove(chip.target)
     }
 
     /// What tapping an in-progress item plays; the player resumes from the saved position.

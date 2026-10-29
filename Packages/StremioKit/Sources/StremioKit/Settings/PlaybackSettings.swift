@@ -85,7 +85,9 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
         return nil
     }
 
-    public var rankingPreferences: RankingPreferences { RankingPreferences(preferredResolution: preferredResolution) }
+    public var rankingPreferences: RankingPreferences {
+        RankingPreferences(preferredResolution: preferredResolution, sourcePreference: autoPickSource)
+    }
 
     /// `decodesAV1InHardware` has no default: a caller that left it out would send AV1 to the engine on capable chips.
     public func policy(fallbackEngineLinked: Bool, backupEngineLinked: Bool = false, decodesAV1InHardware: Bool) -> PolicyConfiguration {

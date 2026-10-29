@@ -301,17 +301,17 @@ import PlayerKitTestSupport
 
     @Test func theCushionWaitStaysInsideTheStartBudget() {
         let cushion = StartCushion.standard
-        #expect(cushion.wait(ahead: 2, loadTook: 1) == 6)
-        #expect(cushion.wait(ahead: 2, loadTook: 10) == 4, "load and wait stay inside 14 s")
-        #expect(cushion.wait(ahead: 2, loadTook: 15) == 0)
-        #expect(cushion.wait(ahead: 10, loadTook: 1) == 0)
+        #expect(cushion.wait(ahead: 2, loadTook: 1) == 45)
+        #expect(cushion.wait(ahead: 2, loadTook: 40) == 10, "load and wait stay inside 50 s")
+        #expect(cushion.wait(ahead: 2, loadTook: 51) == 0)
+        #expect(cushion.wait(ahead: 30, loadTook: 1) == 0)
         #expect(cushion.wait(ahead: nil, loadTook: 1) == 0)
-        #expect(cushion.isMet(ahead: 10, startAhead: 0, waited: 5) && !cushion.isMet(ahead: 9.9, startAhead: 0, waited: 5))
+        #expect(cushion.isMet(ahead: 30, startAhead: 0, waited: 5) && !cushion.isMet(ahead: 29.9, startAhead: 0, waited: 5))
         #expect(cushion.isMet(ahead: nil, startAhead: 0, waited: 0))
-        // One segment in hand starts it while the film arrives at least 2.5 times faster than it plays.
-        #expect(cushion.isMet(ahead: 4, startAhead: 0, waited: 1.5))
-        #expect(!cushion.isMet(ahead: 4, startAhead: 0, waited: 2), "twice as fast is a marginal link: it waits for 10 s")
-        #expect(!cushion.isMet(ahead: 3.9, startAhead: 0, waited: 0.5), "less than a segment never starts early")
+        // A briefly fast connection must not bypass the remux cushion.
+        #expect(!cushion.isMet(ahead: 4, startAhead: 0, waited: 1.5))
+        #expect(!cushion.isMet(ahead: 20, startAhead: 0, waited: 2))
+        #expect(!cushion.isMet(ahead: 29.9, startAhead: 0, waited: 0.5))
         #expect(!cushion.isMet(ahead: 8, startAhead: 4, waited: 2))
     }
 

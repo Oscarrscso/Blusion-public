@@ -1,69 +1,190 @@
 import Foundation
 
-/// Additive quality and availability scores shared by Auto Pick and Best Match.
-/// Player policy filters compatibility first; no release tag has absolute priority.
+/// The one quality model behind every automatic choice: Auto Pick, Play Best, automatic starts, episode switching, fallback ordering and
+/// downloads. Player policy has already removed what this device cannot play. Then, in order:
+/// - a release that plays now outranks one that must download first (`Assessment.needsDownload`);
+/// - an explicit resolution preference is a constraint: the releases nearest that resolution compete first;
+/// - the additive score decides. A source preference or binge continuity adds `preferenceBonus` to the releases it names, so it only
+///   breaks near-ties and never outweighs a clearly better release.
+/// Every fact of the score is kept as a `Contribution`, so `explain` can say why a release wins or loses.
 public enum AutoStreamRanking {
+    /// Points a preference adds to a release that matches it: the source kind Settings prefers, or the addon a binge continues from. It is
+    /// less than one resolution step (6 points), so a clearly better release still wins.
+    public static let preferenceBonus: Double = 4
+
+    /// One fact of the score: what the release says about it (`detail`, nil when it says nothing) and the points it adds or takes away.
+    public struct Contribution: Sendable, Equatable {
+        public let fact: String
+        public let detail: String?
+        public let points: Double
+    }
+
     public struct Assessment: Sendable {
         public let item: RankedStream
         public let qualityScore: Double
         public let bitrateMbps: Double?
         public let seeders: Int?
         public let isRemux: Bool
+        /// The release must download before it plays (an uncached torrent on a streaming server). It ranks below every release that plays now.
+        public let needsDownload: Bool
+        /// Every fact of the score, in a fixed order, so two releases line up fact by fact.
+        public let contributions: [Contribution]
     }
 
-    public static func assess(_ item: RankedStream, duration: TimeInterval?) -> Assessment {
+    /// Why a release sits where it does: the reasons are plain lines for logs and tests.
+    public struct Explanation: Sendable, Equatable {
+        public let id: String
+        public let title: String
+        /// 1 for the chosen release.
+        public let rank: Int
+        public let qualityScore: Double
+        public let reasons: [String]
+    }
+
+    public static func assess(_ item: RankedStream, duration: TimeInterval?, preferences: RankingPreferences = .init(),
+                              continuing: BingeContext? = nil) -> Assessment {
         let quality = item.quality
         // Contradicted facts earn no bonus and take a bounded penalty.
         let resolution = quality.hasConflictingResolution ? nil : quality.resolution
         let source = quality.hasConflictingSource ? nil : quality.source
         let codec = quality.hasConflictingVideoCodec ? nil : quality.videoCodec
         let bitrate = bitrateMbps(quality, duration: duration)
-        var score = resolutionPoints(resolution) + sourcePoints(source) + videoCodecPoints(codec)
-        score += bitDepthPoints(quality.bitDepth) + hdrPoints(quality)
-        score += bitratePoints(bitrate, resolution: resolution, codec: codec)
         var playableAudio = quality
         if case .native = item.route {
             playableAudio.audioCodecs.removeAll { $0.needsFallbackEngine }
             playableAudio.hasDTSX = false
         }
-        score += audioPoints(playableAudio)
-        score += quality.provider == nil ? 0 : 3
-        score += quality.hasReputableGroup ? 3 : 0
-        score -= Double([quality.hasConflictingResolution, quality.hasConflictingSource, quality.hasConflictingVideoCodec].filter { $0 }.count) * 8
-        if let declared = quality.declaredBitrateMbps, let measured = sizeOverRuntimeMbps(quality, duration: duration),
-           max(declared, measured) > 2 * min(declared, measured) { score -= 8 }
+        let contradictions = [quality.hasConflictingResolution, quality.hasConflictingSource, quality.hasConflictingVideoCodec].filter { $0 }.count
+        let statedRateContradictsSize: Bool = {
+            guard let declared = quality.declaredBitrateMbps, let measured = sizeOverRuntimeMbps(quality, duration: duration) else { return false }
+            return max(declared, measured) > 2 * min(declared, measured)
+        }()
         // An implausibly small disc copy should not profit from a REMUX label.
-        if quality.isRemux, let bitrate, bitrate < ((resolution ?? 0) >= 2160 ? 15 : 8) { score -= 18 }
+        let implausibleRemux = quality.isRemux && (bitrate.map { $0 < ((resolution ?? 0) >= 2160 ? 15 : 8) } ?? false)
+        let remuxCounts = quality.isRemux && !quality.hasConflictingSource
         let cached = StreamAvailability.isCached(item.stream)
-        score += cached ? 6 : 0
-        if !cached, let seeds = quality.seeders {
-            score += seeds == 0 ? -35 : min(5, log2(Double(max(1, seeds))))
-        }
-        // A REMUX name counts only when no other source is named beside it.
-        if quality.isRemux && !quality.hasConflictingSource { score += remuxPoints }
-        return Assessment(item: item, qualityScore: score, bitrateMbps: bitrate, seeders: quality.seeders, isRemux: quality.isRemux)
+        let seederPoints: Double = {
+            guard !cached, let seeds = quality.seeders else { return 0 }
+            return seeds == 0 ? -35 : min(5, log2(Double(max(1, seeds))))
+        }()
+        let prefers = preferences.sourcePreference.prefers(item.stream)
+        let continues = continuing.map { previous in
+            previous.addonID != nil && previous.addonID == item.addon.id && previous.bingeGroup == item.bingeContext?.bingeGroup
+        } ?? false
+
+        let contributions = [
+            Contribution(fact: "resolution", detail: resolution.map(resolutionLabel), points: resolutionPoints(resolution)),
+            Contribution(fact: "source", detail: source?.label, points: sourcePoints(source)),
+            Contribution(fact: "REMUX", detail: remuxCounts ? "REMUX" : nil, points: remuxCounts ? remuxPoints : 0),
+            Contribution(fact: "video codec", detail: codec?.label, points: videoCodecPoints(codec)),
+            Contribution(fact: "bit depth", detail: quality.bitDepth.map { "\($0)-bit" }, points: bitDepthPoints(quality.bitDepth)),
+            Contribution(fact: "HDR", detail: hdrLabel(quality), points: hdrPoints(quality)),
+            Contribution(fact: "bitrate", detail: bitrate.map { "\(format($0)) Mbps" }, points: bitratePoints(bitrate, resolution: resolution, codec: codec)),
+            Contribution(fact: "audio", detail: audioLabel(playableAudio), points: audioPoints(playableAudio)),
+            Contribution(fact: "provider", detail: quality.provider?.name, points: quality.provider == nil ? 0 : 3),
+            Contribution(fact: "release group", detail: quality.hasReputableGroup ? "reputable" : nil, points: quality.hasReputableGroup ? 3 : 0),
+            Contribution(fact: "contradictions", detail: contradictions == 0 ? nil : "\(contradictions)", points: -8 * Double(contradictions)),
+            Contribution(fact: "stated bitrate", detail: statedRateContradictsSize ? "contradicts size" : nil,
+                         points: statedRateContradictsSize ? -8 : 0),
+            Contribution(fact: "REMUX bitrate", detail: implausibleRemux ? "implausibly small" : nil, points: implausibleRemux ? -18 : 0),
+            Contribution(fact: "cache", detail: cached ? "cached" : nil, points: cached ? 6 : 0),
+            Contribution(fact: "seeders", detail: !cached ? quality.seeders.map(String.init) : nil, points: seederPoints),
+            Contribution(fact: "source preference", detail: prefers ? preferences.sourcePreference.title : nil,
+                         points: prefers ? preferenceBonus : 0),
+            Contribution(fact: "continuity", detail: continues ? "same addon" : nil, points: continues ? preferenceBonus : 0),
+        ]
+        return Assessment(item: item, qualityScore: contributions.reduce(0) { $0 + $1.points }, bitrateMbps: bitrate, seeders: quality.seeders,
+                          isRemux: quality.isRemux, needsDownload: StreamAvailability.cacheStatus(for: item.stream) == .uncached,
+                          contributions: contributions)
     }
 
-    public static func best(from items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init()) -> Assessment? {
-        ranked(items, duration: duration, preferences: preferences).first
+    public static func best(from items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init(),
+                            continuing: BingeContext? = nil) -> Assessment? {
+        ranked(items, duration: duration, preferences: preferences, continuing: continuing).first
     }
 
-    public static func ranked(_ items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init()) -> [Assessment] {
-        StreamAvailability.automaticCandidates(from: items).map { assess($0, duration: duration) }.sorted {
-            // A resolution explicitly chosen in Settings is a constraint, then compare every release at that distance.
-            if let preferred = preferences.preferredResolution {
-                let a = $0.item.quality
-                let b = $1.item.quality
-                let da = a.hasConflictingResolution ? Int.max : a.resolution.map { abs($0 - preferred) } ?? Int.max
-                let db = b.hasConflictingResolution ? Int.max : b.resolution.map { abs($0 - preferred) } ?? Int.max
-                if da != db { return da < db }
+    /// The automatic candidates (see `StreamAvailability`), best first, under the order described at the top of this type.
+    public static func ranked(_ items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init(),
+                              continuing: BingeContext? = nil) -> [Assessment] {
+        StreamAvailability.automaticCandidates(from: items)
+            .map { assess($0, duration: duration, preferences: preferences, continuing: continuing) }
+            .sorted { a, b in
+                if a.needsDownload != b.needsDownload { return !a.needsDownload }
+                if let preferred = preferences.preferredResolution {
+                    let da = distance(a.item.quality, from: preferred)
+                    let db = distance(b.item.quality, from: preferred)
+                    if da != db { return da < db }
+                }
+                if a.qualityScore != b.qualityScore { return a.qualityScore > b.qualityScore }
+                return StreamRanking.isOrdered(a.item, before: b.item)
             }
-            if $0.qualityScore != $1.qualityScore { return $0.qualityScore > $1.qualityScore }
-            return StreamRanking.isOrdered($0.item, before: $1.item)
+    }
+
+    /// Why each release ranks where it does. The chosen release is compared with the one behind it, and every other release with the chosen
+    /// one. A reason names a fact the two score differently on, largest difference first, with both releases' points for it.
+    public static func explain(_ ranked: [Assessment]) -> [Explanation] {
+        guard let chosen = ranked.first else { return [] }
+        return ranked.enumerated().map { index, entry in
+            var reasons: [String] = []
+            let rival = index == 0 ? ranked.dropFirst().first : chosen
+            if let rival {
+                let gap = entry.qualityScore - rival.qualityScore
+                if index == 0 {
+                    reasons.append("chosen, \(amount(gap)) points ahead of \(rival.item.title)")
+                } else {
+                    reasons.append("\(amount(-gap)) points behind \(chosen.item.title)")
+                }
+                if entry.needsDownload && !rival.needsDownload { reasons.append("must download before it plays") }
+                let pairs = zip(entry.contributions, rival.contributions).filter { pair in pair.0.points != pair.1.points }
+                    .sorted { lhs, rhs in abs(lhs.0.points - lhs.1.points) > abs(rhs.0.points - rhs.1.points) }
+                for pair in pairs {
+                    reasons.append("\(pair.0.fact) \(describe(pair.0)) against \(describe(pair.1))")
+                }
+            } else {
+                reasons.append("the only candidate")
+            }
+            return Explanation(id: entry.item.id, title: entry.item.title, rank: index + 1, qualityScore: entry.qualityScore, reasons: reasons)
         }
     }
 
     private static let remuxPoints: Double = 10
+
+    private static func distance(_ quality: StreamQuality, from preferred: Int) -> Int {
+        guard !quality.hasConflictingResolution, let resolution = quality.resolution else { return Int.max }
+        return abs(resolution - preferred)
+    }
+
+    private static func describe(_ contribution: Contribution) -> String {
+        "\(contribution.detail ?? "none") (\(signed(contribution.points)))"
+    }
+
+    /// Points with a sign, to one decimal place at most: "+12", "-7.4".
+    private static func signed(_ value: Double) -> String {
+        let text = amount(value)
+        return value >= 0 ? "+\(text)" : "-\(text)"
+    }
+
+    /// The magnitude of points, to one decimal place at most, without a sign.
+    private static func amount(_ value: Double) -> String {
+        let rounded = (abs(value) * 10).rounded() / 10
+        return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.1f", value)
+    }
+
+    private static func resolutionLabel(_ height: Int) -> String {
+        height >= 2160 ? "4K" : "\(height)p"
+    }
+
+    private static func hdrLabel(_ quality: StreamQuality) -> String? {
+        quality.isDolbyVision ? "Dolby Vision" : quality.isHDR ? "HDR" : nil
+    }
+
+    private static func audioLabel(_ quality: StreamQuality) -> String? {
+        quality.audioCodecs.isEmpty ? nil : quality.audioCodecs.map(\.label).joined(separator: ", ")
+    }
 
     // MARK: - Video
 

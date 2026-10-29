@@ -169,7 +169,7 @@ struct DetailReviews: View {
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .glassEffect(.regular.interactive().tint((PlayColourStore.colour(hex: playColourHex) ?? .clear).opacity(0.25)), in: .circle)
+            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: .circle)
             .contentShape(Circle())
     }
 

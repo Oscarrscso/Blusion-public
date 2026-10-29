@@ -55,12 +55,24 @@ public final class AetherSession {
     public var pictureGravity: AVLayerVideoGravity { host.currentGravity }
     /// The stream is HDR or Dolby Vision (not what reaches the display).
     public var isHDRSource: Bool { isLoaded && engine.sourceVideoFormat != .sdr }
-    /// Seconds of the film AetherEngine holds ahead of the playhead on its loopback route, where it repackages the remux for AVPlayer
-    /// as it downloads (what AVPlayer has, plus the segments made ahead of it). nil before the load, on its software path and for a
-    /// live stream. It moves about once a second while paused.
-    public var loopbackBufferedAhead: TimeInterval? {
-        guard isLoaded, engine.videoRoute == .loopback, !engine.isLive else { return nil }
-        let ahead = engine.clock.bufferedPosition - engine.clock.currentTime
+    /// Compressed media downloaded ahead, including FEL packets. The software clock does not
+    /// advance before its first play, so read its published cache ranges while startup is paused.
+    public var bufferedAhead: TimeInterval? {
+        guard isLoaded, !engine.isLive else { return nil }
+        let position = engine.clock.currentTime
+        let frontier: Double
+        switch engine.videoRoute {
+        case .loopback: frontier = engine.clock.bufferedPosition
+        case .software:
+            // Allow the first packet's timestamp to sit just after the requested start.
+            frontier = engine.residentRanges.first {
+                $0.lowerBound <= position + 0.5 && $0.upperBound >= position
+            }?.upperBound ?? engine.clock.bufferedPosition
+        default: return nil
+        }
+        // Nothing more to wait for when the remaining film is already downloaded.
+        if lastDuration > 0, frontier >= lastDuration - 0.5 { return nil }
+        let ahead = frontier - position
         return ahead.isFinite ? max(0, ahead) : nil
     }
     #if DEBUG
@@ -107,6 +119,10 @@ public final class AetherSession {
             autoplay: false
         )
         loadOptions.dolbyVisionHandling = options.dolbyVision ? .automatic : .baseLayerOnly
+        // Both remuxed AVPlayer and FEL's compressed-packet reader fill independently of playback.
+        loadOptions.forwardBufferSegments = 30 // About two minutes; bounded by bytes and free disk.
+        loadOptions.sessionCacheByteBudget = 2_147_483_648
+        loadOptions.softwarePacketCacheStorage = .disk
         // Start on a segment's first fragments instead of waiting for the whole segment: a faster first frame on slow links.
         loadOptions.progressiveSegmentDelivery = true
         loadTask?.cancel()
@@ -159,7 +175,7 @@ public final class AetherSession {
     public func setPaused(_ paused: Bool) {
         wantsPlaying = !paused
         #if DEBUG
-        trace.note(paused ? "pause" : "play ahead=\(loopbackBufferedAhead.map { String(format: "%.1f", $0) } ?? "-")")
+        trace.note(paused ? "pause" : "play ahead=\(bufferedAhead.map { String(format: "%.1f", $0) } ?? "-")")
         #endif
         guard isLoaded else { return }   // applied in didLoad
         if paused { engine.pause() } else { engine.play() }
@@ -269,7 +285,7 @@ public final class AetherSession {
         }
         stats.frameRate = engine.sourceVideoFrameRate
         stats.videoBitrate = engine.sourceVideoBitrate > 0 ? Double(engine.sourceVideoBitrate) : nil
-        stats.bufferedAhead = max(0, engine.clock.bufferedPosition - engine.clock.currentTime)
+        stats.bufferedAhead = bufferedAhead ?? max(0, engine.clock.bufferedPosition - engine.clock.currentTime)
         let stream = engine.sourceVideoStreamFormat
         let colourDetails = [stream?.transferLabel, stream?.colorPrimariesLabel, stream?.bitDepth.map { "\($0)-bit" }].compactMap { $0 }
         let source = Self.formatName(engine.sourceVideoFormat)
@@ -331,7 +347,19 @@ public final class AetherSession {
         }.store(in: &subscriptions)
         engine.clock.$bufferedPosition.receive(on: RunLoop.main).sink { [weak self] until in
             MainActor.assumeIsolated {
-                guard let self, self.isLoaded, abs(until - self.lastBuffered) >= 0.5 else { return }
+                guard let self, self.isLoaded else { return }
+                let until = self.bufferedAhead.map { self.engine.clock.currentTime + $0 } ?? until
+                guard abs(until - self.lastBuffered) >= 0.5 else { return }
+                self.lastBuffered = until
+                self.continuation.yield(.buffered(until))
+            }
+        }.store(in: &subscriptions)
+        engine.$residentRanges.receive(on: RunLoop.main).sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isLoaded, self.engine.videoRoute == .software,
+                      let ahead = self.bufferedAhead else { return }
+                let until = self.engine.clock.currentTime + ahead
+                guard abs(until - self.lastBuffered) >= 0.5 else { return }
                 self.lastBuffered = until
                 self.continuation.yield(.buffered(until))
             }

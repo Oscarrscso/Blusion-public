@@ -29,7 +29,7 @@ a picture layer to draw on before the screen lays it out. The picture itself can
 player's spinner takes over from the button's until the first frame: a spinner shows from the tap until the picture.
 
 **Swipe to seek (iPhone and iPad, 2026-10-29):** a sideways swipe anywhere on the picture seeks live, right forward and left back, in every
-orientation. Finger height continuously sets the sensitivity: two minutes across the width at the top, ten seconds at the bottom
+orientation. Finger height continuously sets the sensitivity: five minutes across the width at the top, five seconds at the bottom
 (`SwipeSeek`), capped at the video's duration. Moving vertically alone does not jump the target. Once seeking starts, it stays seeking
 anywhere on screen until release; vertical swipes that start at the sides still control brightness and volume. A pinch stops further
 seeks at the last live position. Picture dragging is intentionally disabled on Mac at the user's request; Mac retains timeline and

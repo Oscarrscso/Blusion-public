@@ -65,6 +65,13 @@ struct SearchView: View {
             // Every arrival on Search, and every tap on its button, puts the cursor in the field and brings the keyboard up. The field
             // stays where it is, under the title.
             .onChange(of: router.searchFocusRevision, initial: true) { focusField() }
+            // Search's active toolbar must leave with its root page, rather than follow a pushed destination.
+            .onChange(of: router.searchPath.count) { _, count in
+                if count > 0 {
+                    isSearchFocused = false
+                    isSearchPresented = false
+                }
+            }
             .onChange(of: model.query) { model.queryDidChange() }
             .onSubmit(of: .search) { Task { await model.submit() } }
             .task {
@@ -93,10 +100,12 @@ struct SearchView: View {
 
     /// Puts the cursor in the field. The field is not there in the frame the tab changes, so the focus is asked for again a moment later.
     private func focusField() {
+        guard router.tab == .search, router.searchPath.isEmpty else { return }
         isSearchPresented = true
         isSearchFocused = true
         Task {
             try? await Task.sleep(for: .milliseconds(250))
+            guard router.tab == .search, router.searchPath.isEmpty else { return }
             isSearchPresented = true
             isSearchFocused = true
         }

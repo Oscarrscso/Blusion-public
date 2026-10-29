@@ -565,12 +565,14 @@ public final class DetailViewModel {
 
     public var reviewServicesRevision: Int { services.posterRatings.reviewServicesRevision }
 
-    /// A visible card checks IMDb first; TMDb fills any remaining gaps. The store coalesces requests and controls refresh/retry times.
-    /// The season's episode runtimes are looked up alongside.
-    public func episodeAppeared(_ video: Video) async {
-        async let runtimes: Void = loadEpisodeRuntimes(season: video.season)
-        await loadEpisodeScores(season: video.season)
-        if !Task.isCancelled, score(for: video) == nil { await loadEpisodeRatings(season: video.season) }
+    /// Load the displayed season once for the shelf; TMDb fills gaps after IMDb.
+    public func loadEpisodeSeason(_ season: Int?) async {
+        async let runtimes: Void = loadEpisodeRuntimes(season: season)
+        await loadEpisodeScores(season: season)
+        if !Task.isCancelled, let season,
+           detail.episodes(inSeason: season).contains(where: { score(for: $0) == nil }) {
+            await loadEpisodeRatings(season: season)
+        }
         await runtimes
     }
 
@@ -592,7 +594,7 @@ public final class DetailViewModel {
         let task = Task { [weak self] in
             let scores = await ratings.episodeRatings(for: seriesID, season: season, expectedEpisodes: expected)
             guard let self, scoresRevision == revision else { return }
-            omdbEpisodeScores[season] = scores
+            if omdbEpisodeScores[season] != scores { omdbEpisodeScores[season] = scores }
         }
         scoreTasks[season] = task
         await task.value
@@ -781,7 +783,7 @@ public final class DetailViewModel {
     public func prepareEpisodeScore(for request: StreamRequest) async {
         guard isSeries, let season = request.season, let episode = request.episode,
               let video = detail.videos.first(where: { $0.season == season && $0.episode == episode }) else { return }
-        await episodeAppeared(video)
+        await loadEpisodeSeason(video.season)
     }
 
     /// Share of the movie that is saved and resumable (0...1). Nil when it has not started, is watched or cannot be resumed.

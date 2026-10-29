@@ -27,6 +27,8 @@ struct PlayerControls: View {
     /// AI upscaling, for the Info menu: what it is doing, and how many frames a second it scales.
     var upscaling: SuperResolutionRenderer?
     var onShowStreams: () -> Void = {}
+    /// The streams' panel hangs from the top bar alongside the episode picker.
+    var streamsOpen = false
     /// The picture is on screen (`PlayerContent.isVideoReady`). Until then only the startup spinner and Close show.
     var isVideoReady = true
     /// Playback has been waiting for data for a moment: the play button shows a spinner (and still pauses).
@@ -36,6 +38,7 @@ struct PlayerControls: View {
     private var showsPlayback: Bool { model.hasStartedPlayback && isVideoReady }
     /// A menu is open: only the bar and the menu sitting on it show.
     private var menuOpen: Bool { panel != nil }
+    private var topPanelOpen: Bool { episodesOpen || streamsOpen }
     /// An episode of a series: the player offers the other episodes. A film's request names no series.
     private var hasEpisodes: Bool {
         guard !model.plan.isOffline else { return false }
@@ -51,17 +54,17 @@ struct PlayerControls: View {
                 // Keep transport centered in the *viewport*, independent of the height of the
                 // title, timeline or toolbar at the bottom.
                 transport
-                    .opacity(showsPlayback && !menuOpen && !episodesOpen ? 1 : 0)
-                    .allowsHitTesting(showsPlayback && !menuOpen && !episodesOpen)
-                    .accessibilityHidden(!showsPlayback || menuOpen || episodesOpen)
+                    .opacity(showsPlayback && !menuOpen && !topPanelOpen ? 1 : 0)
+                    .allowsHitTesting(showsPlayback && !menuOpen && !topPanelOpen)
+                    .accessibilityHidden(!showsPlayback || menuOpen || topPanelOpen)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 VStack(spacing: 0) {
                     if !menuOpen { topBar }
                     Spacer(minLength: 12)
                     bottomPanel
-                        .opacity(showsPlayback && !episodesOpen ? 1 : 0)
-                        .allowsHitTesting(showsPlayback && !episodesOpen)
-                        .accessibilityHidden(!showsPlayback || episodesOpen)
+                        .opacity(showsPlayback && !topPanelOpen ? 1 : 0)
+                        .allowsHitTesting(showsPlayback && !topPanelOpen)
+                        .accessibilityHidden(!showsPlayback || topPanelOpen)
                         // An open menu takes the height above the bar before the space over it does.
                         .layoutPriority(menuOpen ? 1 : 0)
                 }
@@ -69,7 +72,7 @@ struct PlayerControls: View {
                 .padding(.vertical, 12)
             }
             .animation(.easeInOut(duration: 0.2), value: menuOpen)
-            .animation(.easeInOut(duration: 0.2), value: episodesOpen)
+            .animation(.easeInOut(duration: 0.2), value: topPanelOpen)
             #if targetEnvironment(macCatalyst)
             .frame(maxWidth: 900)
             #endif
@@ -145,7 +148,10 @@ struct PlayerControls: View {
                         .accessibilityLabel("AirPlay").accessibilityIdentifier("player.airplay")
                     #endif
                     if model.plan.candidates.count > 1 {
-                        Button(action: onShowStreams) {
+                        Button {
+                            Haptics.tap()
+                            onShowStreams()
+                        } label: {
                             Image(systemName: "arrow.trianglehead.2.clockwise")
                                 .font(.body.weight(.semibold))
                                 .frame(width: 44, height: 44)
@@ -332,12 +338,14 @@ struct PlayerControls: View {
 
     /// The menus in one glass bar: the system segmented control picks the menu shown above it (`PlayerMenuBar`).
     private var menuBar: some View {
-        HStack(spacing: 2) {
+        VStack(spacing: 4) {
+            HStack(spacing: 2) {
             PlayerMenuBar(tabs: menuTabs, selection: $panel, speedLabel: speedLabel, subtitlesOn: model.subtitleChoice != .off)
                 .fixedSize()
             #if targetEnvironment(macCatalyst)
             volumeButton
             #endif
+            }
         }
         .font(.body.weight(.semibold))
         .padding(4)

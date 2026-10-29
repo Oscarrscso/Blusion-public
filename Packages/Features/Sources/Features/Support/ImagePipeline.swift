@@ -125,13 +125,13 @@ actor ImagePipeline {
     }
 
     /// The image at `url`, decoded no larger than `maxPixelSize` on its long edge. Memory-cached; concurrent requests for
-    /// the same URL and size share one download. Only http and https URLs are loaded.
+    /// the same URL and size share one download. Only http, https and file URLs are loaded; a file is read from disk, never fetched.
     ///
     /// An `urgent` request does not wait for one of the download slots: it starts at once, past the limit, so a page the user has just
     /// opened is not held up by posters. A download already waiting for a slot is moved ahead when an urgent caller joins it.
     func image(for url: URL, maxPixelSize: CGFloat, priority: TaskPriority = .medium, urgent: Bool = false,
                order: Int? = nil) async throws -> UIImage {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https", "file"].contains(scheme) else {
             throw ImagePipelineError.unsupportedURL
         }
         let size = min(max(maxPixelSize.rounded(), 1), 4096)
@@ -270,6 +270,12 @@ actor ImagePipeline {
     /// from the disk cache and has been there long enough to be checked for a newer copy.
     private nonisolated static func fetch(_ url: URL, maxPixelSize: CGFloat, session: URLSession,
                                           files: URLCache) async throws -> (image: UIImage, isDue: Bool) {
+        // A file on this device (a download's cached artwork) is read as it is: it is never stale and never checked for a newer copy.
+        if url.isFileURL {
+            let data = try Data(contentsOf: url)
+            guard let image = decode(data, maxPixelSize: maxPixelSize) else { throw ImagePipelineError.undecodable }
+            return (image, false)
+        }
         let (data, response) = try await session.data(from: url)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw ImagePipelineError.httpStatus(http.statusCode)

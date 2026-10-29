@@ -398,14 +398,14 @@ private struct NoITunesTransport: HTTPTransport {
         let omdbRequests = transport.requests.filter { $0.url?.host == "www.omdbapi.com" }
         #expect(omdbRequests.isEmpty, "opening the page asks for no episode scores")
         let videos = (1...3).map { (number: Int) in Video(id: "tt0944947:1:\(number)", season: 1, episode: number) }
-        async let a: Void = model.episodeAppeared(videos[0])
-        async let b: Void = model.episodeAppeared(videos[1])
-        async let c: Void = model.episodeAppeared(videos[2])
+        async let a: Void = model.loadEpisodeSeason(videos[0].season)
+        async let b: Void = model.loadEpisodeSeason(videos[1].season)
+        async let c: Void = model.loadEpisodeSeason(videos[2].season)
         _ = await (a, b, c)
         // Counted for OMDb only: the page's iTunes search goes through the same transport.
         #expect(transport.requests.filter { $0.url?.host == "www.omdbapi.com" }.count == 1, "three cards of one season share one request")
         #expect(model.score(for: videos[0]) == .init(value: 8.9, isIMDb: true))
-        await model.episodeAppeared(Video(id: "tt0944947:2:1", season: 2, episode: 1))
+        await model.loadEpisodeSeason(2)
         #expect(transport.requests.filter { $0.url?.host == "www.omdbapi.com" }.count == 2, "another season is its own request")
     }
 
@@ -427,7 +427,7 @@ private struct NoITunesTransport: HTTPTransport {
                                     services: AppServices(registry: registry, client: client, posterRatings: ratings), artworkChecked: true)
         await model.load()
         let episode = try #require(model.episodes.first)
-        await model.episodeAppeared(episode)
+        await model.loadEpisodeSeason(episode.season)
         #expect(model.score(for: episode) == .init(value: 8.9, isIMDb: true))
         #expect(transport.requests.filter { $0.url?.host == "www.omdbapi.com" }.count == 1)
         #expect(!transport.requests.contains { $0.url?.host == "api.themoviedb.org" }, "IMDb already covered the season")
@@ -473,7 +473,7 @@ private struct NoITunesTransport: HTTPTransport {
     @Test func tmdbFillsTheEpisodesOMDbHasNoScoreFor() async throws {
         let (model, transport) = try await tmdbFallbackModel(omdbKey: true)
         let episode = try #require(model.episodes.first)
-        await model.episodeAppeared(episode)
+        await model.loadEpisodeSeason(episode.season)
         #expect(transport.requests.contains { $0.url?.host == "www.omdbapi.com" })
         #expect(tmdbRequests(transport) >= 1, "an episode OMDb has no score for is filled from TMDb, OMDb being available or not")
     }
@@ -481,21 +481,21 @@ private struct NoITunesTransport: HTTPTransport {
     @Test func tmdbEpisodeScoresAreUsedWithoutAnOMDbKey() async throws {
         let (model, transport) = try await tmdbFallbackModel(omdbKey: false)
         let episode = try #require(model.episodes.first)
-        await model.episodeAppeared(episode)
+        await model.loadEpisodeSeason(episode.season)
         #expect(tmdbRequests(transport) > 0)
         #expect(model.score(for: model.episodes[0]) == .init(value: 7.5, isIMDb: false))
     }
 
     @Test func tmdbEpisodeScoresAreUsedOnceTheDailyLimitIsReached() async throws {
         let (model, transport) = try await tmdbFallbackModel(omdbKey: true, requestsToday: OMDbUsage.dailyLimit)
-        await model.episodeAppeared(try #require(model.episodes.first))
+        await model.loadEpisodeSeason(try #require(model.episodes.first).season)
         #expect(tmdbRequests(transport) > 0)
         #expect(model.score(for: model.episodes[0]) == .init(value: 7.5, isIMDb: false))
     }
 
     @Test func tmdbEpisodeScoresAreUsedOnceOMDbIsPausedByARateLimit() async throws {
         let (model, transport) = try await tmdbFallbackModel(omdbKey: true, omdbStatus: 429)
-        await model.episodeAppeared(try #require(model.episodes.first))
+        await model.loadEpisodeSeason(try #require(model.episodes.first).season)
         #expect(tmdbRequests(transport) > 0)
         #expect(model.score(for: model.episodes[0]) == .init(value: 7.5, isIMDb: false))
     }

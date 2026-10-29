@@ -152,7 +152,7 @@ private struct CreditGroupMenu: View {
         .padding(.horizontal, 12)
         .frame(height: 28)
         // The tint belongs to the glass inside the label, just like Sort and AI, so it travels with the system menu animation.
-        .glassEffect(.regular.interactive().tint((PlayColourStore.colour(hex: playColourHex) ?? .clear).opacity(0.25)), in: .capsule)
+        .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: .capsule)
         .animation(.smooth(duration: 0.3), value: playColourHex)
         .contentShape(Capsule())
         .pointerFeedback()

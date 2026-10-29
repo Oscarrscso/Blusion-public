@@ -81,6 +81,7 @@ extension View {
 }
 
 private struct InstantDestination: ViewModifier {
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(AppRouter.self) private var router
 
     func body(content: Content) -> some View {
@@ -90,15 +91,17 @@ private struct InstantDestination: ViewModifier {
         content
             .navigationBarBackButtonHidden()
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        router.goBack(in: \.homePath)
-                    } label: {
-                        Image(systemName: "chevron.backward")
-                            .fontWeight(.semibold)
+                if !isPhoneLandscape || UIDevice.current.userInterfaceIdiom != .phone {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            router.goBack(in: \.homePath)
+                        } label: {
+                            Image(systemName: "chevron.backward")
+                                .fontWeight(.semibold)
+                        }
+                        .accessibilityLabel("Back")
+                        .accessibilityIdentifier("detail.back")
                     }
-                    .accessibilityLabel("Back")
-                    .accessibilityIdentifier("detail.back")
                 }
             }
         #endif

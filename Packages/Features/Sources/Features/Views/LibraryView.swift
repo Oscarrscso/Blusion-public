@@ -29,14 +29,11 @@ struct LibraryView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     pageTitle
-                    NavigationLink(value: LibraryDestination.downloads) {
-                        Label("Downloads", systemImage: "arrow.down.circle")
-                            .font(.headline).frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, metrics.pageMargin).padding(.bottom)
-                    }
                     filters
                     VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
-                        if !model.hasLoaded {
+                        if model.showsDownloads {
+                            DownloadsView(services: services, filter: model.downloadFilter, clearFilters: { model.clearFilters() })
+                        } else if !model.hasLoaded {
                             SkeletonRow()
                         } else if model.isEmpty {
                             EmptyStateLayout(title: "Your library is empty", systemImage: "books.vertical",
@@ -69,10 +66,11 @@ struct LibraryView: View {
             .screenBackground()
             .browsePageTopMargin()
             .navigationTitle("")
-            .navigationDestination(for: LibraryDestination.self) { _ in DownloadsView(services: services) }
             .task(id: router.opensDownloads) {
+                // A long press on a Download button opens Library's Downloads page, from the top of the Library.
                 guard router.opensDownloads, router.tab == .library else { return }
-                router.libraryPath = NavigationPath([LibraryDestination.downloads])
+                router.libraryPath = NavigationPath()
+                model.showsDownloads = true
                 router.opensDownloads = false
             }
             .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
@@ -120,43 +118,86 @@ struct LibraryView: View {
     /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
-    /// The Movies/Series selector, then the Year, Rating and Sort menus, then the chips: the filter block Discover shares (see
-    /// `BrowseFilterBar`), so the two pages look the same.
+    /// The type selector: All, Movies, Series and Downloads. Then the menus and chips of the page in view. The Library shows its Year, Rating
+    /// and Sort; Downloads shows Status, Year and Sort. Each page keeps its own selection, so switching never changes the other's. The block
+    /// is the one Discover shares (see `BrowseFilterBar`), so the pages look the same.
     private var filters: some View {
         @Bindable var model = model
         let kinds: [LibraryKind] = [.movie, .series]
-        return BrowseFilterBar(kinds: .init(titles: ["All"] + kinds.map(\.title), selection: Binding {
-            kinds.firstIndex(where: { model.filter.kinds.contains($0) }).map { $0 + 1 } ?? 0
+        let kindIndex = kinds.firstIndex(where: { model.filter.kinds.contains($0) }).map { $0 + 1 } ?? 0
+        let downloadsIndex = kinds.count + 1
+        return BrowseFilterBar(kinds: .init(titles: ["All"] + kinds.map(\.title) + ["Downloads"], selection: Binding {
+            model.showsDownloads ? downloadsIndex : kindIndex
         } set: { index in
-            model.filter.kinds = index > 0 && index <= kinds.count ? [kinds[index - 1]] : []
-        }, identifier: "library.filter.kind"), chips: model.filter.chips.map { chip in
-            ActiveFilterChip(id: chip.id, label: chip.label) { model.removeFilter(chip) }
-        }, identifier: "library", clearAll: { model.clearFilters() }) {
-            Menu {
-                ReleaseYearOptions(minimumYear: $model.filter.minimumYear, maximumYear: $model.filter.maximumYear,
-                                   identifier: "library.filter.year")
-            } label: {
-                filterLabel("Year", systemImage: "calendar", isActive: model.filter.minimumYear != nil || model.filter.maximumYear != nil)
-            }
-            .accessibilityIdentifier("library.filter.year")
-            Menu {
-                RatingPicker(threshold: $model.filter.minimumRating)
-            } label: {
-                filterLabel("Rating", systemImage: "star.fill", isActive: model.filter.minimumRating != nil)
-            }
-            .accessibilityIdentifier("library.filter.rating")
-            Menu {
-                Picker("Sort by", selection: $model.filter.sort) {
-                    ForEach(LibrarySort.allCases) { Text($0.title).tag($0) }
+            model.showsDownloads = index == downloadsIndex
+            // Picking Downloads leaves the Library's type choice as it was, so returning to the Library restores it.
+            if index <= kinds.count { model.filter.kinds = index > 0 ? [kinds[index - 1]] : [] }
+        }, identifier: "library.filter.kind", symbols: ["square.grid.2x2", "film", "tv", "arrow.down.circle"]), chips: filterChips,
+        identifier: "library", clearAll: { model.clearFilters() }) {
+            if model.showsDownloads {
+                Menu {
+                    Picker("Status", selection: $model.downloadFilter.status) {
+                        ForEach(DownloadStatusFilter.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: {
+                    let status = model.downloadFilter.status
+                    filterLabel(status == .all ? "Status" : status.title, systemImage: "arrow.down.circle", isActive: status != .all)
                 }
-            } label: {
-                filterLabel(model.filter.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.filter.sort != .recentlyAdded)
+                .accessibilityIdentifier("library.downloads.filter.status")
+                Menu {
+                    ReleaseYearOptions(minimumYear: $model.downloadFilter.minimumYear, maximumYear: $model.downloadFilter.maximumYear,
+                                       identifier: "library.downloads.filter.year")
+                } label: {
+                    filterLabel("Year", systemImage: "calendar",
+                                isActive: model.downloadFilter.minimumYear != nil || model.downloadFilter.maximumYear != nil)
+                }
+                .accessibilityIdentifier("library.downloads.filter.year")
+                Menu {
+                    Picker("Sort by", selection: $model.downloadFilter.sort) {
+                        ForEach(DownloadSort.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: {
+                    filterLabel(model.downloadFilter.sort.title, systemImage: "arrow.up.arrow.down",
+                                isActive: model.downloadFilter.sort != .recentlyAdded)
+                }
+                .accessibilityLabel("Sort by \(model.downloadFilter.sort.title)")
+                .accessibilityIdentifier("library.downloads.sort")
+            } else {
+                Menu {
+                    ReleaseYearOptions(minimumYear: $model.filter.minimumYear, maximumYear: $model.filter.maximumYear,
+                                       identifier: "library.filter.year")
+                } label: {
+                    filterLabel("Year", systemImage: "calendar", isActive: model.filter.minimumYear != nil || model.filter.maximumYear != nil)
+                }
+                .accessibilityIdentifier("library.filter.year")
+                Menu {
+                    RatingPicker(threshold: $model.filter.minimumRating)
+                } label: {
+                    filterLabel("Rating", systemImage: "star.fill", isActive: model.filter.minimumRating != nil)
+                }
+                .accessibilityIdentifier("library.filter.rating")
+                Menu {
+                    Picker("Sort by", selection: $model.filter.sort) {
+                        ForEach(LibrarySort.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: {
+                    filterLabel(model.filter.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.filter.sort != .recentlyAdded)
+                }
+                .accessibilityLabel("Sort by \(model.filter.sort.title)")
+                .accessibilityIdentifier("library.sort")
             }
-            .accessibilityLabel("Sort by \(model.filter.sort.title)")
-            .accessibilityIdentifier("library.sort")
         }
         .sensoryFeedback(.selection, trigger: model.filter)
+        .sensoryFeedback(.selection, trigger: model.downloadFilter)
         .accessibilityIdentifier("library.filters")
+    }
+
+    /// The chips of the page in view: the Library's filters, or the Downloads' status and years.
+    private var filterChips: [ActiveFilterChip] {
+        if model.showsDownloads {
+            return model.downloadFilter.chips.map { chip in ActiveFilterChip(id: chip.id, label: chip.label) { model.removeDownloadFilter(chip) } }
+        }
+        return model.filter.chips.map { chip in ActiveFilterChip(id: chip.id, label: chip.label) { model.removeFilter(chip) } }
     }
 
     private func filterLabel(_ title: String, systemImage: String? = nil, tint: Color = .primary, isActive: Bool = false) -> some View {

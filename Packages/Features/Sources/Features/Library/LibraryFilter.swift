@@ -198,14 +198,7 @@ public struct LibraryFilter: Equatable, Sendable {
         return chips
     }
 
-    private var yearLabel: String {
-        switch (minimumYear, maximumYear) {
-        case let (low?, high?): low == high ? "\(low)" : "\(low)–\(high)"
-        case let (low?, nil): "From \(low)"
-        case let (nil, high?): "Until \(high)"
-        case (nil, nil): ""
-        }
-    }
+    private var yearLabel: String { LibraryFiltering.yearSpanLabel(from: minimumYear, to: maximumYear) }
 }
 
 /// One title in the Library, with what is known about it. A saved title carries its saved record and any progress made on it. A watch
@@ -365,6 +358,17 @@ public enum LibraryFiltering {
     /// Every genre any entry has, sorted, for the genre picker.
     public static func genres(in entries: [LibraryEntry]) -> [String] {
         Set(entries.flatMap(\.genres)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// A release span as the chips name it: "1990", "1990–1999", "From 1990" or "Until 1999". Empty when neither end is set. Shared with
+    /// the Downloads page's year filter.
+    public static func yearSpanLabel(from low: Int?, to high: Int?) -> String {
+        switch (low, high) {
+        case let (low?, high?): low == high ? "\(low)" : "\(low)–\(high)"
+        case let (low?, nil): "From \(low)"
+        case let (nil, high?): "Until \(high)"
+        case (nil, nil): ""
+        }
     }
 
     /// The earliest and latest years any entry has; nil when none has a year.

@@ -123,8 +123,8 @@ struct AppDestinations: ViewModifier {
             }
             .navigationDestination(for: PersonDestination.self) { PersonView(destination: $0, services: services).titlePage(on: path) }
             .navigationDestination(for: TMDbTitleDestination.self) { TMDbTitleView(destination: $0, services: services).titlePage(on: path) }
-            .navigationDestination(for: StreamRequest.self) { StreamPickerView(request: $0, services: services) }
-            .navigationDestination(for: CatalogListRequest.self) { CatalogListView(request: $0, services: services) }
+            .navigationDestination(for: StreamRequest.self) { StreamPickerView(request: $0, services: services).browsingBackNavigation() }
+            .navigationDestination(for: CatalogListRequest.self) { CatalogListView(request: $0, services: services).browsingBackNavigation() }
             // A title's page that left the stack without a word (a pop to the root) gives up its depth, so no other page there is taken
             // for one (see `TitlePageBars`).
             .onChange(of: router[keyPath: path].count) { _, count in
@@ -176,10 +176,31 @@ private struct TitlePageBars: ViewModifier {
     }
 }
 
+/// The corner Back replaces native navigation only on landscape iPhone browsing pages.
+private struct BrowsingBackNavigation: ViewModifier {
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+
+    func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content
+        #else
+        let usesCornerBack = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
+        content
+            .navigationBarBackButtonHidden(usesCornerBack)
+            .toolbarVisibility(usesCornerBack ? .hidden : .automatic, for: .navigationBar)
+        #endif
+    }
+}
+
 extension View {
+    func browsingBackNavigation() -> some View {
+        modifier(BrowsingBackNavigation())
+    }
+
     /// See `TitlePageBars`.
     func titlePage(on path: ReferenceWritableKeyPath<AppRouter, NavigationPath>) -> some View {
         modifier(TitlePageBars(path: path))
+            .browsingBackNavigation()
     }
 }
 

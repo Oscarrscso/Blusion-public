@@ -21,6 +21,8 @@ public struct DownloadItem: Identifiable, Codable, Sendable, Equatable {
     public var retries: Int = 0
     public var createdAt: Date = Date()
     public var mediaPath: String?
+    /// The title's landscape picture, cached beside the file so the download keeps its artwork offline. Nil until it has been cached.
+    public var artworkPath: String?
     public var subtitles: [DownloadSubtitle] = []
     public var failure: String?
     public var pendingDeletion: Bool?
@@ -38,7 +40,7 @@ public struct DownloadItem: Identifiable, Codable, Sendable, Equatable {
     }
     public var fraction: Double { expected > 0 ? min(1, Double(received) / Double(expected)) : 0 }
     public var hasValidPaths: Bool {
-        ([mediaPath].compactMap { $0 } + subtitles.map(\.path)).allSatisfy { DownloadFiles.valid($0, for: id) }
+        ([mediaPath, artworkPath].compactMap { $0 } + subtitles.map(\.path)).allSatisfy { DownloadFiles.valid($0, for: id) }
     }
     public static func validRequest(_ request: StreamRequest) -> Bool {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ":._-"))

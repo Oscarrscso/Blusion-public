@@ -107,6 +107,10 @@ public final class DownloadManager {
                 }
             }
             try await persist()
+            // Records saved before artwork was cached get theirs now, and one that failed offline is tried again at the next launch.
+            for item in items where item.artworkPath == nil && !deleting.contains(item.id) {
+                Task { await cacheArtwork(item.id, request: item.request) }
+            }
             listener = Task { [weak self] in
                 for await event in adapter.events { await self?.handle(event) }
             }
@@ -172,6 +176,8 @@ public final class DownloadManager {
                 throw error
             }
             streamDownloads[ranked.id] = item.id
+            let artworkID = item.id, artworkRequest = safeRequest
+            Task { await cacheArtwork(artworkID, request: artworkRequest) }
             await pump()
             return true
         } catch { errorMessage = "Could not save download"; return false }
@@ -223,7 +229,8 @@ public final class DownloadManager {
         var listing = StreamListing(asking: fetched.asked, config: config)
         for await response in fetched.responses { listing.apply(response) }
         for await result in streams.sniff(listing.sniffTargets) { listing.setContainer(result.container, forKey: result.key) }
-        guard let choice = AutoStreamRanking.ranked(listing.items, duration: request.expectedDuration)
+        let preferences = await settings.load().rankingPreferences
+        guard let choice = AutoStreamRanking.ranked(listing.items, duration: request.expectedDuration, preferences: preferences)
             .first(where: { DownloadEligibility.container(for: $0.item, config: config) != nil })?.item else {
             errorMessage = "No downloadable streams"; return
         }
@@ -236,7 +243,7 @@ public final class DownloadManager {
             if deleting.contains(id) { Task { await remove(id) } }
             else { Task { await pump() } }
         }
-        items[i].state = .paused
+        items[i].state = .paused; items[i].failure = nil
         transferSpeeds[id] = nil; rateSamples[id] = nil
         retryTasks.removeValue(forKey: id)?.cancel()
         do { try await persist() } catch { errorMessage = "Could not save pause" }
@@ -359,7 +366,12 @@ public final class DownloadManager {
         }
     }
     private func fail(_ id: UUID, _ message: String) async {
-        guard let i = index(id) else { return }
+        guard let i = index(id), !deleting.contains(id) else { return }
+        // Late transfer callbacks must not undo an explicit pause.
+        guard items[i].state != .paused else {
+            errorMessage = message
+            return
+        }
         items[i].state = .failed; items[i].failure = message
         do { try await persist() } catch { errorMessage = "Could not save download state" }
     }
@@ -465,7 +477,8 @@ public final class DownloadManager {
         }
     }
     private func retry(_ id: UUID, expired: Bool) async {
-        guard let i = index(id), items[i].state == .downloading, items[i].retries < 3 else {
+        guard let i = index(id), items[i].state == .downloading, !deleting.contains(id) else { return }
+        guard items[i].retries < 3 else {
             await fail(id, "Download failed"); return
         }
         items[i].retries += 1
@@ -648,6 +661,29 @@ public final class DownloadManager {
         return PlaybackPlan(request: item.request, candidates: [PlaybackCandidate(id: "download:\(id.uuidString)", title: item.request.title,
                                                                                route: route, subtitles: tracks)],
                             retriesInFallbackEngine: fallback, retriesInBackupEngine: fallback)
+    }
+    /// The download's cached landscape picture, which its card shows offline. Nil until it has been cached.
+    public func artworkURL(for item: DownloadItem) -> URL? {
+        guard let root, let path = item.artworkPath else { return nil }
+        return DownloadFiles.resolve(path, for: item.id, in: root)
+    }
+    /// Keeps the title's landscape picture beside the download's file. A picture that cannot be fetched, or is not one, is not kept, and
+    /// the card falls back to Metahub's art while it is online.
+    private func cacheArtwork(_ id: UUID, request: StreamRequest) async {
+        guard let root, let source = DownloadArtwork.source(for: request), index(id) != nil, !deleting.contains(id),
+              let fetched = try? await URLSession.shared.data(from: source) else { return }
+        let (data, response) = fetched
+        guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
+              DownloadArtwork.isPicture(data) else { return }
+        let file = root.appendingPathComponent(id.uuidString + ".artwork")
+        guard (try? data.write(to: file, options: .atomic)) != nil else { return }
+        // The download may have been deleted while its picture was fetched. Its picture goes with it.
+        guard let current = index(id), !deleting.contains(id) else {
+            try? FileManager.default.removeItem(at: file)
+            return
+        }
+        items[current].artworkPath = file.lastPathComponent
+        try? await persist()
     }
     public func opened(_ id: UUID) { playing.insert(id) }
     public func closed(_ id: UUID, watched: Bool) async {

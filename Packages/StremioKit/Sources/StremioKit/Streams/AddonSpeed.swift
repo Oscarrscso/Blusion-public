@@ -1,9 +1,9 @@
 import Foundation
 
 /// What Auto Pick waits for before it chooses a stream: every addon (as it always has), the fastest addon by the speed test, or one
-/// addon the user named. With an addon to wait for, Auto Pick acts as soon as that addon has answered with a stream it can start,
-/// ranking everything that has arrived by then. When that addon fails, has nothing it can start or does not cover the title, Auto Pick
-/// waits for every addon as before.
+/// addon the user named. With an addon to wait for, Auto Pick chooses once that addon has answered with a stream it can start and the
+/// settle window (`AddonSpeedChoice.settleWindow`) has passed, ranking everything that has arrived by then, so the first answer is not
+/// taken as the best. When that addon fails, has nothing it can start or does not cover the title, Auto Pick waits for every addon as before.
 public enum AutoPickWait: Sendable, Equatable, Hashable, Codable {
     case allAddons
     /// The fastest addon by the speed test (`AddonSpeedChoice.fastest`).
@@ -201,6 +201,9 @@ public final class DefaultsAddonSpeedStore: AddonSpeedStore, @unchecked Sendable
 public enum AddonSpeedChoice {
     /// An addon counts as reliable when at least this share of its requests succeeded.
     public static let minimumReliability = 0.8
+    /// Once the addon Auto Pick waits for has answered with a stream it can start, the other addons get this long to answer before Auto Pick
+    /// chooses. A stream that arrives first is often not the best one, so a clearly better release from a slightly slower addon still counts.
+    public static let settleWindow: Duration = .seconds(3)
     /// Auto moves from its current addon only to one whose median is at least this much smaller, both as a share and in seconds, so a
     /// few lucky answers do not make it hop between two addons that are about as fast.
     public static let switchShare = 0.25

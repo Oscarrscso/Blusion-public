@@ -1,4 +1,8 @@
 #if canImport(UIKit)
+#if os(iOS) && !targetEnvironment(macCatalyst)
+import AVFoundation
+@preconcurrency import MediaPlayer
+#endif
 import PlayerKit
 import StremioKit
 import SwiftUI
@@ -46,6 +50,33 @@ enum ScreenBrightness {
         set { screen?.brightness = min(1, max(0, newValue)) }
     }
 }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+/// Keeps the system volume control mounted while picture swipes drive its slider.
+@MainActor
+final class SystemVolume {
+    let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 150, height: 32))
+
+    var value: Double {
+        get { Double(AVAudioSession.sharedInstance().outputVolume) }
+        set {
+            guard let slider = view.subviews.compactMap({ $0 as? UISlider }).first else { return }
+            slider.setValue(Float(min(1, max(0, newValue))), animated: false)
+            slider.sendActions(for: .valueChanged)
+        }
+    }
+}
+
+struct SystemVolumeControl: UIViewRepresentable {
+    let volume: SystemVolume
+
+    func makeUIView(context: Context) -> MPVolumeView {
+        volume.view
+    }
+
+    func updateUIView(_ view: MPVolumeView, context: Context) {}
+}
+#endif
 
 enum SubtitleFileTypes {
     static let subtitles: [UTType] = ["srt", "vtt", "ass", "ssa", "sup"].compactMap { UTType(filenameExtension: $0) } + [.plainText]

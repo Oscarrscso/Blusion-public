@@ -17,8 +17,8 @@ import StremioKitTestSupport
         AutoStreamRanking.assess(release("score", text), duration: runtime).qualityScore
     }
 
-    private func best(_ items: [RankedStream], duration: TimeInterval?) -> String? {
-        AutoStreamRanking.best(from: items, duration: duration)?.item.id
+    private func best(_ items: [RankedStream], duration: TimeInterval?, preferences: RankingPreferences = .init()) -> String? {
+        AutoStreamRanking.best(from: items, duration: duration, preferences: preferences)?.item.id
     }
 
     @Test func strongAudioEncodeCanBeatALossyRemux() {
@@ -100,7 +100,13 @@ import StremioKitTestSupport
                                    container: nil, route: template.route, addonIndex: 0, indexInAddon: 0)
         #expect(StreamAvailability.automaticCandidates(from: [torrent]).count == 1)
         #expect(!StreamAvailability.isCached(stream))
-        #expect(best([release("unknown", "1080p WEB-DL"), torrent], duration: nil) == "torrent")
+        // A release that plays now beats one that must download first, whatever its quality.
+        #expect(best([release("unknown", "720p WEB-DL"), torrent], duration: nil) == "unknown")
+        // Among releases that must download, the seeders decide.
+        let deadSwarm = RankedStream(id: "dead", stream: S.torrent("uncached 1080p WEB-DL seeders: 0"), addon: template.addon, alsoProvidedBy: [],
+                                     quality: StreamQuality.parse(from: ["uncached 1080p WEB-DL seeders: 0"]), container: nil, route: template.route,
+                                     addonIndex: 0, indexInAddon: 0)
+        #expect(best([deadSwarm, torrent], duration: nil) == "torrent")
         #expect(StreamAvailability.automaticCandidates(from: [torrent.rerouted(.unsupported(.matroska))]).isEmpty)
         #expect(!StreamAvailability.isCached(release("contradicted", "[RD+] Cached: false").stream))
         #expect(best([release("cached", "[RD+] 1080p WEB-DL seeders: 0"), release("unknown", "1080p WEB-DL")], duration: nil) == "cached")
@@ -246,5 +252,144 @@ import StremioKitTestSupport
         #expect(StreamQuality.parse(from: ["Movie 1080p 🌱 9"]).seeders == 9)
         #expect(StreamQuality.parse(from: ["Movie 1080p 12 seeders 44.66 GB"]).seeders == 12, "the size's number is not the seeder count")
         #expect(StreamQuality.parse(from: ["Movie 1080p seeders 12 44.66 GB"]).seeders == 12)
+    }
+
+    // MARK: The screenshot scenario
+
+    /// The release Auto Pick chose over the better one: 720p cached WEB-DL, 432 MB, DD+, against 1080p cached WEB-DL, 830 MB, DD+.
+    @Test func cachedFullHDBeatsCachedHDAtTheSameCodecAndAudio() {
+        let fullHD = release("fullHD", "[RD+] Show.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP 830 MB")
+        let hd = release("hd", "[RD+] Show.S01E01.720p.AMZN.WEB-DL.DDP5.1.H.264-GRP 432 MB")
+        for runtime in [nil, 1_320, 2_700, 7_200] as [TimeInterval?] {
+            #expect(best([hd, fullHD], duration: runtime) == "fullHD", "runtime \(String(describing: runtime))")
+            #expect(best([fullHD, hd], duration: runtime) == "fullHD", "list order does not decide it")
+        }
+    }
+
+    @Test func theLosingReleaseSaysWhichFactCostIt() {
+        let fullHD = release("fullHD", "[RD+] Show.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-GRP 830 MB")
+        let hd = release("hd", "[RD+] Show.S01E01.720p.AMZN.WEB-DL.DDP5.1.H.264-GRP 432 MB")
+        let lines = AutoStreamRanking.explain(AutoStreamRanking.ranked([hd, fullHD], duration: 2_700))
+        #expect(lines.map(\.id) == ["fullHD", "hd"])
+        #expect(lines.map(\.rank) == [1, 2])
+        #expect(lines[0].reasons.first?.hasPrefix("chosen, ") == true)
+        #expect(lines[1].reasons.first?.contains("points behind") == true)
+        #expect(lines[1].reasons.contains { $0.hasPrefix("resolution 720p (+6) against 1080p (+12)") }, "\(lines[1].reasons)")
+    }
+
+    // MARK: REMUX hierarchy
+
+    @Test func aFourKRemuxBeatsAFullHDRemux() {
+        let uhd = release("uhd", "Movie.2160p.REMUX.HEVC.DTS-HD.MA.5.1-GRP 60 GB")
+        let fhd = release("fhd", "Movie.1080p.REMUX.AVC.DTS-HD.MA.5.1-GRP 22 GB")
+        #expect(best([fhd, uhd], duration: runtime) == "uhd")
+        #expect(best([uhd, fhd], duration: runtime) == "uhd")
+    }
+
+    @Test func aFullHDRemuxBeatsAFourKWebDLAtTypicalBitrates() {
+        let remux = release("remux", "Movie.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-GRP 22 GB")
+        let web = release("web", "Movie.2160p.AMZN.WEB-DL.HEVC.DDP5.1.HDR-GRP 9 GB")
+        #expect(best([web, remux], duration: runtime) == "remux")
+        #expect(best([remux, web], duration: runtime) == "remux")
+    }
+
+    // MARK: Caching
+
+    private func torrent(_ id: String, _ text: String) -> RankedStream {
+        let template = release(id, "1080p WEB-DL")
+        let stream = S.torrent(text)
+        return RankedStream(id: id, stream: stream, addon: template.addon, alsoProvidedBy: [], quality: StreamQuality.parse(stream),
+                            container: nil, route: template.route, addonIndex: 0, indexInAddon: 0)
+    }
+
+    @Test func aCachedReleaseBeatsAnUncachedTorrentOfHigherQuality() {
+        let uncached = torrent("uncached", "uncached 2160p REMUX HEVC HDR TrueHD Atmos 7.1 seeders: 80")
+        let cached = release("cached", "[RD+] 1080p WEB-DL DDP5.1")
+        #expect(best([uncached, cached], duration: runtime) == "cached")
+        #expect(best([cached, uncached], duration: runtime) == "cached")
+        #expect(AutoStreamRanking.ranked([uncached, cached], duration: runtime).first?.needsDownload == false)
+    }
+
+    @Test func aCachedTorrentBeatsAnUncachedOneOfTheSameQuality() {
+        let uncached = torrent("uncached", "uncached 1080p WEB-DL seeders: 40")
+        let cached = torrent("cached", "[RD+] 1080p WEB-DL seeders: 40")
+        #expect(best([uncached, cached], duration: runtime) == "cached")
+    }
+
+    // MARK: Audio
+
+    @Test func dolbyDigitalPlusBeatsAACAtTheSameVideo() {
+        #expect(score("Movie.1080p.WEB-DL.DDP5.1") > score("Movie.1080p.WEB-DL.AAC"))
+        #expect(score("Movie.1080p.WEB-DL.DDP5.1") > score("Movie.1080p.WEB-DL.AAC.5.1"))
+    }
+
+    @Test func losslessAudioBeatsDolbyDigitalPlusAtTheSameVideo() {
+        let lossless = release("lossless", "Movie.1080p.BluRay.TrueHD.7.1")
+        let lossy = release("lossy", "Movie.1080p.BluRay.DDP5.1")
+        #expect(best([lossy, lossless], duration: runtime) == "lossless")
+    }
+
+    // MARK: Preferences
+
+    private func addonRelease(_ id: String, _ text: String, from addon: AddonSummary, group: String? = nil) -> RankedStream {
+        let stream = group.map { g in S.direct(text, "https://e.example.com/\(id).mkv", bingeGroup: g) } ?? S.direct(text, "https://e.example.com/\(id).mkv")
+        return RankedStream(id: id, stream: stream, addon: addon, alsoProvidedBy: [], quality: StreamQuality.parse(stream), container: nil,
+                            route: .fallback(URL(string: "https://e.example.com/\(id).mkv")!, .container(.matroska)), addonIndex: 0, indexInAddon: 0)
+    }
+
+    @Test func aSourcePreferenceNeverOutweighsAClearlyBetterRelease() {
+        let debridFourK = release("debrid4K", "☁️ ⚡ Movie.2160p.BluRay.REMUX 60 GB")
+        let usenetFullHD = release("usenetFHD", "📰 ⚡ Movie.1080p.WEB-DL 9 GB")
+        for preference in [StreamSourcePreference.usenet, .debrid, .balanced] {
+            #expect(best([debridFourK, usenetFullHD], duration: runtime, preferences: .init(sourcePreference: preference)) == "debrid4K",
+                    "\(preference)")
+        }
+    }
+
+    @Test func aSourcePreferenceBreaksANearTie() {
+        let debrid = release("debrid", "☁️ ⚡ Movie.1080p.WEB-DL.DDP5.1 9 GB")
+        let usenet = release("usenet", "📰 ⚡ Movie.1080p.WEB-DL.DDP5.1 9 GB")
+        #expect(best([debrid, usenet], duration: runtime, preferences: .init(sourcePreference: .usenet)) == "usenet")
+        #expect(best([usenet, debrid], duration: runtime, preferences: .init(sourcePreference: .debrid)) == "debrid")
+    }
+
+    @Test func anExplicitResolutionIsAConstraint() {
+        let remux = release("remux", "Movie.2160p.REMUX.TrueHD.Atmos 60 GB")
+        let hd = release("hd", "[RD+] Movie.720p.WEB-DL.DDP5.1 2 GB")
+        #expect(best([remux, hd], duration: runtime, preferences: .init(preferredResolution: 720)) == "hd")
+        #expect(best([remux, hd], duration: runtime, preferences: .init(preferredResolution: 2160)) == "remux")
+    }
+
+    // MARK: Episode continuity
+
+    @Test func continuityDoesNotKeepAClearlyWeakerReleaseFromThePreviousAddon() {
+        let previous = S.addon("Previous")
+        let other = S.addon("Other")
+        let weak = addonRelease("weak", "[RD+] 720p WEB-DL DDP5.1", from: previous, group: "show")
+        let strong = addonRelease("strong", "[RD+] 1080p WEB-DL DDP5.1", from: other, group: "show")
+        let continuing = BingeContext(bingeGroup: "show", addonID: previous.id)
+        #expect(AutoStreamRanking.best(from: [weak, strong], duration: runtime, continuing: continuing)?.item.id == "strong")
+        #expect(BingeSelection.pick(from: [weak, strong], continuing: continuing, duration: runtime)?.id == "strong")
+    }
+
+    @Test func continuityBreaksANearTieInFavourOfThePreviousAddon() {
+        let previous = S.addon("Previous")
+        let other = S.addon("Other")
+        let same = addonRelease("same", "[RD+] 1080p WEB-DL DDP5.1", from: previous, group: "show")
+        let different = addonRelease("different", "[RD+] 1080p WEB-DL DDP5.1", from: other, group: "show")
+        let continuing = BingeContext(bingeGroup: "show", addonID: previous.id)
+        #expect(BingeSelection.pick(from: [different, same], continuing: continuing, duration: runtime)?.id == "same")
+    }
+
+    // MARK: Diagnostics
+
+    @Test func everyReleaseGetsAReasonList() {
+        let a = release("a", "[RD+] 2160p REMUX HEVC TrueHD Atmos 7.1 60 GB")
+        let b = release("b", "[RD+] 1080p WEB-DL H.264 DDP5.1 830 MB")
+        let lines = AutoStreamRanking.explain(AutoStreamRanking.ranked([b, a], duration: runtime))
+        #expect(lines.count == 2)
+        #expect(lines.allSatisfy { !$0.reasons.isEmpty })
+        #expect(AutoStreamRanking.explain([]).isEmpty)
+        #expect(AutoStreamRanking.explain(AutoStreamRanking.ranked([a], duration: runtime)).first?.reasons == ["the only candidate"])
     }
 }

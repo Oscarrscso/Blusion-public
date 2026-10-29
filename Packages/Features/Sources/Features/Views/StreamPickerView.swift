@@ -562,7 +562,7 @@ struct StreamPickerView: View {
                 .foregroundStyle(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .glassCircleButton(.small, glass: .regular.interactive().tint((PlayColourStore.colour(hex: playColourHex) ?? .clear).opacity(0.25)))
+        .glassCircleButton(.small, glass: .regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)))
         .frame(width: side, height: side)
         .animation(.smooth(duration: 0.3), value: playColourHex)
         .disabled(request == nil)
@@ -982,7 +982,7 @@ struct StreamPickerView: View {
                 StreamRow(item: item, isBest: isRecommended, isRemux: item.quality.isRemux,
                           savesToPlayer: savesUnderMark(item),
                           downloadsToPlayer: savesUnderMark(item),
-                          downloadsNatively: services.downloads != nil && DownloadEligibility.container(for: item, config: model.listing.config) != nil,
+                          downloadsNatively: true,
                           isPreparing: preparingItemID == item.id)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         guard order < 3, height > 0 else { return }
@@ -999,13 +999,15 @@ struct StreamPickerView: View {
             .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight))
             .contextMenu { contextActions(for: item) }
             .overlayPreferenceValue(StreamNativeDownloadSlotKey.self) { slot in
-                if let slot, let manager = services.downloads {
+                if let slot {
                     GeometryReader { proxy in
-                        NativeDownloadButton(manager: manager, item: manager.item(forStream: item.id),
-                                             isLoading: manager.enqueueing.contains(item.id),
+                        NativeDownloadButton(manager: services.downloads, item: services.downloads?.item(forStream: item.id),
+                                             isLoading: services.downloads?.enqueueing.contains(item.id) == true,
+                                             isAvailable: services.downloads?.item(forStream: item.id) != nil
+                                                 || DownloadEligibility.container(for: item, config: model.listing.config) != nil,
                                              size: item.route.isPlayable ? StreamCardMetrics.playButtonSize : StreamCardMetrics.markSize,
                                              matchesStream: true) {
-                            Task { await manager.enqueue(item, request: model.request) }
+                            Task { await services.downloads?.enqueue(item, request: model.request) }
                         }
                         .position(x: proxy[slot].midX, y: proxy[slot].midY)
                         .accessibilityIdentifier("stream.nativeDownload.button")

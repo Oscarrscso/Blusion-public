@@ -359,6 +359,16 @@ public final class MPVBackend: FallbackBackend {
 
     public func makeEventStream() -> AsyncStream<FallbackEvent> { events }
 
+    public var startCushion: StartCushion? { .standard }
+    public var bufferedAhead: TimeInterval? {
+        guard let handle else { return nil }
+        let read = MPVProperties(handle: handle)
+        guard let duration = read.double("duration"), duration > 0 else { return nil }
+        let ahead = read.double("demuxer-cache-duration") ?? 0
+        if (read.double("time-pos") ?? 0) + ahead >= duration - 0.5 { return nil }
+        return ahead
+    }
+
     /// Multichannel PCM reaches HDMI adapters and AirPlay receivers that take it; the system downmixes for headphones and the speaker.
     private static func activateAudioSession() {
         let session = AVAudioSession.sharedInstance()
@@ -368,10 +378,8 @@ public final class MPVBackend: FallbackBackend {
         try? session.setPreferredOutputNumberOfChannels(max(2, session.maximumOutputNumberOfChannels))
     }
 
-    /// Bigger buffers on devices with the memory for them: a 4K remux runs at 60–100 Mbit/s, so 400 MB is about half a minute.
-    private static var cacheBytes: String {
-        ProcessInfo.processInfo.physicalMemory >= 6 * 1_073_741_824 ? "400MiB" : "150MiB"
-    }
+    /// Match Aether's 2 GiB budget; mpv keeps compressed packets in memory.
+    private static let cacheBytes = "2GiB"
 
     private func setUp() {
         guard let handle = mpv_create() else {
@@ -383,8 +391,8 @@ public final class MPVBackend: FallbackBackend {
             ("vo", "gpu-next"), ("gpu-api", "vulkan"), ("gpu-context", "moltenvk"), ("hwdec", "videotoolbox"),
             ("pause", "yes"), ("keep-open", "no"), ("sub-auto", "no"), ("network-timeout", "30"),
             // Reliability: a deep cache, ffmpeg's own reconnects for dropped HTTP connections, and frame-exact seeks.
-            ("cache", "yes"), ("demuxer-max-bytes", Self.cacheBytes), ("demuxer-max-back-bytes", "64MiB"), ("demuxer-readahead-secs", "30"),
-            ("cache-pause-wait", "2"), ("stream-buffer-size", "1MiB"),
+            ("cache", "yes"), ("demuxer-max-bytes", Self.cacheBytes), ("demuxer-max-back-bytes", "64MiB"), ("demuxer-readahead-secs", "120"),
+            ("cache-pause-wait", "10"), ("stream-buffer-size", "1MiB"),
             ("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=8"),
             ("hr-seek", "yes"), ("hr-seek-framedrop", "yes"),
             // HDR: tell the display what the video is when it can show it, and measure each scene's peak for tone mapping.

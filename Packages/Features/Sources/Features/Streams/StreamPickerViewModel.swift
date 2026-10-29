@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import Persistence
 import PlayerKit
 import StremioKit
@@ -43,6 +44,8 @@ public final class StreamPickerViewModel {
     public private(set) var bestToPlay: RankedStream?
 
     private let services: AppServices
+    /// Why Auto Pick chose what it chose: one debug line per release, for the console and for Console.app.
+    private let autoPickLog = Logger(subsystem: "app.blusion.player", category: "auto-pick")
     /// The previous viewing session's store. The app's file store unless one is handed over (tests, previews).
     private let snapshotStore: any PlaybackSnapshotStore
     /// Set by `loadSessionResume`: the session the player last left open for this request, to walk back into.
@@ -56,6 +59,11 @@ public final class StreamPickerViewModel {
     /// The addon Auto Pick waits for (see `AutoPickWait`), read as the streams load with Auto Pick's switch on. Nil waits for every addon,
     /// as Auto Pick always has.
     private var waitTarget: UUID?
+    /// When the addon Auto Pick waits for first answered with a stream it can start. Auto Pick chooses once `autoPickSettleWindow` has passed
+    /// since, so the other addons still have time to answer (see `AddonSpeedChoice.settleWindow`).
+    private var waitTargetAnsweredAt: ContinuousClock.Instant?
+    /// How long Auto Pick lets the other addons answer after its wait addon has a stream. The default is `AddonSpeedChoice.settleWindow`.
+    public var autoPickSettleWindow: Duration = AddonSpeedChoice.settleWindow
     /// Set for a picker that starts the best stream on opening whatever Auto Pick's switch says (a held poster): it then waits for the
     /// addon Auto Pick waits for, as with the switch on.
     public var startsAutomaticallyAnyway = false
@@ -93,11 +101,11 @@ public final class StreamPickerViewModel {
         }
         addonSections = runs.map { AddonSection(addon: $0[0].addon, streams: $0) }
         links = Self.linksToOffer(in: listing.items)
-        // The player's routing policy has already applied the saved preference. Auto Pick must
-        // rank only these watchable routes, not bypass the preference with an Infuse handoff.
-        let candidates = automaticCandidates
-        bestAssessment = listing.isLoading ? nil : AutoStreamRanking.best(from: candidates, duration: request.expectedDuration, preferences: settings.rankingPreferences)
-        bestToPlay = (bestAssessment ?? AutoStreamRanking.best(from: candidates, duration: request.expectedDuration, preferences: settings.rankingPreferences))?.item
+        // One ranking for every automatic choice: the best of what has arrived so far, and the completed one once every addon has answered.
+        // It ranks only the watchable routes the saved player policy allows, so Auto Pick never bypasses that policy with an Infuse hand-off.
+        let best = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        bestAssessment = listing.isLoading ? nil : best
+        bestToPlay = best?.item
     }
 
     public func load() async {
@@ -105,6 +113,7 @@ public final class StreamPickerViewModel {
         let generation = loadGeneration
         settings = await services.settings.load()
         waitTarget = settings.autoPlayBestStream || startsAutomaticallyAnyway ? await automaticWaitTarget() : nil
+        waitTargetAnsweredAt = nil
         let (asked, responses) = await services.streams.fetch(request)
         guard !Task.isCancelled, generation == loadGeneration else { return }
         var config = settings.policy(fallbackEngineLinked: services.fallbackEngineLinked, backupEngineLinked: services.aetherEngineLinked,
@@ -120,6 +129,7 @@ public final class StreamPickerViewModel {
             for await response in responses {
                 guard !Task.isCancelled, generation == loadGeneration else { return }
                 listing.apply(response)
+                if waitTargetAnsweredAt == nil, waitTargetHasAStream() { waitTargetAnsweredAt = ContinuousClock.now }
                 let targets = listing.sniffTargets.filter { requested.insert($0.key).inserted }
                 if !targets.isEmpty { startSniffing(targets) }
             }
@@ -147,8 +157,8 @@ public final class StreamPickerViewModel {
     }
 
     /// By default, compare every addon response. A caller can impose a deadline; later answers still improve the open picker. When Auto Pick waits for one
-    /// addon (see `AutoPickWait`), the wait ends once that addon has a stream to start; `stopsForWaitTarget` false keeps the whole window,
-    /// for the next episode, which looks for a stream continuing the last one.
+    /// addon (see `AutoPickWait`), the wait ends once that addon has a stream to start and the settle window has passed; `stopsForWaitTarget` false keeps
+    /// the whole window, for the next episode, which looks for a stream continuing the last one.
     public func loadForAutomaticSelection(timeout: Duration? = nil, stopsForWaitTarget: Bool = true) async {
         if !hasLoaded, loadingTask == nil {
             loadingTask = Task { [weak self] in
@@ -157,11 +167,12 @@ public final class StreamPickerViewModel {
             }
         }
         let deadline = timeout.map { ContinuousClock.now.advanced(by: $0) }
-        while isLoading, !(stopsForWaitTarget && waitTargetHasAnswered()), deadline.map({ ContinuousClock.now < $0 }) ?? true,
+        while isLoading, !(stopsForWaitTarget && automaticChoiceIsReady()), deadline.map({ ContinuousClock.now < $0 }) ?? true,
               !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         if Task.isCancelled { cancelLoading() }
+        logAutomaticChoice()
     }
 
     public func cancelLoading() {
@@ -324,13 +335,14 @@ public final class StreamPickerViewModel {
         autoPickMessage = nil
         autoPickedStream = nil
         defer { isAutoPicking = false }
-        // Wait for the chosen addon when applicable; it must have a stream playable
+        // Wait for the chosen addon, and for the settle window after its first stream, so the others can answer. The stream must be playable
         // through the saved policy, rather than merely one Infuse could accept.
-        while isLoading, !waitTargetHasAnswered() {
+        while isLoading, !automaticChoiceIsReady() {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
         }
         guard !Task.isCancelled else { return nil }
-        let assessment = isLoading ? AutoStreamRanking.best(from: automaticCandidates, duration: request.expectedDuration, preferences: settings.rankingPreferences) : bestAssessment
+        let assessment = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        logAutomaticChoice()
         guard let pick = assessment else {
             autoPickMessage = "No streams are ready for automatic playback. Choose a stream manually."
             return nil
@@ -367,11 +379,6 @@ public final class StreamPickerViewModel {
     /// The saved Auto Pick source, for the picker's note.
     public var autoPickSource: StreamSourcePreference { settings.autoPickSource }
 
-    /// Policy has already excluded unsupported routes. Compare all remaining engines and cache states.
-    private var automaticCandidates: [RankedStream] {
-        settings.autoPickSource.candidates(from: StreamAvailability.automaticCandidates(from: listing.items))
-    }
-
     /// The addon Auto Pick waits for under the saved choice: one the user named, Auto's fastest, or nil for every addon.
     private func automaticWaitTarget() async -> UUID? {
         guard settings.autoPickWait != .allAddons else { return nil }
@@ -384,25 +391,44 @@ public final class StreamPickerViewModel {
         return target
     }
 
-    /// True once the chosen addon answers with a stream the saved player can start.
-    /// When it fails or has no watchable streams we continue waiting for other addons.
-    private func waitTargetHasAnswered() -> Bool {
-        guard let waitTarget, hasLoaded, !listing.pending.contains(where: { $0.id == waitTarget }) else { return false }
+    /// True once the addon Auto Pick waits for has answered with a stream the saved player can start. When it fails or has no watchable
+    /// streams, Auto Pick keeps waiting for every addon.
+    private func waitTargetHasAStream() -> Bool {
+        guard let waitTarget else { return false }
         return listing.items.contains { item in
             (item.addon.id == waitTarget || item.alsoProvidedBy.contains { $0.id == waitTarget })
                 && item.route.isWatchable && StreamAvailability.canStartAutomatically(item)
         }
     }
 
-    /// The first stream Blusion plays itself after `item`: what "Try the next stream" plays.
-    public func nextPlayable(after item: RankedStream) -> RankedStream? {
-        guard let index = listing.items.firstIndex(where: { $0.id == item.id }) else { return listing.playable.first }
-        return listing.items[(index + 1)...].first { $0.route.isPlayable } ?? listing.playable.first
+    /// True once Auto Pick may choose: every addon has answered, or the addon it waits for has a stream it can start and the settle window has
+    /// passed since, so the others still have their time to answer. Until then the first stream to arrive is not taken as the best.
+    private func automaticChoiceIsReady() -> Bool {
+        guard isLoading else { return true }
+        guard waitTarget != nil, let waitTargetAnsweredAt else { return false }
+        return ContinuousClock.now >= waitTargetAnsweredAt.advanced(by: autoPickSettleWindow)
     }
 
-    /// For binge-watching: the stream continuing the previous episode's group, if this listing has one.
+    /// Logs why the automatic choice is what it is, one line per reason, for each release in ranked order. Debug only: nothing is shown.
+    private func logAutomaticChoice() {
+        let ranked = AutoStreamRanking.ranked(listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        for explanation in AutoStreamRanking.explain(ranked) {
+            autoPickLog.debug("\(explanation.rank, privacy: .public). \(explanation.title, privacy: .private): \(explanation.reasons.joined(separator: "; "), privacy: .public)")
+        }
+    }
+
+    /// The first stream Blusion plays itself after `item` under the same ranking as Auto Pick, so "Try the next stream" never offers a release
+    /// that Auto Pick would rank below another.
+    public func nextPlayable(after item: RankedStream) -> RankedStream? {
+        let others = listing.playable.filter { $0.id != item.id }
+        return AutoStreamRanking.best(from: others, duration: request.expectedDuration, preferences: settings.rankingPreferences)?.item
+    }
+
+    /// For binge-watching: the best stream of the previous episode's group, under the same ranking as Auto Pick. The addon the previous episode
+    /// came from only breaks near-ties (`AutoStreamRanking.preferenceBonus`).
     public func bingeChoice(continuing previous: BingeContext?) async -> Choice? {
-        guard let pick = BingeSelection.pick(from: listing.items, continuing: previous) else { return nil }
+        guard let pick = BingeSelection.pick(from: listing.items, continuing: previous, duration: request.expectedDuration,
+                                             preferences: settings.rankingPreferences) else { return nil }
         return await choose(pick)
     }
 

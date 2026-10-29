@@ -5,6 +5,12 @@ import UIKit
 /// Design tokens. Screens take their spacing, radii and colours from here so every screen lines up on the same grid.
 /// Sizes that differ between a phone and a Mac window (page margin, poster width, shelf spacing) live in `LayoutMetrics`.
 enum Theme {
+    /// All controls derived from Play share this tint on iPhone and Mac. See docs/DESIGN_SPEC.md.
+    @MainActor
+    static func playControlColour(hex: String?) -> Color? {
+        PlayColourStore.colour(hex: hex)?.opacity(0.50)
+    }
+
     enum Spacing {
         static let xs: CGFloat = 4
         static let s: CGFloat = 8

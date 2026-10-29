@@ -365,15 +365,20 @@ public final class PlayerViewModel {
         default: return coordinator?.phase == .starting
         }
     }
-    /// Playback has begun and is waiting for data (a stall, or a reload such as a reconnect). Before its first frame the player shows its
-    /// startup spinner instead, with only Close (see `hasStartedPlayback` and `PlayerContent.isVideoReady`).
+    /// A requested playback that is waiting on the engine, including a reconnect or an engine that briefly reports ready/paused.
+    /// Pausing explicitly clears the requested-playback flag, so an intentional pause never shows a spinner.
     public var isStalled: Bool {
-        isBuffering && failureMessage == nil && coordinator?.phase == .playing
+        guard let coordinator, coordinator.isPlaybackRequested, failureMessage == nil,
+              coordinator.phase == .playing || coordinator.phase == .starting else { return false }
+        switch state.status {
+        case .loading, .ready, .paused, .buffering: return true
+        default: return false
+        }
     }
     /// The stall spinner stands alone while the controls are hidden; with them showing it takes the play button's place.
     public var showsBufferingIndicator: Bool { isStalled && !controlsVisible }
-    /// Playing, or stalled while meant to play: the play button offers Pause.
-    public var wantsPlayback: Bool { isPlaying || isStalled }
+    /// Pause means cancel the current play request, even if the engine is still buffering or ready.
+    public var wantsPlayback: Bool { coordinator?.isPlaybackRequested == true }
     public var position: TimeInterval { isScrubbing ? scrubFraction * (state.duration ?? 0) : state.position }
     public var duration: TimeInterval? { state.duration }
     public var fraction: Double { isScrubbing ? scrubFraction : (state.duration.map { $0 > 0 ? min(1, state.position / $0) : 0 } ?? 0) }
@@ -666,9 +671,9 @@ public final class PlayerViewModel {
         setZoomMode(zoomMode.next)
     }
 
-    /// A pinch: out trims bars and enlarges proportionally without overshooting (Crop), in shows the uncropped picture again (Normal).
+    /// A pinch selects Fill outward and restores Normal inward.
     public func pinchZoom(in zoomsIn: Bool) {
-        let mode: ZoomMode = zoomsIn ? .crop : .normal
+        let mode: ZoomMode = zoomsIn ? .fill : .normal
         guard mode != zoomMode else { return }
         // A pinch leaves the controls as they were, so the picture stays clear.
         changeZoomMode(to: mode)

@@ -57,8 +57,8 @@ public final class AetherBackend: FallbackBackend {
     /// AetherEngine repackages a remux into segments as it downloads: the first start waits for a few of them in hand, or a
     /// high-bitrate remux outruns its download and stops and starts.
     public var startCushion: StartCushion? { .standard }
-    /// What AetherEngine holds ahead on its loopback route; nil on its software path and for live streams, where the start doesn't wait.
-    public var bufferedAhead: TimeInterval? { session.loopbackBufferedAhead }
+    /// Downloaded media on both the remux and FEL routes; live streams start immediately.
+    public var bufferedAhead: TimeInterval? { session.bufferedAhead }
 
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         session.load(url: url, headers: headers, startPosition: startPosition, options: options)

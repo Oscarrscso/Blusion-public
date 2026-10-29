@@ -104,6 +104,11 @@ struct DetailEpisodes: View {
         }
         .detailLoadingTransition(model.isLoading)
         .environment(\.showsArtworkLoadingSpinner, true)
+        // Season data belongs to the shelf, so newly visible cards do no lookup work during a swipe.
+        .task(id: "\(model.selectedSeason ?? -1):\(model.reviewServicesRevision):\(model.isLoading):\(model.hasSettledHero)") {
+            guard model.hasSettledHero else { return }
+            await model.loadEpisodeSeason(model.selectedSeason)
+        }
         // A page that is left never stays blurred, even if its episode's menu was still open.
         .onDisappear { isHoldingEpisode = false }
     }
@@ -137,7 +142,7 @@ struct DetailEpisodes: View {
             }
             .padding(.horizontal, 10)
             .frame(height: Self.secondaryControlHeight)
-            .glassEffect(.regular.interactive().tint((PlayColourStore.colour(hex: model.playColourHex) ?? .clear).opacity(0.25)), in: .capsule)
+            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: .capsule)
         }
         .buttonStyle(.plain)
         .frame(height: Self.secondaryControlHeight)
@@ -294,11 +299,6 @@ struct DetailEpisodes: View {
             }
         }
         .accessibilityIdentifier("detail.episode.\(video.id)")
-        // IMDb's episode scores come from OMDb, a season at a time, asked for when its first card comes on screen (and again if the key changes).
-        .task(id: "\(video.id):\(model.reviewServicesRevision):\(model.isLoading):\(model.hasSettledHero)") {
-            guard model.hasSettledHero else { return }
-            await model.episodeAppeared(video)
-        }
     }
 
     private func landscapePreview(_ video: Video) -> some View {

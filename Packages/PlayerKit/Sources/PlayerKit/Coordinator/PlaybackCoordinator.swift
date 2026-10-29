@@ -25,6 +25,8 @@ public final class PlaybackCoordinator {
 
     public private(set) var phase: Phase = .idle
     public private(set) var state = PlaybackState()
+    /// The listener still expects playback to advance; engine status can briefly report paused or ready while it catches up.
+    public private(set) var isPlaybackRequested = false
     public private(set) var current: PlaybackCandidate?
     public private(set) var candidateIndex = 0
     public private(set) var failedAttempts: [FailedAttempt] = []
@@ -85,7 +87,7 @@ public final class PlaybackCoordinator {
     private var lastPosition: TimeInterval = 0
     private var stopped = false
 
-    public init(plan: PlaybackPlan, resumeFrom: TimeInterval = 0, startupTimeout: Duration = .seconds(20),
+    public init(plan: PlaybackPlan, resumeFrom: TimeInterval = 0, startupTimeout: Duration = .seconds(60),
                 stallTimeout: Duration = .seconds(20), progress: ProgressSession? = nil, layout: VideoLayout = VideoLayout(),
                 processing: VideoProcessing = VideoProcessing(), subtitleStyle: SubtitleStyle = SubtitleStyle(),
                 makeEngine: @escaping @MainActor (PlaybackCandidate) -> (any PlaybackEngine)?) {
@@ -129,6 +131,7 @@ public final class PlaybackCoordinator {
 
     public func stop() async {
         stopped = true
+        isPlaybackRequested = false
         observer?.cancel()
         stallTimer?.cancel()
         resolveStart(false)
@@ -139,8 +142,8 @@ public final class PlaybackCoordinator {
 
     // MARK: Transport
 
-    public func play() { engine?.play() }
-    public func pause() { engine?.pause() }
+    public func play() { isPlaybackRequested = true; engine?.play() }
+    public func pause() { isPlaybackRequested = false; engine?.pause() }
     /// A stall is still playing as far as the viewer is concerned, so the button pauses it rather than asking to play again.
     public func togglePlayPause() { state.isPlayingOrBuffering ? pause() : play() }
     public func seek(to position: TimeInterval) async { await engine?.seek(to: max(0, position)) }
@@ -265,6 +268,7 @@ public final class PlaybackCoordinator {
             observer?.cancel()
             engine?.stop()
             phase = .exhausted
+            isPlaybackRequested = false
             notice = plan.candidates.isEmpty ? "There is nothing to play." : "None of the streams could be played."
             return
         }
@@ -311,7 +315,7 @@ public final class PlaybackCoordinator {
             }
         }
         engine.load(PlaybackItem(url: url, headers: candidate.headers, title: candidate.title, startPosition: startPosition, filename: candidate.filename))
-        engine.play()
+        play()
 
         let started = await waitForStart()
         guard !stopped, generation == engineGeneration else { return }
@@ -407,6 +411,7 @@ public final class PlaybackCoordinator {
             }
         case .ended:
             phase = .finished
+            isPlaybackRequested = false
             Task { [weak self] in
                 await self?.progress?.finish()
                 self?.onEnded?()

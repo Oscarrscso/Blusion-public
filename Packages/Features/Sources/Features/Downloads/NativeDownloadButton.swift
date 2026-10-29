@@ -6,6 +6,8 @@ import StremioKit
 struct DownloadProgressGlyph: View {
     let item: DownloadItem?
     var isLoading = false
+    var colour: Color = .white
+    var progressColour: Color = .accentColor
     var body: some View {
         ZStack {
             if isLoading || item?.state == .queued || (item?.state == .downloading && item?.expected == 0) {
@@ -13,7 +15,7 @@ struct DownloadProgressGlyph: View {
             } else if let item, item.state != .complete {
                 Circle().stroke(.white.opacity(0.25), lineWidth: 2.5)
                 Circle().trim(from: 0, to: item.fraction)
-                    .stroke(.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .stroke(progressColour, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 Image(systemName: item.state == .downloading ? "pause.fill" : "arrow.down")
                     .font(.system(size: 10, weight: .bold))
@@ -22,18 +24,21 @@ struct DownloadProgressGlyph: View {
                     .font(.subheadline.weight(.bold))
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(colour)
         .frame(width: 24, height: 24)
         .animation(.linear(duration: 0.25), value: item?.fraction)
     }
 }
 
 struct NativeDownloadButton: View {
-    let manager: DownloadManager
+    let manager: DownloadManager?
     let item: DownloadItem?
     var isLoading = false
+    var isAvailable = true
     var size: CGFloat = CircleActionButton.diameter
     var matchesStream = false
+    var glass: Glass?
+    var progressColour: Color = .accentColor
     let start: () -> Void
     @Environment(AppRouter.self) private var router: AppRouter?
 
@@ -47,7 +52,7 @@ struct NativeDownloadButton: View {
     }
     var body: some View {
         let button = Button {
-            guard !isLoading else { return }
+            guard let manager, isAvailable, !isLoading else { return }
             Haptics.tap()
             if let item {
                 switch item.state {
@@ -57,13 +62,18 @@ struct NativeDownloadButton: View {
                 }
             } else { start() }
         } label: {
-            DownloadProgressGlyph(item: item, isLoading: isLoading)
+            DownloadProgressGlyph(item: item, isLoading: isLoading, colour: glass == nil ? .white : .white.opacity(0.6),
+                                  progressColour: progressColour)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Circle())
         }
         Group {
             if matchesStream {
                 button.buttonStyle(.plain).background(Theme.surfaceStrong, in: Circle())
+            } else if let glass {
+                button.buttonStyle(.plain)
+                    .frame(width: size, height: size)
+                    .glassEffect(glass, in: .circle)
             } else {
                 button.glassCircleButton()
             }
@@ -74,6 +84,7 @@ struct NativeDownloadButton: View {
             router?.opensDownloads = true
             router?.open(.library)
         })
+        .disabled(manager == nil || !isAvailable || isLoading)
         .accessibilityLabel(isLoading ? "Download, loading" : title)
         .accessibilityValue(item.map { $0.expected > 0 ? "\(Int($0.fraction * 100)) percent" : "" } ?? "")
         .help(title)

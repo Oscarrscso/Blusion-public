@@ -355,6 +355,37 @@ import StremioKitTestSupport
         #expect(noContext == nil)
     }
 
+    @Test func episodeContinuityDoesNotOverrideAClearlyBetterRelease() async throws {
+        let stream = { (name: String, url: String, group: String) in
+            #"{"name":"\#(name)","url":"\#(url)","behaviorHints":{"bingeGroup":"\#(group)"}}"#
+        }
+        // The previous episode came from the addon that offers only the 720p; the other addon has the 1080p of the same show.
+        let services = try await services(bodies: [body([stream("[RD+] 720p WEB-DL", "https://a.example.com/1.mp4", "g-show")]),
+                                                  body([stream("[RD+] 1080p WEB-DL", "https://b.example.com/2.mp4", "g-show")])])
+        let model = StreamPickerViewModel(request: request, services: services)
+        await model.load()
+        let previous = try #require(model.listing.items.first { $0.title.contains("720p") })
+        guard case .play(let plan)? = await model.bingeChoice(continuing: BingeContext(bingeGroup: "g-show", addonID: previous.addon.id)) else {
+            Issue.record("expected a plan"); return
+        }
+        #expect(plan.candidates.first?.title == "[RD+] 1080p WEB-DL", "continuity breaks near-ties only")
+    }
+
+    @Test func episodeContinuityBreaksANearTieInFavourOfTheSameAddon() async throws {
+        let stream = { (name: String, url: String, group: String) in
+            #"{"name":"\#(name)","url":"\#(url)","behaviorHints":{"bingeGroup":"\#(group)"}}"#
+        }
+        let services = try await services(bodies: [body([stream("[RD+] 1080p WEB-DL", "https://a.example.com/1.mp4", "g-show")]),
+                                                  body([stream("[RD+] 1080p WEB-DL", "https://b.example.com/2.mp4", "g-show")])])
+        let model = StreamPickerViewModel(request: request, services: services)
+        await model.load()
+        let second = try #require(model.listing.items.first { $0.route.playableURL?.host == "b.example.com" })
+        guard case .play(let plan)? = await model.bingeChoice(continuing: BingeContext(bingeGroup: "g-show", addonID: second.addon.id)) else {
+            Issue.record("expected a plan"); return
+        }
+        #expect(plan.candidates.first?.url?.host == "b.example.com", "the same addon wins an equal release")
+    }
+
     @Test func candidatesCarryHeadersSubtitlesAndHashes() async throws {
         let stream = #"{"name":"P","url":"https://a.example.com/p.mp4","#
             + #""subtitles":[{"id":"s","url":"https://a.example.com/s.srt","lang":"eng"}],"#
@@ -547,21 +578,37 @@ import StremioKitTestSupport
         #expect(model.recommendedStream?.title == "[TB+] Ready")
     }
 
-    @Test func theAutoPickSourceSettingChoosesUsenetOrDebridAndBalancedLetsQualityDecide() async throws {
+    @Test func theAutoPickSourceSettingPrefersUsenetOrDebridAndBalancedLetsQualityDecide() async throws {
+        // Quality decides between the kinds: the Debrid 4K REMUX is clearly better than the Usenet 1080p, whatever the preference says.
         let streams = body([direct("☁️ ⚡ Debrid 4K", "https://a.example.com/debrid.mp4", "2160p BluRay REMUX · 📡 Source: ☁️ TB"),
                             direct("📰 ⚡ Usenet 1080", "https://a.example.com/usenet.mp4", "1080p WEB-DL · 📡 Source: 📰 TB")])
-        for (source, expected) in [(StreamSourcePreference.usenet, "📰 ⚡ Usenet 1080"), (.debrid, "☁️ ⚡ Debrid 4K"),
-                                   (.balanced, "☁️ ⚡ Debrid 4K")] {
+        for source in StreamSourcePreference.allCases {
             let model = picker(movie, try await services(bodies: [streams], settings: PlaybackSettings(autoPickSource: source)))
             await model.load()
-            #expect(model.recommendedStream?.title == expected, "\(source)")
+            #expect(model.recommendedStream?.title == "☁️ ⚡ Debrid 4K", "\(source)")
             guard case .play(let plan)? = await model.autoPickBest() else { Issue.record("expected playback for \(source)"); continue }
-            #expect(plan.candidates.first?.title == expected)
+            #expect(plan.candidates.first?.title == "☁️ ⚡ Debrid 4K")
         }
-        let usenet = picker(movie, try await services(bodies: [streams], settings: PlaybackSettings(autoPickSource: .usenet)))
+        // Between two releases of the same quality, the preferred kind wins.
+        let nearTie = body([direct("☁️ ⚡ Debrid 1080", "https://a.example.com/debrid.mp4", "1080p WEB-DL · 📡 Source: ☁️ TB"),
+                            direct("📰 ⚡ Usenet 1080", "https://a.example.com/usenet.mp4", "1080p WEB-DL · 📡 Source: 📰 TB")])
+        for (source, expected) in [(StreamSourcePreference.usenet, "📰 ⚡ Usenet 1080"), (.debrid, "☁️ ⚡ Debrid 1080")] {
+            let model = picker(movie, try await services(bodies: [nearTie], settings: PlaybackSettings(autoPickSource: source)))
+            await model.load()
+            #expect(model.recommendedStream?.title == expected, "\(source)")
+        }
+        let usenet = picker(movie, try await services(bodies: [nearTie], settings: PlaybackSettings(autoPickSource: .usenet)))
         await usenet.load()
         #expect(usenet.recommendedStreamLabel?.hasSuffix("· Usenet") == true, "Auto Pick's button names the kind it starts")
         #expect(usenet.autoPickSourceNote == "Auto Pick prefers Usenet streams")
+    }
+
+    @Test func aSourcePreferenceNeverExcludesAClearlyBetterRelease() async throws {
+        let streams = body([direct("☁️ ⚡ Debrid 4K", "https://a.example.com/debrid.mp4", "2160p BluRay REMUX · 📡 Source: ☁️ TB"),
+                            direct("📰 ⚡ Usenet 1080", "https://a.example.com/usenet.mp4", "1080p WEB-DL · 📡 Source: 📰 TB")])
+        let model = picker(movie, try await services(bodies: [streams], settings: PlaybackSettings(autoPickSource: .usenet)))
+        await model.load()
+        #expect(model.recommendedStream?.title == "☁️ ⚡ Debrid 4K", "a Usenet preference only breaks near-ties")
     }
 
     @Test(arguments: ["[TB download]", "[RD download]", "⏳ TB", "Uncached", "Not cached", "Cached: false"])

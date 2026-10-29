@@ -52,8 +52,9 @@ public enum StreamDelivery: String, Sendable, Equatable, Hashable, CaseIterable 
     }
 }
 
-/// Which kind of stream Auto Pick goes for (Settings › Playback). Usenet or Debrid keeps Auto Pick to that kind whenever any is there;
-/// Balanced lets quality alone decide, as Auto Pick always has.
+/// Which kind of stream Auto Pick prefers (Settings › Playback). It is a preference, not a filter: a release of the preferred kind gains
+/// `AutoStreamRanking.preferenceBonus`, which only decides between releases of near-equal quality. A clearly better release of the other
+/// kind still wins. Balanced gives no preference, so every release is compared on quality alone.
 public enum StreamSourcePreference: String, Sendable, Equatable, Hashable, CaseIterable, Identifiable, Codable {
     case usenet, balanced, debrid
 
@@ -76,11 +77,9 @@ public enum StreamSourcePreference: String, Sendable, Equatable, Hashable, CaseI
         }
     }
 
-    /// The streams Auto Pick chooses from: only the preferred kind when there is one, otherwise all of them, so a preference never
-    /// leaves Auto Pick with nothing to start.
-    public func candidates(from items: [RankedStream]) -> [RankedStream] {
-        guard let delivery else { return items }
-        let preferred = items.filter { StreamDelivery.detect(in: $0.stream) == delivery }
-        return preferred.isEmpty ? items : preferred
+    /// True when the stream is of the preferred kind. Balanced prefers nothing.
+    public func prefers(_ stream: AddonStream) -> Bool {
+        guard let delivery else { return false }
+        return StreamDelivery.detect(in: stream) == delivery
     }
 }

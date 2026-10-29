@@ -50,6 +50,7 @@ import StremioKitTestSupport
                                           delays: [.milliseconds(10), .seconds(3)])
         await waitFor({ .addon(await $0.registry.addons[0].id) }, in: services)
         let model = StreamPickerViewModel(request: request, services: services)
+        model.autoPickSettleWindow = .milliseconds(200)
         // As the picker does when it opens: streams go to Infuse, which is installed.
         model.setInstalledPlayers([.infuse])
         var choice: StreamPickerViewModel.Choice?
@@ -64,16 +65,45 @@ import StremioKitTestSupport
         model.cancelLoading()
     }
 
+    @Test func anEarlyStreamFromTheAddonItWaitsForDoesNotBeatABetterOneThatArrivesSoon() async throws {
+        let services = try await services(bodies: [body([direct("Fast 720 cached", "https://a.example.com/1.mkv", "[RD+] 720p WEB-DL DD+")]),
+                                                   body([direct("Slow 1080 cached", "https://b.example.com/1.mkv", "[RD+] 1080p WEB-DL DD+")])],
+                                          delays: [.milliseconds(10), .milliseconds(400)])
+        await waitFor({ .addon(await $0.registry.addons[0].id) }, in: services)
+        let model = StreamPickerViewModel(request: request, services: services)
+        model.setInstalledPlayers([.infuse])
+        await model.loadForAutomaticSelection()
+        #expect(model.automaticStartCandidate?.title == "Slow 1080 cached", "the 720p arrived first, but the 1080p is still on its way")
+        model.cancelLoading()
+    }
+
     @Test func theFiveSecondWindowEndsOnceTheAddonHasAStream() async throws {
         let services = try await services(bodies: [body([direct("Fast", "https://a.example.com/1.mkv", "1080p")]),
                                                    body([direct("Slow", "https://b.example.com/1.mkv", "2160p")])],
                                           delays: [.milliseconds(10), .seconds(3)])
         await waitFor({ .addon(await $0.registry.addons[0].id) }, in: services)
         let model = StreamPickerViewModel(request: request, services: services)
+        model.autoPickSettleWindow = .milliseconds(200)
         model.setInstalledPlayers([.infuse])
         let time = await elapsed { await model.loadForAutomaticSelection() }
         #expect(time < .seconds(2))
         #expect(model.listing.isLoading)
+        model.cancelLoading()
+    }
+
+    /// The addon Auto Pick waits for answers at once, with a stream that is not the best; the other addon answers well after the settle
+    /// window. Auto Pick does not wait for it beyond the window, and takes what has arrived.
+    @Test func aSlowAddonBeyondTheSettleWindowIsNotWaitedFor() async throws {
+        let services = try await services(bodies: [body([direct("Fast 720", "https://a.example.com/1.mkv", "1080p")]),
+                                                   body([direct("Very slow 2160", "https://b.example.com/1.mkv", "2160p")])],
+                                          delays: [.milliseconds(10), .seconds(3)])
+        await waitFor({ .addon(await $0.registry.addons[0].id) }, in: services)
+        let model = StreamPickerViewModel(request: request, services: services)
+        model.autoPickSettleWindow = .milliseconds(300)
+        model.setInstalledPlayers([.infuse])
+        let time = await elapsed { await model.loadForAutomaticSelection() }
+        #expect(time < .seconds(2), "the settle window ends the wait")
+        #expect(model.automaticStartCandidate?.title == "Fast 720")
         model.cancelLoading()
     }
 
@@ -156,6 +186,7 @@ import StremioKitTestSupport
         let model = StreamPickerViewModel(request: request, services: services)
         // As the picker does when it opens: streams go to Infuse, which is installed.
         model.setInstalledPlayers([.infuse])
+        model.autoPickSettleWindow = .milliseconds(200)
         let time = await elapsed {
             await model.loadForAutomaticSelection()
             _ = await model.autoPickBest()

@@ -1,5 +1,12 @@
 import Foundation
 
+/// Cache readiness reported by an addon's display metadata, or `.unknown` when the stream carries no cache marker.
+public enum StreamCacheStatus: String, Sendable, Equatable, Hashable, Codable {
+    case cached
+    case uncached
+    case unknown
+}
+
 /// Addons report cache readiness in their display metadata. Unmarked HTTP streams
 /// remain usable; HTTP download placeholders block automatic starts. Torrents need a playable server route.
 public enum StreamAvailability {
@@ -9,6 +16,17 @@ public enum StreamAvailability {
 
     public static func automaticCandidates(from items: [RankedStream]) -> [RankedStream] {
         items.filter(canStartAutomatically)
+    }
+
+    public static func cacheStatus(for stream: AddonStream) -> StreamCacheStatus {
+        switch stream.source {
+        case .direct, .torrent:
+            if isUncached(stream) { return .uncached }
+            if isCached(stream) { return .cached }
+            return .unknown
+        case .youtube, .external, .archive:
+            return .unknown
+        }
     }
 
     /// An uncached torrent can play through the configured streaming server; an HTTP download placeholder cannot.

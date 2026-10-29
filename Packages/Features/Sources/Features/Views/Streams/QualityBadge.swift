@@ -87,6 +87,15 @@ extension QualityBadge {
         }
     }
 
+    /// Honest cache readiness for any stream candidate, including `.unknown` when the addon carries no cache marker.
+    static func cache(_ status: StreamCacheStatus) -> QualityBadge {
+        switch status {
+        case .cached: return QualityBadge("Cached", symbol: "bolt.fill", tint: cachedGreen)
+        case .uncached: return QualityBadge("Uncached", symbol: "hourglass")
+        case .unknown: return QualityBadge("Cache unknown", symbol: "questionmark.circle", tint: .white.opacity(0.75))
+        }
+    }
+
     /// A soft sky blue for a Usenet stream, so it tells apart from a debrid one at a glance.
     static let usenetBlue = Color(red: 0.62, green: 0.80, blue: 0.99)
 

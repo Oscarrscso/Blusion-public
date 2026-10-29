@@ -4,8 +4,7 @@ import Foundation
 ///
 /// AetherEngine plays a remux by repackaging it into 4 s segments as it downloads. Started on its first segment, a high-bitrate remux
 /// (a UHD Blu-ray at 50 to 100 Mbit/s) outruns a download only a little faster than the film, and the picture stops and starts until the
-/// download pulls ahead. Held until a few segments are in hand, it plays through; the startup spinner stays up meanwhile. A download well
-/// ahead of the film (most streams, on most links) starts on one segment, so only a marginal link pays for the wait.
+/// download pulls ahead. Hold the start for a downloaded cushion on both remux and FEL playback.
 public struct StartCushion: Sendable, Equatable {
     /// Seconds buffered ahead of the playhead that let the stream start.
     public var seconds: TimeInterval
@@ -15,7 +14,7 @@ public struct StartCushion: Sendable, Equatable {
     public var fastFill: Double
     /// The longest the start waits for them once the stream has loaded.
     public var maximumWait: TimeInterval
-    /// Load and wait together stay inside this, so a slow load never runs the start into the player's start-up timeout (20 s).
+    /// Load and wait together stay inside this, below the player's start-up timeout (60 s).
     public var startBudget: TimeInterval
 
     public init(seconds: TimeInterval, earlySeconds: TimeInterval, fastFill: Double, maximumWait: TimeInterval, startBudget: TimeInterval) {
@@ -26,9 +25,9 @@ public struct StartCushion: Sendable, Equatable {
         self.startBudget = startBudget
     }
 
-    /// Two and a half segments in hand, or one while the film arrives two and a half times faster than it plays; at most 6 s more,
-    /// and never past 14 s from the load.
-    public static let standard = StartCushion(seconds: 10, earlySeconds: 4, fastFill: 2.5, maximumWait: 6, startBudget: 14)
+    /// Thirty seconds of media, with up to 45 s to fill it and 50 s for load and fill together.
+    /// Keep the same minimum even on a briefly fast connection: remux bitrates arrive in bursts.
+    public static let standard = StartCushion(seconds: 30, earlySeconds: 30, fastFill: 2.5, maximumWait: 45, startBudget: 50)
 
     /// How long the start may wait now, `loadTook` after the load began, with `ahead` seconds in hand. 0 starts at once, as does a
     /// backend that cannot say how much it holds (nil).

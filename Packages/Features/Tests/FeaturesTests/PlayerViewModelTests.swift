@@ -87,6 +87,8 @@ import StremioKitTestSupport
         #expect(model.controlsVisible && !model.showsBufferingIndicator)
         model.toggleControls()
         #expect(model.showsBufferingIndicator)
+        model.togglePlayPause()
+        #expect(!model.isStalled && !model.wantsPlayback, "a deliberate pause must dismiss buffering")
         await model.close()
     }
 
@@ -364,7 +366,7 @@ import StremioKitTestSupport
         #expect(!model.controlsVisible && engines.made["a"]?.seeks == [100])
 
         model.pinchZoom(in: true)
-        #expect(!model.controlsVisible && model.zoomMode == .crop)
+        #expect(!model.controlsVisible && model.zoomMode == .fill)
         model.pinchZoom(in: false)
         #expect(!model.controlsVisible && model.zoomMode == .normal)
 
@@ -455,8 +457,8 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// The pinch is a shortcut for Zoom Mode: out trims bars and enlarges proportionally without overshooting (Crop), in shows the whole picture (Normal).
-    @Test func pinchingSwitchesBetweenNormalAndCrop() async throws {
+    /// The pinch is a shortcut for Zoom Mode: out selects Fill, in shows the whole picture (Normal).
+    @Test func pinchingSwitchesBetweenNormalAndFill() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
@@ -465,9 +467,9 @@ import StremioKitTestSupport
         model.pinchZoom(in: false)
         #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit))
         model.pinchZoom(in: true)
-        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
+        #expect(model.zoomMode == .fill && model.videoLayout == VideoLayout(fit: .fill, crop: .ratio185))
         model.pinchZoom(in: true)
-        #expect(model.zoomMode == .crop, "Crop is the last step")
+        #expect(model.zoomMode == .fill, "Pinching outward keeps Fill selected")
         model.setZoomMode(.stretch)
         model.pinchZoom(in: false)
         #expect(model.zoomMode == .normal)
@@ -544,17 +546,17 @@ import StremioKitTestSupport
         for _ in 0..<3 {
             model.pinchZoom(in: true)
             model.setSafeAreaInset(59)
-            #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
+            #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
             model.pinchZoom(in: false)
             #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59))
             model.setSafeAreaInset(0)
         }
         model.pinchZoom(in: true)
         await model.openInAdvancedPlayer()
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
         #expect(engines.fallbackMade["a"] != nil)
         await model.nextStream()
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
+        #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio239))
         await model.close()
     }
 

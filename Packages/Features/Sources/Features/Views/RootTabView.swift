@@ -3,8 +3,6 @@ import Persistence
 import SwiftUI
 import StremioKit
 
-enum LibraryDestination: Hashable { case downloads }
-
 /// Screens reachable from the Settings tab's stack.
 enum SettingsDestination: Hashable {
     case addons
@@ -20,6 +18,7 @@ public final class AppRouter {
     var searchPath = NavigationPath()
     var discoverPath = NavigationPath()
     var libraryPath = NavigationPath()
+    /// Set by a long press on a Download button: Library opens its Downloads page, from its top (see `LibraryView`).
     var opensDownloads = false
     var searchBrowseRevision = 0
     var searchFocusRevision = 0
@@ -321,6 +320,23 @@ private struct LandscapeTabControls: View {
     let title: String
     let hidesPageHeader: Bool
     let onHome: () -> Void
+    let onReveal: () -> Void
+    @GestureState private var revealDistance: CGFloat = 0
+
+    private var reveal: CGFloat {
+        collapsed ? min(1, max(0, revealDistance / 100)) : 1
+    }
+
+    private var currentTab: (symbol: String, title: String) {
+        switch router.tab {
+        case .home: ("play.house.fill", "Home")
+        case .discover: ("square.grid.2x2.fill", "Discover")
+        case .library: ("books.vertical.fill", "Library")
+        case .settings: ("gearshape.fill", "Settings")
+        case .search: ("magnifyingglass", "Search")
+        case .widgets: ("rectangle.3.group.fill", "Widgets")
+        }
+    }
 
     /// Home and three tab icons, 44 points each, 12 apart.
     private static let panelContentWidth: CGFloat = 44 * 4 + 12 * 3
@@ -366,10 +382,10 @@ private struct LandscapeTabControls: View {
             .frame(width: Self.panelContentWidth)
             .padding(.leading, 10)
             .padding(.trailing, 12)
-            .opacity(collapsed ? 0 : 1)
+            .opacity(reveal)
             // The clearer, more see-through variant of Liquid Glass; it clears away with the rest when scrolled.
-            .glassEffect(collapsed ? .identity : .clear, in: Self.panelShape)
-            .scaleEffect(collapsed ? Self.tuckedScale : 1, anchor: .bottomLeading)
+            .glassEffect(reveal == 0 ? .identity : .clear, in: Self.panelShape)
+            .mask(alignment: .leading) { Rectangle().frame(width: 44 + (Self.panelContentWidth + 22 - 44) * reveal) }
             .allowsHitTesting(!collapsed)
             .accessibilityHidden(collapsed)
             .animation(Self.fade(collapsed: collapsed), value: collapsed)
@@ -377,16 +393,16 @@ private struct LandscapeTabControls: View {
             // This is the same instance in both states: it never moves, scales or changes glass.
             Button {
                 Haptics.tap()
-                onHome()
+                if collapsed { onReveal() } else { onHome() }
             } label: {
-                Image(systemName: router.tab == .home ? "play.house.fill" : "play.house")
+                Image(systemName: collapsed ? currentTab.symbol : (router.tab == .home ? "play.house.fill" : "play.house"))
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(router.tab == .home ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
                     .frame(width: 44, height: 44)
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Home")
+            .accessibilityLabel(collapsed ? currentTab.title : "Home")
             .accessibilityIdentifier("landscape.home")
             .highPriorityGesture(tabDrag)
         }
@@ -395,8 +411,13 @@ private struct LandscapeTabControls: View {
 
     private var tabDrag: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .named("landscapeTabs"))
+            .updating($revealDistance) { drag, distance, _ in
+                if collapsed, drag.translation.width > abs(drag.translation.height) {
+                    distance = drag.translation.width
+                }
+            }
             .onChanged { drag in
-                guard !collapsed, abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                guard (!collapsed || drag.translation.width > 8), abs(drag.translation.width) > abs(drag.translation.height) else { return }
                 // Boundaries sit halfway between the existing 44-point buttons, including Home's separate circle.
                 let tab: LaunchRoute.Tab
                 switch drag.location.x {
@@ -407,7 +428,12 @@ private struct LandscapeTabControls: View {
                 }
                 guard tab != router.tab else { return }
                 Haptics.selection()
-                if tab == .home { onHome() } else { router.tapTab(tab) }
+                if tab == .home { router.tapTab(.home) } else { router.tapTab(tab) }
+            }
+            .onEnded { drag in
+                if collapsed, drag.translation.width > 8, drag.translation.width > abs(drag.translation.height) {
+                    onReveal()
+                }
             }
     }
 
@@ -524,11 +550,12 @@ public struct RootTabView: View {
                 NavigationStack(path: $router.homePath) {
                     HomeView(services: services)
                         .appDestinations(services: services, path: \.homePath)
-                        .navigationDestination(for: GalleryDestination.self) { DesignGalleryView(section: $0.section) }
+                        .navigationDestination(for: GalleryDestination.self) { DesignGalleryView(section: $0.section).browsingBackNavigation() }
                         .navigationDestination(for: PlayerRecovery.self) { recovery in
                             StreamPickerView(request: recovery.request, services: services,
                                              forcesAutomaticStart: recovery.resumesSession,
                                              allowsAutomaticStart: recovery.resumesSession)
+                                .browsingBackNavigation()
                         }
                 }
                 .zoomTransitions()
@@ -619,7 +646,8 @@ public struct RootTabView: View {
                 HStack(alignment: .bottom) {
                     LandscapeTabControls(router: router, collapsed: landscapeTabs.collapsed, title: landscapeTitle,
                                          hidesPageHeader: landscapeTabs.pageTitle?.isEmpty != false,
-                                         onHome: { landscapeTabs.reset(); router.tapTab(.home) })
+                                         onHome: { landscapeTabs.reset(); router.tapTab(.home) },
+                                         onReveal: { landscapeTabs.reset() })
                     Spacer(minLength: 0)
                     Button {
                         Haptics.tap()

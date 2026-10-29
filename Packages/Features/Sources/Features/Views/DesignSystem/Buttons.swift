@@ -9,9 +9,10 @@ struct PrimaryActionButtonStyle: PrimitiveButtonStyle {
     /// The least width the button takes on the Mac, so the glass itself is that wide; zero leaves it to its label.
     var minWidth: CGFloat = 0
     var glass: Glass?
+    var height: CGFloat?
 
     func makeBody(configuration: Configuration) -> some View {
-        PrimaryActionButton(configuration: configuration, fillsWidth: fillsWidth, minWidth: minWidth, glass: glass)
+        PrimaryActionButton(configuration: configuration, fillsWidth: fillsWidth, minWidth: minWidth, glass: glass, height: height)
     }
 }
 
@@ -21,9 +22,26 @@ private struct PrimaryActionButton: View {
     let fillsWidth: Bool
     let minWidth: CGFloat
     let glass: Glass?
+    let height: CGFloat?
     @Environment(\.controlSize) private var controlSize
 
     var body: some View {
+        if let height {
+            Button(role: configuration.role) {
+                Haptics.tap()
+                configuration.trigger()
+            } label: {
+                configuration.label
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, Theme.Spacing.s)
+                    .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil)
+                    .frame(height: height)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(glass ?? .regular.interactive(), in: .capsule)
+            .pointerFeedback()
+        } else {
         #if targetEnvironment(macCatalyst)
         // The Mac's own glass button is a third shorter than the round actions beside it, so the capsule is given their height: the label
         // fills the frame and the glass follows it, as a round action's does. A small one (Auto Pick) is a step down.
@@ -56,6 +74,7 @@ private struct PrimaryActionButton: View {
         .controlSize(controlSize == .regular ? .large : controlSize)
         .pointerFeedback()
         #endif
+        }
     }
 
     #if targetEnvironment(macCatalyst)
@@ -135,6 +154,7 @@ struct CircleActionButton: View {
     let quietRevision: Int
     /// The symbol's colour while `isOn`: the title's Play colour for Save, Watched and Trailer. Nil keeps the usual grey.
     let onColour: Color?
+    let exactSize: Bool
     /// The height of the large glass capsule beside it, so the circles are level with Play and equally wide. Smaller on a Mac, where a
     /// pointer needs less room than a finger and 50 points stood twice as tall as the Mac's own Play button.
     #if targetEnvironment(macCatalyst)
@@ -144,13 +164,14 @@ struct CircleActionButton: View {
     #endif
 
     init(title: String, systemImage: String, isOn: Bool = false, onTitle: String? = nil, onSystemImage: String? = nil,
-         quietRevision: Int = 0, onColour: Color? = nil, action: @escaping () -> Void, isLoading: Bool = false) {
+         quietRevision: Int = 0, onColour: Color? = nil, exactSize: Bool = false, action: @escaping () -> Void, isLoading: Bool = false) {
         self.title = title
         self.systemImage = systemImage
         self.isOn = isOn
         self.onTitle = onTitle
         self.onSystemImage = onSystemImage
         self.quietRevision = quietRevision
+        self.exactSize = exactSize
         self.onColour = onColour
         self.action = action
         self.isLoading = isLoading
@@ -186,8 +207,7 @@ struct CircleActionButton: View {
             .animation(.smooth(duration: 0.25), value: isLoading)
         }
         // The large size, like the main action beside it on the title page, so the two read as one row.
-        .glassCircleButton()
-        .frame(width: Self.diameter, height: Self.diameter)
+        .modifier(CircleActionSizing(exact: exactSize))
         // The caption is gone, so the name is spoken here instead. Loading is part of the name, so a caller's own value is left as it is.
         .accessibilityLabel(isLoading ? "\(title), loading" : (isOn ? (onTitle ?? title) : title))
         .help(isOn ? (onTitle ?? title) : title)
@@ -195,6 +215,22 @@ struct CircleActionButton: View {
         // A tick when the state changes, but not when it is read in: a page that opens on a saved title is silent.
         .sensoryFeedback(trigger: TickState(isOn: isOn, quietRevision: quietRevision)) { old, new in
             old.isOn != new.isOn && old.quietRevision == new.quietRevision ? .selection : nil
+        }
+    }
+}
+
+private struct CircleActionSizing: ViewModifier {
+    let exact: Bool
+
+    func body(content: Content) -> some View {
+        if exact {
+            content.buttonStyle(.plain)
+                .frame(width: CircleActionButton.diameter, height: CircleActionButton.diameter)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .pointerFeedback()
+        } else {
+            content.glassCircleButton()
+                .frame(width: CircleActionButton.diameter, height: CircleActionButton.diameter)
         }
     }
 }

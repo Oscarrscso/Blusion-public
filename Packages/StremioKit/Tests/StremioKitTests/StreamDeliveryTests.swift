@@ -40,15 +40,18 @@ import StremioKitTestSupport
         #expect(StreamDelivery.detect(in: page) == nil, "a web page is never a stream")
     }
 
-    @Test func aPreferenceKeepsAutoPickToThatKindWheneverThereIsOne() {
+    @Test func aPreferenceNamesTheKindItPrefersAndNeverExcludesAnother() {
         let usenet = ranked("u", "📰 ⚡ Movie · 1080p")
         let debrid = ranked("d", "☁️ ⚡ Movie · 2160p")
         let plain = ranked("p", "Movie · 2160p")
-        let all = [debrid, plain, usenet]
-        #expect(StreamSourcePreference.usenet.candidates(from: all).map(\.id) == ["u"])
-        #expect(StreamSourcePreference.debrid.candidates(from: all).map(\.id) == ["d"])
-        #expect(StreamSourcePreference.balanced.candidates(from: all).map(\.id) == ["d", "p", "u"])
-        #expect(StreamSourcePreference.usenet.candidates(from: [debrid, plain]).map(\.id) == ["d", "p"],
-                "with no Usenet stream at all, Auto Pick still has every stream to choose from")
+        #expect(StreamSourcePreference.usenet.prefers(usenet.stream))
+        #expect(!StreamSourcePreference.usenet.prefers(debrid.stream))
+        #expect(StreamSourcePreference.debrid.prefers(debrid.stream))
+        #expect(!StreamSourcePreference.debrid.prefers(plain.stream), "a stream whose kind is unknown is not preferred")
+        #expect(!StreamSourcePreference.balanced.prefers(usenet.stream), "Balanced prefers nothing")
+        // The preference is scored, not filtered: every release stays in the ranking for the quality model to compare.
+        let ids = AutoStreamRanking.ranked([debrid, plain, usenet], duration: nil, preferences: RankingPreferences(sourcePreference: .usenet))
+            .map(\.item.id)
+        #expect(Set(ids) == ["u", "d", "p"])
     }
 }

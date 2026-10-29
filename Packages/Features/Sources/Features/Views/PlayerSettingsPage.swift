@@ -104,7 +104,7 @@ struct PlayerSettingsPage: View {
                     .disabled(!player.showsSkipButtons)
                 #if !targetEnvironment(macCatalyst)
                 // Brightness has no app control on the Mac, and its keyboard already sets the volume.
-                Toggle("Swipe for brightness and volume", isOn: binding(\.swipeGestures))
+                Toggle("Swipe for brightness", isOn: binding(\.swipeGestures))
                 #endif
             }
 
