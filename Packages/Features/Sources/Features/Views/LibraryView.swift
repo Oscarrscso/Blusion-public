@@ -13,11 +13,13 @@ struct LibraryView: View {
     @Environment(TitleActions.self) private var actions: TitleActions?
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
+    let services: AppServices
     let onOpenAddons: () -> Void
     /// The id of the page's content, which its scroll goes back to when its tab's item is tapped.
     private static let topID = "library.top"
 
     init(services: AppServices, onOpenAddons: @escaping () -> Void) {
+        self.services = services
         _model = State(initialValue: LibraryViewModel(services: services))
         self.onOpenAddons = onOpenAddons
     }
@@ -27,6 +29,11 @@ struct LibraryView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     pageTitle
+                    NavigationLink(value: LibraryDestination.downloads) {
+                        Label("Downloads", systemImage: "arrow.down.circle")
+                            .font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, metrics.pageMargin).padding(.bottom)
+                    }
                     filters
                     VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
                         if !model.hasLoaded {
@@ -62,6 +69,12 @@ struct LibraryView: View {
             .screenBackground()
             .browsePageTopMargin()
             .navigationTitle("")
+            .navigationDestination(for: LibraryDestination.self) { _ in DownloadsView(services: services) }
+            .task(id: router.opensDownloads) {
+                guard router.opensDownloads, router.tab == .library else { return }
+                router.libraryPath = NavigationPath([LibraryDestination.downloads])
+                router.opensDownloads = false
+            }
             .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)

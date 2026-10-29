@@ -142,7 +142,7 @@ struct PlayerOptionsPanel: View {
                 }
             }
             if !model.externalSubtitleRows.isEmpty {
-                PanelSection("Online") {
+                PanelSection(model.plan.isOffline ? "Downloaded" : "Online") {
                     PanelGroup {
                         ForEach(Array(model.externalSubtitleRows.enumerated()), id: \.element.id) { index, row in
                             PanelOptionRow(title: row.title, subtitle: row.subtitle, tags: row.tags,
@@ -154,7 +154,9 @@ struct PlayerOptionsPanel: View {
             }
             HStack(spacing: 8) {
                 PanelButton("Add File", symbol: "doc.badge.plus") { closeThen(actions.openSubtitleFile) }
-                PanelButton("OpenSubtitles", symbol: "magnifyingglass") { closeThen(actions.searchOpenSubtitles) }
+                if !model.plan.isOffline {
+                    PanelButton("OpenSubtitles", symbol: "magnifyingglass") { closeThen(actions.searchOpenSubtitles) }
+                }
             }
             if model.hasSimplifiedStyling {
                 PanelButton("Show Full Styling", symbol: "textformat") { Task { await model.openInAdvancedPlayer() } }

@@ -120,6 +120,9 @@ struct SettingsView: View {
                     }
                 }
                 Section("Data") {
+                    NavigationLink { DownloadSettingsPage(services: services) } label: {
+                        SettingsRow(title: "Downloads", summary: "", systemImage: "arrow.down.circle")
+                    }
                     NavigationLink { ImageCacheSettingsPage() } label: {
                         SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
                     }

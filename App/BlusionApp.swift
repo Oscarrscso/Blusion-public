@@ -6,6 +6,7 @@ import SafariServices
 
 @main
 struct BlusionApp: App {
+    @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var appDelegate
     @State private var environment = AppEnvironment.make()
 
     var body: some Scene {
@@ -62,6 +63,7 @@ struct RootView: View {
             if isReady {
                 RootTabView(services: environment.services, route: environment.launchRoute,
                             addonLink: $addonLink, userStateRevision: userStateRevision)
+                    .environment(environment.services.downloads!)
             } else {
                 Spinner()
                     .accessibilityIdentifier("root.loading")
@@ -168,3 +170,23 @@ private struct MacWindowSize: ViewModifier {
     }
 }
 #endif
+
+/// UIKit reconnects the same URLSession after a system relaunch; its completion is released after the event stream drains.
+@MainActor
+enum DownloadBackgroundEvents {
+    static var pending: (() -> Void)?
+    static weak var manager: DownloadManager? {
+        didSet { if let pending, let manager { manager.backgroundCompletion = pending; self.pending = nil } }
+    }
+}
+
+final class DownloadAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == DownloadSession.identifier else { completionHandler(); return }
+        if let manager = DownloadBackgroundEvents.manager {
+            manager.backgroundCompletion = completionHandler
+            Task { await manager.start() }
+        } else { DownloadBackgroundEvents.pending = completionHandler }
+    }
+}

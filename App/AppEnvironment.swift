@@ -56,6 +56,7 @@ final class AppEnvironment {
         let secrets: any SecretStore
         let progress: any ProgressStore
         let library: any LibraryStore
+        let downloads: any DownloadStore
         let settingsDefaults: UserDefaults
         var secretsInKeychain = true
         if uiTesting {
@@ -63,6 +64,7 @@ final class AppEnvironment {
             secrets = InMemorySecretStore()
             progress = InMemoryProgressStore()
             library = InMemoryLibraryStore()
+            downloads = InMemoryDownloadStore()
             // A throwaway suite, so UI tests neither read nor leave preferences behind.
             let suite = "app.blusion.uitest.\(UUID().uuidString)"
             settingsDefaults = UserDefaults(suiteName: suite) ?? .standard
@@ -91,12 +93,14 @@ final class AppEnvironment {
                 store = SwiftDataAddonStore(container: container)
                 progress = SwiftDataProgressStore(container: container)
                 library = SwiftDataLibraryStore(container: container)
+                downloads = SwiftDataDownloadStore(container: container)
             } else {
                 // A store that cannot be opened must not stop the app: run from memory and say so.
                 logger.log(.error, "persistent store unavailable; using memory")
                 store = InMemoryAddonStore()
                 progress = InMemoryProgressStore()
                 library = InMemoryLibraryStore()
+                downloads = InMemoryDownloadStore()
             }
         }
         let settings = DefaultsSettingsStore(defaults: settingsDefaults, secrets: secrets, logger: logger)
@@ -190,13 +194,20 @@ final class AppEnvironment {
         let posterRatings = PosterRatingsStore(letterboxd: uiTesting ? nil : LetterboxdRatings(client: client), cache: ratingsCache,
                                                dataset: imdbDataset, logger: logger)
         let searchHistory: any SearchHistoryStore = uiTesting ? InMemorySearchHistoryStore() : DefaultsSearchHistoryStore(defaults: settingsDefaults)
-        let services = AppServices(registry: registry, client: client, settings: settings, progress: progress, library: library,
+        let streamService = StreamService(registry: registry, client: client, timings: addonSpeed)
+        let subtitleService = SubtitleService(registry: registry, client: client)
+        let downloadManager = DownloadManager(store: downloads, secrets: secrets, settings: settings, streams: streamService,
+                                              subtitles: subtitleService, fallback: fallbackLinked,
+                                              hardwareAV1: AVHardware.decodesAV1InHardware, persistent: !uiTesting)
+        DownloadBackgroundEvents.manager = downloadManager
+        Task { await downloadManager.start() }
+        let services = AppServices(registry: registry, client: client, streams: streamService, subtitles: subtitleService, settings: settings, progress: progress, library: library,
                                    makeEngine: makeEngine, preloadStream: preloadStream, fallbackEngineLinked: fallbackLinked, aetherEngineLinked: aetherLinked,
                                    decodesAV1InHardware: AVHardware.decodesAV1InHardware,
                                    widgets: widgets, widgetContent: widgetContent,
                                    posterRatings: posterRatings, handoffs: handoffs, searchHistory: searchHistory, traktAccount: traktAccount, trakt: trakt,
                                    secretsInKeychain: secretsInKeychain, traktSyncState: traktSyncState, syncSchedulesItself: !uiTesting,
-                                   addonSpeed: addonSpeed, widgetShuffle: widgetShuffle)
+                                   addonSpeed: addonSpeed, widgetShuffle: widgetShuffle, downloads: downloadManager)
         if !uiTesting {
             // The first report from the network monitor is also the launch sync.
             Task { await services.traktSync.startMonitoringNetwork() }

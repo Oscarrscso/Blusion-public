@@ -5,33 +5,34 @@ import Testing
 /// Zoom Mode and Aspect Ratio: the layout each makes, where each is kept, and older saved settings.
 @Suite struct VideoZoomTests {
     @Test func eachModeMakesItsLayout() {
-        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239, inset: 59))
-        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .auto, detectedAspect: 1.85, safeInset: 59) == VideoLayout(fit: .fit, inset: 59),
-                "Normal shows the uncropped container frame when Aspect Ratio is Auto")
+        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, inset: 59),
+                "Normal shows the uncropped container frame inside the safe area")
+        #expect(VideoLayout(zoomMode: .normal, aspectRatio: .original, safeInset: 59) == VideoLayout(fit: .fit, inset: 59))
         #expect(VideoLayout(zoomMode: .crop, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239),
-                "Crop trims bars and fits proportionally without overshooting into Fill")
-        #expect(VideoLayout(zoomMode: .crop, aspectRatio: .auto) == VideoLayout(fit: .fit),
-                "Auto with no detected bars preserves the full frame")
-        #expect(VideoLayout(zoomMode: .crop, aspectRatio: .auto, detectedAspect: 1.85) == VideoLayout(fit: .fit, crop: .ratio185),
-                "Auto in Crop trims detected encoded bars and proportionally fits the remaining film")
-        #expect(VideoLayout(zoomMode: .crop, aspectRatio: .widescreenB, detectedAspect: 1.85) == VideoLayout(fit: .fit, crop: .ratio2x1),
-                "Manual aspect ratio always overrides automatic bar detection")
-        #expect(VideoLayout(zoomMode: .fill, aspectRatio: .auto, safeInset: 59) == VideoLayout(fit: .fill),
+                "Crop trims bars for the chosen Aspect Ratio and fits proportionally without overshooting into Fill")
+        #expect(VideoLayout(zoomMode: .crop, aspectRatio: .original) == VideoLayout(fit: .fit),
+                "Original preserves the full frame")
+        #expect(VideoLayout(zoomMode: .crop, aspectRatio: .widescreenB) == VideoLayout(fit: .fit, crop: .ratio2x1))
+        #expect(VideoLayout(zoomMode: .fill, aspectRatio: .original, safeInset: 59) == VideoLayout(fit: .fill),
                 "Fill intentionally scales to cover the screen")
-        #expect(VideoLayout(zoomMode: .fill, aspectRatio: .widescreenA, detectedAspect: 2.39) == VideoLayout(fit: .fill, crop: .ratio185))
+        #expect(VideoLayout(zoomMode: .fill, aspectRatio: .widescreenA) == VideoLayout(fit: .fill, crop: .ratio185))
         #expect(VideoLayout(zoomMode: .stretch, aspectRatio: .widescreenA) == VideoLayout(fit: .stretch, crop: .ratio185))
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239))
-        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .auto, detectedAspect: 2.0, safeInset: 59) == VideoLayout(fit: .fit))
+        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit),
+                "Aspect Fit shows the uncropped container frame across the full screen")
         #else
-        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, crop: .ratio239, inset: 59),
+        #expect(VideoLayout(zoomMode: .aspectFit, aspectRatio: .anamorphicB, safeInset: 59) == VideoLayout(fit: .fit, inset: 59),
                 "a Mac has no Aspect Fit: it plays as Normal")
         #endif
     }
 
-    @Test func aspectRatioChoicesExcludeMistaken165And166Presets() {
+    @Test func aspectRatioChoicesExcludeAutoAndMistaken165And166Presets() throws {
         let labels = AspectRatioChoice.allCases.map(\.label)
+        #expect(!labels.contains("Auto"))
+        #expect(labels.first == "Original")
         #expect(!labels.contains(where: { $0.contains("1.65") || $0.contains("1.66") }))
+        let legacyAuto = try JSONDecoder().decode(AspectRatioChoice.self, from: Data(#""auto""#.utf8))
+        #expect(legacyAuto == .original)
     }
 
     @Test func theZoomButtonGoesRoundTheModes() {

@@ -340,12 +340,16 @@ struct DetailEpisodes: View {
         }
         let controls = UIMenu(options: [.displayInline, .displayAsPalette], children: [watchedAction, imdbAction])
         controls.preferredElementSize = .large
-        return UIMenu(children: [controls, watchedThroughAction])
+        let download = UIAction(title: "Download", image: UIImage(systemName: "arrow.down.circle")) { _ in
+            Task { @MainActor in Haptics.tap(); await model.download(request) }
+        }
+        return UIMenu(children: [controls, download, watchedThroughAction])
     }
 
     @ViewBuilder
     private func episodeActions(_ video: Video) -> some View {
         let request = model.request(for: video)
+        Button("Download", systemImage: "arrow.down.circle") { Haptics.tap(); Task { await model.download(request) } }
             let watched = model.isWatched(video)
             ControlGroup {
                 Button(watched ? "Mark as not watched" : "Mark as watched",
@@ -377,12 +381,21 @@ struct DetailEpisodes: View {
     /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes
     /// `showsWholeOverview` for both expanded layouts. The list follows the full-width setting.
     private func episodeCard(_ video: Video, width: CGFloat, airsLater: Bool, isLoadingStreams: Bool = false,
-                             stillRadius: CGFloat = Theme.Radius.small, showsWholeOverview: Bool? = nil, sideBySide: Bool = false) -> EpisodeRow {
+                             stillRadius: CGFloat = Theme.Radius.small, showsWholeOverview: Bool? = nil, sideBySide: Bool = false) -> some View {
         EpisodeRow(video: video, fraction: model.progressFraction(for: video), watched: model.isWatched(video),
                    artwork: model.backdropURL, score: model.score(for: video), runtimeMinutes: model.runtimeMinutes(for: video), width: width,
                    showsWholeOverview: showsWholeOverview ?? model.matchesEpisodeWidthToText, airsLater: airsLater,
-                   isLoadingStreams: isLoadingStreams,
+                   isLoadingStreams: isLoadingStreams || model.downloadManager?.loadingRequests.contains(model.request(for: video).identity) == true,
                    stillRadius: stillRadius, sideBySide: sideBySide)
+            .overlay(alignment: .topTrailing) {
+                if let item = model.downloadManager?.item(for: model.request(for: video)) {
+                    DownloadProgressGlyph(item: item)
+                        .frame(width: 44, height: 44)
+                        .background(Theme.surfaceStrong, in: Circle())
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+            }
     }
 }
 

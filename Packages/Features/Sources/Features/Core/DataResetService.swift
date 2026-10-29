@@ -5,10 +5,11 @@ import StremioKit
 /// "Clear data" in Settings. Each scope is independent; `everything` is all of them and also removes every addon (and so its Keychain URL).
 public struct DataResetService: Sendable {
     public enum Scope: Sendable, Equatable, CaseIterable {
-        case history, library, settings, widgets, addons, everything
+        case history, library, downloads, settings, widgets, addons, everything
 
         public var title: String {
             switch self {
+            case .downloads: return "Downloads"
             case .history: return "Watch history"
             case .library: return "Saved titles"
             case .settings: return "Settings"
@@ -20,12 +21,13 @@ public struct DataResetService: Sendable {
 
         public var warning: String {
             switch self {
+            case .downloads: return "Removes downloaded videos and subtitles."
             case .history: return "Removes your watch progress and watched marks. Continue will be empty."
             case .library: return "Removes every saved title from your library."
             case .settings: return "Resets playback and ratings preferences, account credentials and the streaming server."
             case .widgets: return "Puts Home back to the automatic layout. Your widgets are removed."
             case .addons: return "Removes every installed addon and its saved link. You'll need to add them again."
-            case .everything: return "Removes watch history, saved titles, settings, your Home layout and all addons."
+            case .everything: return "Removes watch history, saved titles, downloads, settings, your Home layout and all addons."
             }
         }
     }
@@ -40,12 +42,15 @@ public struct DataResetService: Sendable {
     @discardableResult
     public func clear(_ scope: Scope) async -> String {
         switch scope {
+        case .downloads:
+            await services.downloads?.deleteAll()
         case .history:
             await services.progress.clear()
         case .library:
             await services.library.clear()
         case .settings:
             await services.settings.save(PlaybackSettings())
+            await services.downloads?.preferencesChanged()
             await services.traktAccount.clearCredentials()
             await services.traktSync.signedOut()
             await services.posterRatings.setReviewServices(tmdb: nil)
@@ -63,7 +68,7 @@ public struct DataResetService: Sendable {
             await services.widgetContent.forgetEverything()
             await services.addonSpeed.clear()
         case .everything:
-            for each in [Scope.history, .library, .settings, .widgets, .addons] { await clear(each) }
+            for each in [Scope.history, .library, .downloads, .settings, .widgets, .addons] { await clear(each) }
             services.searchHistory.save([])
             await services.posterRatings.forgetAll()
             await services.handoffs.clear()

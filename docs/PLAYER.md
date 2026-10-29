@@ -136,3 +136,14 @@ Intentionally iPhone/iPad-only:
 
 HDR/EDR output through MoltenVK, DV profile 5/8 colours, multichannel PCM over HDMI/AirPlay, VideoToolbox super-resolution speed per chip,
 PGS placement against the picture, OpenSubtitles against the live API (needs a key), and mpv's `deinterlace=auto` on this build.
+
+
+## Downloaded playback (2026-10-29)
+
+Library → Downloads opens a single local-file candidate, routed through the same built-in engines: native formats use AVPlayer;
+fallback formats use AetherEngine/mpv on iPhone and mpv on Catalyst. The file is not converted to another container. Session
+snapshots store a download UUID, and watch progress retains the original movie/episode identity. Saved subtitle files and embedded
+tracks work offline. The offline player disables addon/subtitle listing, OpenSubtitles, stream preloads and online episode selection.
+Cold relaunch restores by local UUID; Continue Watching opens a matching completed download directly. Missing files fail locally.
+Local fallback interoperability, background scheduling, subtitles and resume behavior require the manual download checklist in
+DEVICE_CHECKLIST.md; successful builds/installations do not establish these device behaviors.

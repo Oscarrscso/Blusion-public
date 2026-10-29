@@ -24,6 +24,8 @@ settings:
     BLUSION_BUILD_TAG: dev
     BLUSION_SOURCE_REVISION: unversioned
     ENABLE_USER_SCRIPT_SANDBOXING: YES
+    # MPVKit ships flat Catalyst frameworks. The post-embed step must restructure and re-sign their nested files.
+    "ENABLE_USER_SCRIPT_SANDBOXING[sdk=macosx*]": NO
     CODE_SIGN_STYLE: Automatic
     # String Catalogs (App/Localizable.xcstrings, App/InfoPlist.xcstrings); seed with scripts/extract-strings.py.
     SWIFT_EMIT_LOC_STRINGS: YES
@@ -56,6 +58,13 @@ targets:
     platform: iOS
     sources:
       - path: App
+    postBuildScripts:
+      - name: Normalize Catalyst framework bundles
+        script: |
+          if [ "$EFFECTIVE_PLATFORM_NAME" = "-maccatalyst" ]; then
+            /usr/bin/python3 "$SRCROOT/scripts/normalize-catalyst-frameworks.py"
+          fi
+        basedOnDependencyAnalysis: false
     dependencies:
       - package: StremioKit
       - package: PlayerKit

@@ -320,8 +320,7 @@ private final class MPVEventPump: @unchecked Sendable {
 /// `FallbackBackend` on libmpv (MPVKit, LGPL build). Renders through a CAMetalLayer (gpu-next on MoltenVK) with VideoToolbox hardware decoding,
 /// libplacebo tone mapping and Dolby Vision (profiles 5 and 8, and 7's base layer with its RPU), and libass for styled subtitles.
 @MainActor
-public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
-    public private(set) var pictureSamplingRevision = 0
+public final class MPVBackend: FallbackBackend {
     private let host = MPVHostView(frame: MPVHostView.initialFrame)
     private var handle: OpaquePointer?
     private var pump: MPVEventPump?
@@ -331,7 +330,6 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
     private var layout = VideoLayout()
     private var subtitleStyle = SubtitleStyle()
     /// What was last set, so a reconfig that follows a change doesn't set it again (setting `vf` reconfigures the video once more).
-    private var lastSampleTime: Double?
     private var appliedScale: CGSize?
     private var appliedSubMarginY: Int?
     private var appliedFilter: String?
@@ -422,11 +420,9 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
 
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         guard handle != nil else { return }
-        pictureSamplingRevision &+= 1
         host.visiblePicture = nil
         appliedScale = nil
         appliedSubMarginY = nil
-        lastSampleTime = nil
         set("video-scale-x", "1")
         set("video-scale-y", "1")
         set("pause", "yes")
@@ -634,44 +630,6 @@ public final class MPVBackend: FallbackBackend, OriginalPictureSampling {
         temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         temporaryFiles = []
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    /// An unscaled, subtitle-free source screenshot. Never sample the window: that would feed our own geometry back into detection.
-    public func sampleOriginalPicture() -> (frame: VideoLumaFrame, aspect: Double)? {
-        guard let handle else { return nil }
-        let read = MPVProperties(handle: handle)
-        guard let source = read.originalVideoSize, let time = read.double("time-pos"), time != lastSampleTime else { return nil }
-        lastSampleTime = time
-        let arguments = ["screenshot-raw", "video"]
-        let strings = arguments.map { strdup($0) }
-        defer { strings.forEach { free($0) } }
-        var pointers: [UnsafePointer<CChar>?] = strings.map { $0.map { UnsafePointer($0) } } + [nil]
-        var result = mpv_node()
-        guard mpv_command_ret(handle, &pointers, &result) >= 0 else { return nil }
-        defer { mpv_free_node_contents(&result) }
-        guard result.format == MPV_FORMAT_NODE_MAP, let list = result.u.list?.pointee,
-              let keys = list.keys, let values = list.values else { return nil }
-        func value(_ key: String) -> mpv_node? {
-            for index in 0..<Int(list.num) where keys[index].map({ String(cString: $0) }) == key { return values[index] }
-            return nil
-        }
-        guard let w = value("w"), w.format == MPV_FORMAT_INT64,
-              let h = value("h"), h.format == MPV_FORMAT_INT64,
-              let row = value("stride"), row.format == MPV_FORMAT_INT64,
-              let format = value("format"), format.format == MPV_FORMAT_STRING, let name = format.u.string,
-              ["bgr0", "bgra"].contains(String(cString: name)),
-              let data = value("data"), data.format == MPV_FORMAT_BYTE_ARRAY, let bytes = data.u.ba?.pointee,
-              let base = bytes.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
-        let width = Int(w.u.int64), height = Int(h.u.int64), stride = Int(row.u.int64)
-        guard width > 2, height > 2, stride >= width * 4, bytes.size >= stride * height else { return nil }
-        let sampleWidth = min(480, width), sampleHeight = max(3, Int((Double(height) * Double(sampleWidth) / Double(width)).rounded()))
-        let pixels = (0..<(sampleWidth * sampleHeight)).map { index -> UInt8 in
-            let x = min(width - 1, ((index % sampleWidth) * 2 + 1) * width / (sampleWidth * 2))
-            let y = min(height - 1, ((index / sampleWidth) * 2 + 1) * height / (sampleHeight * 2))
-            let p = base + y * stride + x * 4
-            return UInt8((Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8)
-        }
-        return (VideoLumaFrame(width: sampleWidth, height: sampleHeight, pixels: pixels), Double(source.width / source.height))
     }
 
     // MARK: Helpers

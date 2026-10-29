@@ -57,6 +57,11 @@ public struct PlaybackCandidate: Sendable, Equatable, Identifiable {
 /// What to play and what to fall back on: the chosen stream first, then every other playable stream in rank order.
 /// If one fails, the coordinator moves to the next (PLAN M5: auto-advance on failure).
 public struct PlaybackPlan: Sendable, Equatable, Identifiable, Hashable {
+    public var downloadID: UUID? {
+        guard let id = candidates.first?.id, id.hasPrefix("download:") else { return nil }
+        return UUID(uuidString: String(id.dropFirst(9)))
+    }
+    public var isOffline: Bool { downloadID != nil }
     public let id: UUID
     public let request: StreamRequest
     public let candidates: [PlaybackCandidate]

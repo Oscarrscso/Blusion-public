@@ -5,10 +5,10 @@ import StremioKit
 import SwiftData
 
 public enum PersistenceContainer {
-    /// The app's container at the current schema (V4), migrating older stores forward. `inMemory` is for tests; otherwise the store lives
+    /// The app's container at the current schema (V5), migrating older stores forward. `inMemory` is for tests; otherwise the store lives
     /// at `url` (default: `defaultStoreURL()`, or SwiftData's default location where that is nil).
     public static func make(inMemory: Bool = false, url: URL? = nil) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: BlusionSchemaV4.self)
+        let schema = Schema(versionedSchema: BlusionSchemaV5.self)
         let configuration: ModelConfiguration
         if inMemory {
             configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)

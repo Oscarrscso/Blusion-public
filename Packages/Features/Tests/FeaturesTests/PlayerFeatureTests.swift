@@ -201,8 +201,7 @@ import StremioKitTestSupport
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
                                     services: try await services(store: store, engines: engines))
         await model.start()
-        model.setZoomMode(.crop)
-        model.setDetectedPictureAspect(1.85)
+        model.setAspectRatio(.widescreenA)
         #expect(engines.made[0].layouts.last == VideoLayout(fit: .fit, crop: .ratio185))
         model.setZoomMode(.fill)
         #expect(engines.made[0].layouts.last == VideoLayout(fit: .fill, crop: .ratio185))
@@ -255,15 +254,15 @@ import StremioKitTestSupport
         let film = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]),
                                    services: try await services(store: store, engines: engines))
         await film.start()
-        #expect(film.zoomMode == .crop && film.aspectRatio == .auto, "Zoom Mode is global, Aspect Ratio belongs to its title")
+        #expect(film.zoomMode == .crop && film.aspectRatio == .original, "Zoom Mode is global, Aspect Ratio belongs to its title")
         await film.close()
 
         let nextSeason = StreamRequest(type: "series", id: "tt9:3:1", title: "Show · One", season: 3, episode: 1, seriesName: "Show")
         let third = PlayerViewModel(plan: PlaybackPlan(request: nextSeason, candidates: [candidate("a")]),
                                     services: try await services(store: store, engines: engines))
         await third.start()
-        #expect(third.aspectRatio == .auto)
-        third.setAspectRatio(.auto)
+        #expect(third.aspectRatio == .original)
+        third.setAspectRatio(.original)
         await third.close()
         let saved = await store.load().player
         #expect(saved.zoomMode == .crop && saved.aspectRatios == ["tt9:s2": .anamorphicB])

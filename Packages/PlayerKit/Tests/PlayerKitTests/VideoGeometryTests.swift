@@ -207,8 +207,8 @@ import StremioKit
     }
 
     /// Synthetic marked-frame & rendered RGBA bitmap verification across 16:9 displays, widescreen landscape iPhones, and portrait viewports:
-    /// 1920×1080 with 1.85:1 (~21px bars), 2.00:1 (60px bars), 2.39:1 (~138px bars), and 1.65:1 (69px pillarbox bars),
-    /// native 1920×1038 (no bars), and genuine 16:9 Auto.
+    /// 1920×1080 with 1.85:1 (~21px bars), 2.00:1 (60px bars), 2.39:1 (~138px bars), and 16:10 (120px pillarbox bars),
+    /// native 1920×1038 (no bars), and genuine 16:9 Original.
     @Test func syntheticMarkedFramesPreserveExactMoviePixelsAcrossAllViewports() throws {
         let viewports = [hd, phone, portrait]
 
@@ -249,16 +249,16 @@ import StremioKit
             )
             #expect(abs(geo239.visible.width / geo239.visible.height - 2.39) < 0.0005)
 
-            // 4. 1920×1080 with 1.65:1 pillarboxed content (1782×1080, 69px bars left & right).
-            let layout165 = VideoLayout(fit: .fit, crop: .precise(1.65))
-            let geo165 = try #require(VideoGeometry(bounds: viewport, source: hd, layout: layout165))
+            // 4. 1920×1080 with 16:10 pillarboxed content (1728×1080, 96px bars left & right).
+            let layout1610 = VideoLayout(zoomMode: .crop, aspectRatio: .hdtv16x10)
+            let geo1610 = try #require(VideoGeometry(bounds: viewport, source: hd, layout: layout1610))
             try assertVisiblePixelMarkersAndRenderedBitmap(
                 viewport: viewport,
-                geometry: geo165,
-                expectedMovieRect: CGRect(x: 69, y: 0, width: 1782, height: 1080),
+                geometry: geo1610,
+                expectedMovieRect: CGRect(x: 96, y: 0, width: 1728, height: 1080),
                 source: hd
             )
-            #expect(abs(geo165.visible.width / geo165.visible.height - 1.65) < 0.0005)
+            #expect(abs(geo1610.visible.width / geo1610.visible.height - 1.6) < 0.0005)
 
             // 5. Native 1.85:1 encode (1920×1038) without embedded black bars: zero fictitious crop.
             let native185 = CGSize(width: 1920, height: 1038)
@@ -270,23 +270,21 @@ import StremioKit
                 source: native185
             )
 
-            // 6. Genuine 16:9 content (1920×1080) with Crop + Auto: zero pixels cropped.
-            let layoutAuto = VideoLayout(zoomMode: .crop, aspectRatio: .auto)
-            let geoAuto = try #require(VideoGeometry(bounds: viewport, source: hd, layout: layoutAuto))
+            // 6. Genuine 16:9 content (1920×1080) with Crop + Original: zero pixels cropped.
+            let layoutOriginal = VideoLayout(zoomMode: .crop, aspectRatio: .original)
+            let geoOriginal = try #require(VideoGeometry(bounds: viewport, source: hd, layout: layoutOriginal))
             try assertVisiblePixelMarkersAndRenderedBitmap(
                 viewport: viewport,
-                geometry: geoAuto,
+                geometry: geoOriginal,
                 expectedMovieRect: CGRect(origin: .zero, size: hd),
                 source: hd
             )
         }
 
-        let uncroppedPhone = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(zoomMode: .crop, aspectRatio: .auto)))
-        let auto185Phone = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(zoomMode: .crop, aspectRatio: .auto, detectedAspect: 1.85)))
+        let uncroppedPhone = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(zoomMode: .crop, aspectRatio: .original)))
         let w185Phone = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(zoomMode: .crop, aspectRatio: .widescreenA)))
         let w200Phone = try #require(VideoGeometry(bounds: phone, source: hd, layout: VideoLayout(zoomMode: .crop, aspectRatio: .widescreenB)))
         #expect(abs(uncroppedPhone.visible.width - 393 * 16.0 / 9.0) < 0.1)
-        #expect(close(auto185Phone.visible, w185Phone.visible, tolerance: 0.01))
         #expect(abs(w185Phone.visible.width - 393 * 1.85) < 0.1)
         #expect(abs(w200Phone.visible.width - 393 * 2.0) < 0.1)
         #expect(uncroppedPhone.visible.width < w185Phone.visible.width - 25)

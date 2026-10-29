@@ -3,6 +3,8 @@ import Persistence
 import SwiftUI
 import StremioKit
 
+enum LibraryDestination: Hashable { case downloads }
+
 /// Screens reachable from the Settings tab's stack.
 enum SettingsDestination: Hashable {
     case addons
@@ -18,6 +20,7 @@ public final class AppRouter {
     var searchPath = NavigationPath()
     var discoverPath = NavigationPath()
     var libraryPath = NavigationPath()
+    var opensDownloads = false
     var searchBrowseRevision = 0
     var searchFocusRevision = 0
     /// Counts the titles opened from Search, so the Search screen reads its recent searches again.
@@ -777,6 +780,12 @@ public struct RootTabView: View {
         guard initialRoute == .home, let snapshot = await PlaybackSession.load() else { return }
         guard !snapshot.isEffectivelyFinished() else {
             await PlaybackSession.clear()
+            return
+        }
+        if let downloadID = snapshot.downloadID {
+            await services.downloads?.start()
+            if let plan = await services.downloads?.plan(for: downloadID) { router.demoPlan = plan }
+            else { await PlaybackSession.clear() }
             return
         }
         router.tab = .home

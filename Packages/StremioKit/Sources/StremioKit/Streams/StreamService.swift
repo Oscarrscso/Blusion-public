@@ -28,6 +28,11 @@ public final class StreamService: Sendable {
         return await fetchFresh(request)
     }
 
+    /// Expired credentials must come from a new addon response, never a previously prefetched listing.
+    public func fetchUncached(_ request: StreamRequest) async -> (asked: [AddonSummary], responses: AsyncStream<AddonResponse<[AddonStream]>>) {
+        await fetchFresh(request)
+    }
+
     /// Starts the addons' stream lookup for a title now, so the picker finds it loaded. One lookup per title while it lives. Never sniffs, never plays.
     public func prefetch(_ request: StreamRequest) async {
         let key = Self.prefetchKey(request)

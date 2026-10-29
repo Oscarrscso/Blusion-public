@@ -3,6 +3,8 @@ import Foundation
 /// User preferences that affect which stream is picked and how it plays (PLAN M7 surfaces them in Settings).
 public struct PlaybackSettings: Sendable, Equatable, Codable {
     /// Preferred vertical resolution (e.g. 1080). nil = best available.
+    public var downloadsAllowCellular: Bool = false
+    public var downloadsDeleteWhenWatched: Bool = false
     public var preferredResolution: Int?
     /// Default subtitle language as an ISO 639-2 or 639-1 code (`eng`, `en`). nil = subtitles off by default.
     public var subtitleLanguage: String?

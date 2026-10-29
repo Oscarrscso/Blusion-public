@@ -155,6 +155,14 @@ public final class PlayerViewModel {
         async let savedProgress = services.progress.progress(for: plan.request.identity)
         settings = await loadedSettings
         let previous = await savedProgress
+        if let id = plan.downloadID {
+            services.downloads?.opened(id)
+            if let snapshot = await snapshotStore.load(), snapshot.downloadID == id { pendingResume = snapshot }
+            else {
+                let snapshot = PlaybackSnapshot(downloadID: id, request: plan.request, stream: PlaybackStreamIdentity(kind: .direct))
+                try? await snapshotStore.save(snapshot)
+            }
+        }
         guard !isClosed else { return }
         // The saved session knows where the viewer actually was, past what the progress store had flushed; progress still resumes a
         // session whose snapshot was at its start.
@@ -167,13 +175,12 @@ public final class PlayerViewModel {
         let player = settings.player
         // The picture is Zoom Mode's, kept for every video, with this title's Aspect Ratio (as in Infuse).
         zoomMode = player.zoomMode.onThisDevice
-        aspectRatio = player.aspectRatios[AspectRatioChoice.titleKey(for: plan.request)] ?? .auto
+        aspectRatio = player.aspectRatios[AspectRatioChoice.titleKey(for: plan.request)] ?? .original
         let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: pictureLayout,
                                               processing: pendingResume?.processing ?? player.processing,
                                               subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
         coordinator.onEnded = { [weak self] in self?.hasFinished = true }
         coordinator.onCandidateChange = { [weak self] candidate in
-            self?.setDetectedPictureAspect(nil)
             self?.lookUpSubtitles(for: candidate)
         }
         coordinator.onEngineChange = { [weak self] in self?.engineChanged() }
@@ -211,6 +218,10 @@ public final class PlayerViewModel {
         await coordinator?.stop()
         temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
         temporaryFiles = []
+        if let id = plan.downloadID {
+            let progress = await services.progress.progress(for: plan.request.identity)
+            await services.downloads?.closed(id, watched: progress?.isWatched == true)
+        }
     }
 
     /// True once a session exists and has not been closed: the app-level holder keeps such a session alive across its screen's
@@ -258,9 +269,9 @@ public final class PlayerViewModel {
     public func saveSessionSnapshot(for next: PlaybackPlan, candidateIndex: Int = 0) async {
         guard next.candidates.indices.contains(candidateIndex) else { return }
         let candidate = next.candidates[candidateIndex]
-        guard let identity = PlaybackStreamIdentity(candidate: candidate) else { return }
+        guard !next.isOffline, let identity = PlaybackStreamIdentity(candidate: candidate) else { return }
         let layout = VideoLayout(zoomMode: settings.player.zoomMode,
-                                 aspectRatio: settings.player.aspectRatios[AspectRatioChoice.titleKey(for: next.request)] ?? .auto)
+                                 aspectRatio: settings.player.aspectRatios[AspectRatioChoice.titleKey(for: next.request)] ?? .original)
         let snapshot = PlaybackSnapshot(request: next.request, stream: identity, addonName: candidate.addonName,
                                         position: 0, duration: nil, wasPaused: false,
                                         layout: layout, processing: settings.player.processing)
@@ -373,7 +384,7 @@ public final class PlayerViewModel {
     public var currentStreamIndex: Int { coordinator?.candidateIndex ?? 0 }
     /// The stream playing now, as its addon listed it (the options panel's Info).
     public var currentCandidate: PlaybackCandidate? { coordinator?.current }
-    public var hasNextEpisode: Bool { plan.request.nextRequest != nil }
+    public var hasNextEpisode: Bool { !plan.isOffline && plan.request.nextRequest != nil }
     public var canPictureInPicture: Bool { coordinator?.current?.route.isNative == true }
     public var volume: Float { coordinator?.volume ?? 1 }
     public var isMuted: Bool { coordinator?.isMuted ?? false }
@@ -627,24 +638,14 @@ public final class PlayerViewModel {
 
     /// As in Infuse: one global setting, kept for every video. Read from Settings when playback begins.
     public private(set) var zoomMode: ZoomMode = .normal
-    /// As in Infuse: kept per title (a film, or a TV season). Read when playback begins; Auto when none was chosen.
-    public private(set) var aspectRatio: AspectRatioChoice = .auto
+    /// As in Infuse: kept per title (a film, or a TV season). Read when playback begins; Original when none was chosen.
+    public private(set) var aspectRatio: AspectRatioChoice = .original
     /// How far the safe area keeps the picture from each side, in points (beside a notch or Dynamic Island): Normal fits inside it.
     public private(set) var safeAreaInset: Double = 0
-    private var detectedPictureAspect: Double?
 
     /// The picture Zoom Mode and Aspect Ratio make on this screen.
     var pictureLayout: VideoLayout {
-        VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio,
-                    detectedAspect: detectedPictureAspect, safeInset: safeAreaInset)
-    }
-
-    /// Measured against original source frames, independently of the user's display aspect and zoom mode.
-    public func setDetectedPictureAspect(_ ratio: Double?) {
-        let ratio = ratio.flatMap { $0.isFinite && (0.5...4).contains($0) ? $0 : nil }
-        guard ratio != detectedPictureAspect else { return }
-        detectedPictureAspect = ratio
-        applyPicture()
+        VideoLayout(zoomMode: zoomMode, aspectRatio: aspectRatio, safeInset: safeAreaInset)
     }
 
     /// Kept for every video, as in Infuse.
@@ -674,14 +675,20 @@ public final class PlayerViewModel {
         lastInteraction = now()
     }
 
-    /// The centred source crop in every mode, kept for the film or every episode of its season.
+    /// The centred source crop for Crop, Fill and Stretch, kept for the film or every episode of its season.
     public func setAspectRatio(_ choice: AspectRatioChoice) {
         defer { showControls() }
-        guard choice != aspectRatio else { return }
+        let promotesToCrop = choice != .original && (zoomMode == .normal || zoomMode == .aspectFit)
+        guard choice != aspectRatio || promotesToCrop else { return }
         aspectRatio = choice
+        if promotesToCrop { zoomMode = .crop }
         applyPicture()
         let key = AspectRatioChoice.titleKey(for: plan.request)
-        savePreferences { $0.aspectRatios[key] = choice == .auto ? nil : choice }
+        let savedZoom = zoomMode
+        savePreferences {
+            $0.aspectRatios[key] = choice == .original ? nil : choice
+            if promotesToCrop { $0.zoomMode = savedZoom }
+        }
     }
 
     /// The safe area the player screen reports. Only Normal uses it.
@@ -931,7 +938,7 @@ public final class PlayerViewModel {
             subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: first.subtitles))
             restoreChoicesIfPossible()
             await applyDefaultSubtitle()
-            await collect(services.subtitles.fetch(for: first, request: plan.request))
+            if !plan.isOffline { await collect(services.subtitles.fetch(for: first, request: plan.request)) }
         }
     }
 
@@ -948,7 +955,7 @@ public final class PlayerViewModel {
     /// Another stream took over: its own subtitles (bundled, and those addons match to its hash and file name) join the list.
     /// The list keeps what it had, so a choice already made stays available.
     private func lookUpSubtitles(for candidate: PlaybackCandidate) {
-        guard lookedUpCandidates.insert(candidate.id).inserted else { return }
+        guard !plan.isOffline, lookedUpCandidates.insert(candidate.id).inserted else { return }
         lookupTasks.append(Task { [weak self] in
             guard let self else { return }
             subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: candidate.subtitles))
@@ -957,10 +964,8 @@ public final class PlayerViewModel {
         })
     }
 
-    /// Reset automatic bar detection whenever the active engine changes (fallback switch or reopen), and move external subtitles
-    /// between engine-drawn and overlay-drawn paths as capabilities change.
+    /// Move external subtitles between engine-drawn and overlay-drawn paths as capabilities change across engines.
     private func engineChanged() {
-        setDetectedPictureAspect(nil)
         guard case .external(let id) = subtitleChoice else { return }
         let engineDraws = capabilities.contains(.engineSubtitles)
         if (engineDrawnOptionID != nil) != engineDraws {
@@ -1013,6 +1018,7 @@ public final class PlayerViewModel {
 
     /// Searches OpenSubtitles.com for this title (and episode) in the preferred subtitle language, matched to the stream's hash when known.
     public func searchOpenSubtitles() async {
+        guard !plan.isOffline else { return }
         guard let client = openSubtitles() else {
             openSubtitlesStatus = "Add an OpenSubtitles API key in Settings to search."
             return
@@ -1038,6 +1044,7 @@ public final class PlayerViewModel {
 
     /// Downloads one result; it joins the list and is selected.
     public func downloadOpenSubtitle(_ result: OpenSubtitlesResult) async {
+        guard !plan.isOffline else { return }
         guard let client = openSubtitles() else { return }
         openSubtitlesStatus = "Downloading…"
         do {
@@ -1129,7 +1136,7 @@ public final class PlayerViewModel {
     /// Streams for the next episode, auto-selecting one in the same bingeGroup as the current stream (PLAN M4).
     /// nil when there is no next episode or no matching stream: the caller then shows the picker for it.
     public func prepareNextEpisode() async -> PlaybackPlan? {
-        guard let next = plan.request.nextRequest else { return nil }
+        guard !plan.isOffline, let next = plan.request.nextRequest else { return nil }
         let picker = StreamPickerViewModel(request: next, services: services)
         defer { picker.cancelLoading() }
         // Every addon's answers within the window, as before: the stream continuing this one may come from a slower addon.
@@ -1141,6 +1148,7 @@ public final class PlayerViewModel {
     /// Readies a chosen episode's streams, as `prepareNextEpisode` does for the one after this: the stream continuing this binge where
     /// the addons have it, else the best they offer that Blusion itself can play. Nil when none of them can be played.
     public func prepareEpisode(_ request: StreamRequest) async -> PlaybackPlan? {
+        guard !plan.isOffline else { return nil }
         let picker = StreamPickerViewModel(request: request, services: services)
         defer { picker.cancelLoading() }
         await picker.loadForAutomaticSelection(stopsForWaitTarget: false)

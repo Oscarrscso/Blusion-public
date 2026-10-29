@@ -44,7 +44,7 @@ struct PlayerContent: View {
     #if canImport(UIKit) && canImport(AVKit)
     @State private var pip = PiPProxy()
     @State private var superResolution = SuperResolutionRenderer()
-    /// Original picture samples: encoded bars and ambient mode's colours.
+    /// Samples the picture for ambient mode's colours.
     @State private var picture = PictureSampler()
     #endif
     @State private var importsSubtitle = false
@@ -172,7 +172,7 @@ struct PlayerContent: View {
             PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
                            onShowEpisodes: toggleEpisodes, episodesOpen: showsEpisodes,
                            panel: $panel, actions: controlActions, upscaling: upscalingRenderer,
-                           onShowStreams: { closeMenus(); model.showControls(); showsStreams = true },
+                           onShowStreams: { guard !model.plan.isOffline else { return }; closeMenus(); model.showControls(); showsStreams = true },
                            isVideoReady: isVideoReady, isStalled: showsStall && model.isStalled)
                 .opacity(controlsAreVisible ? 1 : 0)
                 .allowsHitTesting(controlsAreVisible)
@@ -406,6 +406,7 @@ struct PlayerContent: View {
     private static let episodePanelTop: CGFloat = 12 + 44 + 8
 
     private func toggleEpisodes() {
+        guard !model.plan.isOffline else { return }
         if showsEpisodes {
             closeEpisodes()
         } else {
@@ -494,7 +495,7 @@ struct PlayerContent: View {
 
     private var controlActions: PlayerControlActions {
         PlayerControlActions(openSubtitleFile: { importsSubtitle = true }, openAudioFile: { importsAudio = true },
-                             searchOpenSubtitles: { showsOpenSubtitles = true }, toggleAmbient: { model.toggleAmbientMode() })
+                             searchOpenSubtitles: { if !model.plan.isOffline { showsOpenSubtitles = true } }, toggleAmbient: { model.toggleAmbientMode() })
     }
 
     private func skipButton(_ marker: SkipMarker) -> some View {
@@ -556,9 +557,6 @@ struct PlayerContent: View {
                       onFirstVideoFrame: {
                           guard let engine, model.coordinator?.engine === engine else { return }
                           nativeFrameEngineID = ObjectIdentifier(engine)
-                      }, onPictureAspect: { ratio in
-                          guard let engine, model.coordinator?.engine === engine else { return }
-                          model.setDetectedPictureAspect(ratio)
                       })
         #if DEBUG
         picture.onTestGeometry = { testVideoGeometry = $0 }
@@ -970,7 +968,7 @@ enum PlayerPreload {
     private static var begun: Set<UUID> = []
 
     static func begin(_ plan: PlaybackPlan, services: AppServices) {
-        guard let first = plan.candidates.first, begun.insert(plan.id).inserted else { return }
+        guard !plan.isOffline, let first = plan.candidates.first, begun.insert(plan.id).inserted else { return }
         services.preloadStream(first)
     }
 }

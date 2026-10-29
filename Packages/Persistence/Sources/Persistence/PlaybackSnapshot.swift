@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import PlayerKit
 import StremioKit
 
@@ -63,7 +64,7 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
     public var infoHash: String?
     public var fileIndex: Int?
     public var youtubeID: String?
-    /// Direct and external links: host and path only, never the query or fragment.
+    /// Direct and external links: a SHA-256 fingerprint of scheme/host/path, with user-info, query and fragment removed.
     public var urlPath: String?
     /// What the addon says the file is: the stronger hint when a debrid link's host or path changes between answers.
     public var filename: String?
@@ -78,7 +79,10 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
         self.infoHash = infoHash?.lowercased()
         self.fileIndex = fileIndex
         self.youtubeID = youtubeID
-        self.urlPath = urlPath
+        self.urlPath = urlPath.map {
+            if $0.hasPrefix("sha256:") { return $0 }
+            return URL(string: $0).flatMap(Self.sanitized) ?? Self.fingerprint($0)
+        }
         self.filename = filename
         self.videoSize = videoSize
         self.videoHash = videoHash
@@ -168,14 +172,20 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
         }
     }
 
-    /// Host and path, so a link's credentials in its query or fragment were never saved. nil for a link without a host.
+    /// One-way matching fingerprint. No URL path, user-info, query or fragment is persisted.
     public static func sanitized(_ url: URL) -> String? {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.user = nil
+        components?.password = nil
         components?.query = nil
         components?.fragment = nil
         let text = components?.string
         guard let text, !text.isEmpty else { return nil }
-        return text
+        return fingerprint(text)
+    }
+
+    private static func fingerprint(_ text: String) -> String {
+        "sha256:" + SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The same file, offered by a fresh answer: exact identities decide, and for a debrid link whose path changed, the file's own
@@ -208,6 +218,7 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
 public struct PlaybackSnapshot: Codable, Sendable, Equatable {
     public static let currentVersion = 1
 
+    public var downloadID: UUID?
     public var version: Int
     /// What was watched. Any addon can answer this request again, so this with `stream` is how the same stream is located.
     public var request: StreamRequest
@@ -226,10 +237,11 @@ public struct PlaybackSnapshot: Codable, Sendable, Equatable {
     public var processing: VideoProcessing?
     public var savedAt: Date
 
-    public init(version: Int = PlaybackSnapshot.currentVersion, request: StreamRequest, stream: PlaybackStreamIdentity,
+    public init(downloadID: UUID? = nil, version: Int = PlaybackSnapshot.currentVersion, request: StreamRequest, stream: PlaybackStreamIdentity,
                 addonID: String? = nil, addonName: String? = nil, position: TimeInterval = 0, duration: TimeInterval? = nil,
                 wasPaused: Bool = false, audioTrack: SnapshotTrack? = nil, subtitleTrack: SnapshotTrack? = nil, subtitlesOff: Bool = false,
                 layout: VideoLayout? = nil, processing: VideoProcessing? = nil, savedAt: Date = Date()) {
+        self.downloadID = downloadID
         self.version = version
         self.request = request
         self.stream = stream
@@ -288,13 +300,13 @@ public struct PlaybackSnapshot: Codable, Sendable, Equatable {
 
     /// Tolerant of older and newer copies: every field but the identity pair has a default, and unbeknownst keys are skipped.
     private enum CodingKeys: String, CodingKey {
-        case version, request, stream, addonID, addonName, position, duration, wasPaused, audioTrack, subtitleTrack, subtitlesOff,
+        case downloadID, version, request, stream, addonID, addonName, position, duration, wasPaused, audioTrack, subtitleTrack, subtitlesOff,
              layout, processing, savedAt
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(version: (try? container.decode(Int.self, forKey: .version)) ?? PlaybackSnapshot.currentVersion,
+        self.init(downloadID: try container.decodeIfPresent(UUID.self, forKey: .downloadID), version: (try? container.decode(Int.self, forKey: .version)) ?? PlaybackSnapshot.currentVersion,
                   request: try container.decode(StreamRequest.self, forKey: .request),
                   stream: try container.decode(PlaybackStreamIdentity.self, forKey: .stream),
                   addonID: try container.decodeIfPresent(String.self, forKey: .addonID),

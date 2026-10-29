@@ -62,6 +62,10 @@ public actor FilePlaybackSnapshotStore: PlaybackSnapshotStore {
             try? FileManager.default.removeItem(at: fileURL)
             return nil
         }
+        // Rewrite legacy URL identities into their one-way fingerprints when first opened.
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let stream = object["stream"] as? [String: Any], let path = stream["urlPath"] as? String,
+           !path.hasPrefix("sha256:") { try? await save(snapshot) }
         return snapshot
     }
 

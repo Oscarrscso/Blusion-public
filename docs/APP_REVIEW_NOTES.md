@@ -49,3 +49,20 @@ Trakt account flows and optional review APIs have stub-based tests; live account
 - Produce release screenshots from the intended devices; Catalyst layout snapshots are development evidence only.
 - Complete [DEVICE_CHECKLIST.md](DEVICE_CHECKLIST.md) and [RELEASE.md](RELEASE.md).
 - Revisit these notes if default sources, network services, storage, tracking, accounts, or the optional fallback build change.
+
+
+## Native downloads — personal-build scope (2026-10-29)
+
+Blusion now offers native progressive-file downloads and local offline playback under Library → Downloads, separate from Infuse.
+Downloads support direct/debrid/ready-to-play usenet HTTP(S) sources; torrent streaming-server routes, YouTube, external links,
+archives and HLS downloads are excluded. Download media/subtitles are backup-excluded and device-local; URLs, request headers,
+validators, matching facts and resume data use non-synchronizing SecretStore keys. SwiftData V5 retains only non-secret metadata.
+Mac uses the same infrastructure and UI, with mpv for supported fallback containers; AetherEngine remains iOS-only.
+
+Background URLSession requests remain subject to ATS and OS scheduling; no TLS bypass or extra background-audio keepalive is
+introduced. The privacy manifest declares DiskSpace E174.1 to block downloads when space is insufficient. Offline playback
+skips addon/subtitle-service/OpenSubtitles/preload lookups and restores the local UUID rather than a remote stream.
+
+This private personal-build change is not a claim of App Store approval. Before submission, the owner must establish authorized
+third-party service access and media download rights under App Review Guidelines 5.2.2–5.2.3, provide authorized reviewer media,
+and update submission answers and screenshots. A playable addon/CDN URL does not itself establish those rights.

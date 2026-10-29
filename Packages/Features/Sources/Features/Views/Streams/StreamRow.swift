@@ -17,6 +17,7 @@ struct StreamRow: View {
     /// `StreamSaveSlotKey`).
     var savesToPlayer = false
     var downloadsToPlayer = false
+    var downloadsNatively = false
     /// True while Blusion readies this stream to play: its play button turns into a spinner until the film is ready.
     var isPreparing = false
     /// Usenet or debrid, as the addon marks it, read once. Nil when its text says neither.
@@ -26,7 +27,7 @@ struct StreamRow: View {
     /// Compact width (iPhone in portrait) takes the short badge words: "RMX" and "DV".
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    init(item: RankedStream, isBest: Bool = false, isRemux: Bool = false, savesToPlayer: Bool = false, downloadsToPlayer: Bool = false,
+    init(item: RankedStream, isBest: Bool = false, isRemux: Bool = false, savesToPlayer: Bool = false, downloadsToPlayer: Bool = false, downloadsNatively: Bool = false,
          isPreparing: Bool = false) {
         self.item = item
         self.isPreparing = isPreparing
@@ -35,6 +36,7 @@ struct StreamRow: View {
         self.isRemux = isRemux
         self.savesToPlayer = savesToPlayer
         self.downloadsToPlayer = downloadsToPlayer
+        self.downloadsNatively = downloadsNatively
         self.torBox = TorBoxCache.detect(in: item.stream)
     }
 
@@ -198,9 +200,14 @@ struct StreamRow: View {
     /// Play, then the bookmark, then download. The picker overlays independent controls in these slots.
     @ViewBuilder
     private var trailingMarks: some View {
-        if savesToPlayer || downloadsToPlayer {
+        if savesToPlayer || downloadsToPlayer || downloadsNatively {
             VStack(spacing: Theme.Spacing.s) {
                 routeGlyph
+                if downloadsNatively {
+                    let side = item.route.isPlayable ? StreamCardMetrics.playButtonSize : StreamCardMetrics.markSize
+                    Color.clear.frame(width: side, height: side)
+                        .anchorPreference(key: StreamNativeDownloadSlotKey.self, value: .bounds) { $0 }
+                }
                 if savesToPlayer {
                     Color.clear
                         .frame(width: StreamCardMetrics.markSize, height: StreamCardMetrics.markSize)
@@ -333,6 +340,11 @@ struct StreamSaveSlotKey: PreferenceKey {
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
         value = value ?? nextValue()
     }
+}
+
+struct StreamNativeDownloadSlotKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
 }
 
 struct StreamDownloadSlotKey: PreferenceKey {

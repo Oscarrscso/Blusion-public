@@ -38,6 +38,7 @@ struct PlayerControls: View {
     private var menuOpen: Bool { panel != nil }
     /// An episode of a series: the player offers the other episodes. A film's request names no series.
     private var hasEpisodes: Bool {
+        guard !model.plan.isOffline else { return false }
         let request = model.plan.request
         return request.episode != nil || request.season != nil || request.seriesName != nil
     }

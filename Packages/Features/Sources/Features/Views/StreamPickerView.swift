@@ -159,6 +159,7 @@ struct StreamPickerView: View {
         .background(alignment: .top) { ambientBackdrop }
         .screenBackground()
         // The title is the header's; the navigation title stays set for VoiceOver and the screen's name, but is not drawn twice.
+        .downloadErrors(services.downloads)
         .navigationTitle(model.request.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(removing: .title)
@@ -981,6 +982,7 @@ struct StreamPickerView: View {
                 StreamRow(item: item, isBest: isRecommended, isRemux: item.quality.isRemux,
                           savesToPlayer: savesUnderMark(item),
                           downloadsToPlayer: savesUnderMark(item),
+                          downloadsNatively: services.downloads != nil && DownloadEligibility.container(for: item, config: model.listing.config) != nil,
                           isPreparing: preparingItemID == item.id)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         guard order < 3, height > 0 else { return }
@@ -996,6 +998,21 @@ struct StreamPickerView: View {
             // On a Mac one hover effect: the card's own highlight, without the system's on top of it. iPad keeps both, as before.
             .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight))
             .contextMenu { contextActions(for: item) }
+            .overlayPreferenceValue(StreamNativeDownloadSlotKey.self) { slot in
+                if let slot, let manager = services.downloads {
+                    GeometryReader { proxy in
+                        NativeDownloadButton(manager: manager, item: manager.item(forStream: item.id),
+                                             isLoading: manager.enqueueing.contains(item.id),
+                                             size: item.route.isPlayable ? StreamCardMetrics.playButtonSize : StreamCardMetrics.markSize,
+                                             matchesStream: true) {
+                            Task { await manager.enqueue(item, request: model.request) }
+                        }
+                        .position(x: proxy[slot].midX, y: proxy[slot].midY)
+                        .accessibilityIdentifier("stream.nativeDownload.button")
+                    }
+                }
+            }
+            .task { await services.downloads?.bindStream(item, request: model.request) }
             .accessibilityIdentifier("stream.row.\(item.title)")
             .accessibilityHint(hint(for: item))
             // A card that opens in another player has a bookmark under its mark, set in the room the card keeps for it.
@@ -1055,6 +1072,12 @@ struct StreamPickerView: View {
 
     @ViewBuilder
     private func contextActions(for item: RankedStream) -> some View {
+        if DownloadEligibility.container(for: item, config: model.listing.config) != nil, services.downloads != nil {
+            Button("Download", systemImage: "arrow.down.circle") {
+                Haptics.tap()
+                Task { await services.downloads?.enqueue(item, request: model.request) }
+            }.accessibilityIdentifier("stream.nativeDownload")
+        }
         if item.stream.description != nil {
             Button("Show Details", systemImage: "info.circle") { expandedDetails = item }
         }

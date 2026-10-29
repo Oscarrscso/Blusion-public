@@ -19,7 +19,7 @@ public enum VideoFit: String, Sendable, Equatable, Hashable, Codable, CaseIterab
 }
 
 /// A display aspect ratio that replaces the one the file states: for a file whose shape is wrong (an anamorphic DVD shown squeezed,
-/// a 4:3 TV rip flagged 16:9). Every engine applies it to the visible picture, after measured source bars are removed.
+/// a 4:3 TV rip flagged 16:9). Every engine applies it to the visible picture.
 public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, CaseIterable {
     case source
     case ratio1x1 = "1:1"
@@ -48,9 +48,8 @@ public enum AspectOverride: String, Sendable, Equatable, Hashable, Codable, Case
 
 /// Crops the picture to a shape, centred: takes off black bars that are part of the video itself (a 2.39:1 film in a 16:9 file, a
 /// 4:3 show pillarboxed in 16:9), so Fit fills the screen with the picture alone and Fill crops less. The shape is the picture's as
-/// encoded in the original source, before any aspect override. The standard shapes are the ones the crop panel offers; `precise` carries the picture a film
-/// carries inside its own bars, measured by the player and kept to three decimals. Coded as the old raw strings ("4:3", "off") so
-/// saved layouts from earlier versions still load, and as a decimal for a measured shape.
+/// encoded in the original source, before any aspect override. Coded as the old raw strings ("4:3", "off") so saved layouts from
+/// earlier versions still load, and as a decimal for custom ratios.
 public struct VideoCrop: Sendable, Equatable, Hashable, Codable {
     /// Width over height of what is kept; nil keeps the whole picture.
     public var ratio: Double?
@@ -79,7 +78,7 @@ public struct VideoCrop: Sendable, Equatable, Hashable, Codable {
     public static let allCases: [VideoCrop] = [.off, .ratio4x3, .ratio3x2, .ratio166, .ratio16x9, .ratio185, .ratio190, .ratio2x1,
                                                .ratio220, .ratio235, .ratio239, .ratio240, .ratio276]
 
-    /// The picture inside a film's own bars, as measured, to three decimals; a shape that lands on a standard one is that one.
+    /// Resolves a numeric crop ratio to a named preset when matching, or a formatted ratio otherwise.
     public static func precise(_ ratio: Double) -> VideoCrop {
         if let named = allCases.first(where: { abs(($0.ratio ?? -1) - ratio) < 0.0005 }) { return named }
         return VideoCrop(ratio: ratio, label: String(format: "%.2f:1", ratio))
@@ -346,7 +345,7 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     public var videoLayout: VideoLayout
     /// Video › Zoom Mode, for every video (as in Infuse).
     public var zoomMode: VideoZoomMode
-    /// Video › Aspect Ratio per title (`AspectRatioChoice.titleKey`); a title with none plays at Auto.
+    /// Video › Aspect Ratio per title (`AspectRatioChoice.titleKey`); a title with none plays at Original.
     public var aspectRatios: [String: AspectRatioChoice]
     public var processing: VideoProcessing
     /// Shows Skip Intro / Skip Recap / Skip Credits when the media marks them.
@@ -377,7 +376,7 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
         self.audioLanguage = audioLanguage
         self.videoLayout = videoLayout
         self.zoomMode = zoomMode
-        self.aspectRatios = aspectRatios
+        self.aspectRatios = aspectRatios.filter { $0.value != .original }
         self.processing = processing
         self.showsSkipButtons = showsSkipButtons
         self.skipsIntrosAutomatically = skipsIntrosAutomatically

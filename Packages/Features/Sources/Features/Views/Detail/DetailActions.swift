@@ -54,6 +54,7 @@ struct DetailActions: View {
             if showsActions {
                 VStack(alignment: leadsText ? .leading : .center, spacing: Theme.Spacing.s) {
                     actionRow
+                        .downloadErrors(model.downloadManager)
                     if model.isFallback && !model.isLoading {
                         Label("Only basic details are available for this title.", systemImage: "info.circle")
                             .font(.footnote)
@@ -157,6 +158,7 @@ struct DetailActions: View {
                         .minimumScaleFactor(0.6)
                         .frame(maxWidth: .infinity)
                     HStack(spacing: TitleHero.actionGap) {
+                        downloadAction
                         saveAction
                         watchedAction
                         trailerAction
@@ -191,9 +193,21 @@ struct DetailActions: View {
         .frame(maxWidth: .infinity, alignment: leadsText ? .leading : .center)
     }
 
+    @ViewBuilder
+    private var downloadAction: some View {
+        if let request = model.primaryRequest, let manager = model.downloadManager {
+            NativeDownloadButton(manager: manager, item: manager.item(for: request),
+                                 isLoading: manager.loadingRequests.contains(request.identity)) {
+                Task { await model.download(request) }
+            }
+            .accessibilityIdentifier("detail.download")
+        }
+    }
+
     private var secondaryActions: some View {
         GlassEffectContainer(spacing: TitleHero.actionGap) {
             HStack(spacing: TitleHero.actionGap) {
+                downloadAction
                 saveAction
                 watchedAction
                 trailerAction

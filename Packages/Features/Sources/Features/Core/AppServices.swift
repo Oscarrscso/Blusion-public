@@ -9,6 +9,7 @@ public typealias StreamPreloader = @MainActor @Sendable (PlaybackCandidate) -> V
 
 /// The app's long-lived services, handed to view models. Built once at launch (App/) and in tests (with stubs or the mock).
 public struct AppServices: Sendable {
+    public let downloads: DownloadManager?
     public let registry: AddonRegistry
     public let client: AddonClient
     public let browse: BrowseService
@@ -64,7 +65,8 @@ public struct AppServices: Sendable {
                 trakt: TraktClient? = nil, secretsInKeychain: Bool = true, bestBlurays: BestBluraysClient? = nil,
                 traktSyncState: (any TraktSyncStateStore)? = nil, syncSchedulesItself: Bool = false, heroMeta: HeroMetaStore? = nil,
                 addonSpeed: (any AddonSpeedStore)? = nil, speedTester: AddonSpeedTester? = nil,
-                widgetShuffle: (any WidgetShuffleStore)? = nil) {
+                widgetShuffle: (any WidgetShuffleStore)? = nil, downloads: DownloadManager? = nil) {
+        self.downloads = downloads
         self.registry = registry
         self.client = client
         self.browse = browse ?? BrowseService(registry: registry, client: client)

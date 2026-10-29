@@ -91,6 +91,7 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
     let launcher: ContinueWatchingLauncher?
     let onMarkWatched: () -> Void
     let onRemove: () -> Void
+    @Environment(DownloadManager.self) private var downloads: DownloadManager?
     @Environment(AppRouter.self) private var router
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(\.zoomScope) private var zoomScope
@@ -103,6 +104,11 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
         let isLoading = launcher?.isLoading(itemID) ?? false
         Button {
             guard !isBusy else { return }
+            if let item = downloads?.items.first(where: { $0.request.identity == request.identity && $0.state == .complete }) {
+                Haptics.tap()
+                Task { if let plan = await downloads?.plan(for: item.id) { router.demoPlan = plan } }
+                return
+            }
             guard let launcher else {
                 Haptics.tap()
                 return openTitle(sourceID: sourceID)

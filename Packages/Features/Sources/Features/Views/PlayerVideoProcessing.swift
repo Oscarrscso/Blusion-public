@@ -427,8 +427,8 @@ private struct UncheckedBuffer: @unchecked Sendable {
 }
 #endif
 
-/// Original frames sampled twice a second: persistent encoded bars for geometry, plus AVPlayer edge colours for ambient mode.
-/// mpv supplies native source screenshots. Aether's software path preserves the complete frame when samples are unavailable.
+/// Samples small frames twice a second while Ambient Mode is enabled, reading the edge colours inside the active crop rectangle.
+/// Detached completely whenever Ambient Mode is off so normal playback incurs zero frame readback.
 @MainActor
 @Observable
 final class PictureSampler {
@@ -437,32 +437,21 @@ final class PictureSampler {
 
     @ObservationIgnored private weak var source: (any AVPlayerFrameSource)?
     @ObservationIgnored private weak var item: AVPlayerItem?
-    @ObservationIgnored private var sourceRevision: Int?
     @ObservationIgnored private var output: AVPlayerItemVideoOutput?
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var detector = VideoBlackBars()
-    @ObservationIgnored private var detectedAspect: Double?
-    @ObservationIgnored private var ambient = false
-    @ObservationIgnored var onPictureAspect: ((Double?) -> Void)?
+    @ObservationIgnored private var cropRatio: Double?
 
-    /// Quarter-HD (480×270) gives ~5.3 clean rows for 1.85:1's ~21px bars on 1080p without excessive memory or CPU work.
-    private static let width = 480, height = 270
+    private static let width = 128, height = 72
 
-    func update(source: (any AVPlayerFrameSource)?, ambient: Bool) {
-        self.ambient = ambient
-        if !ambient, !colours.isEmpty { colours = [] }
-        guard let source else {
-            let hadAspect = detectedAspect != nil
+    func update(source: (any AVPlayerFrameSource)?, ambient: Bool, cropRatio: Double? = nil) {
+        self.cropRatio = cropRatio
+        guard let source, ambient else {
             stop()
-            if hadAspect { onPictureAspect?(nil) }
             return
         }
         if source !== self.source {
-            let hadAspect = detectedAspect != nil
             stop()
             self.source = source
-            self.sourceRevision = source.frameSourceRevision
-            if hadAspect { onPictureAspect?(nil) }
         }
         guard task == nil else { return }
         task = Task { [weak self] in
@@ -479,9 +468,6 @@ final class PictureSampler {
         task = nil
         detach()
         source = nil
-        sourceRevision = nil
-        detector.reset()
-        detectedAspect = nil
         if !colours.isEmpty { colours = [] }
     }
 
@@ -497,20 +483,9 @@ final class PictureSampler {
     }
 
     private func sample() {
-        guard let source else { return }
-        if sourceRevision != source.frameSourceRevision {
+        // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session.
+        guard let item = source?.framePlayer?.currentItem else {
             detach()
-            sourceRevision = source.frameSourceRevision
-            detector.reset()
-            if !colours.isEmpty { colours = [] }
-            if detectedAspect != nil { detectedAspect = nil; onPictureAspect?(nil) }
-        }
-        // Asked again every time: AetherEngine swaps its AVPlayer item as it rebuilds its session within the same load.
-        guard let item = source.framePlayer?.currentItem else {
-            detach()
-            if let native = source as? OriginalPictureSampling, let sample = native.sampleOriginalPicture() {
-                _ = detect(sample.frame, aspect: sample.aspect)
-            }
             return
         }
         if item !== self.item || output == nil {
@@ -530,12 +505,6 @@ final class PictureSampler {
         read(buffer)
     }
 
-    private func detect(_ frame: VideoLumaFrame, aspect: Double) -> Double? {
-        let detected = detector.sample(frame, pictureAspect: aspect)
-        if detected != detectedAspect { detectedAspect = detected; onPictureAspect?(detected) }
-        return detected
-    }
-
     private func read(_ buffer: CVPixelBuffer) {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
@@ -543,21 +512,12 @@ final class PictureSampler {
         let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer), stride = CVPixelBufferGetBytesPerRow(buffer)
         guard width > 2, height > 2 else { return }
         let pixels = base.assumingMemoryBound(to: UInt8.self)
-        func luma(_ x: Int, _ y: Int) -> Int {
-            let p = pixels + y * stride + x * 4
-            return (Int(p[2]) * 54 + Int(p[1]) * 183 + Int(p[0]) * 19) >> 8
-        }
-        let frame = VideoLumaFrame(width: width, height: height,
-                                   pixels: (0..<(width * height)).map { UInt8(luma($0 % width, $0 / width)) })
         let presented = item?.presentationSize ?? .zero
         let aspect = presented.width > 0 && presented.height > 0 ? Double(presented.width / presented.height) : Double(width) / Double(height)
-        let detected = detect(frame, aspect: aspect)
-        guard ambient else { return }
-        // Ambient colours use the same confirmed bars as display geometry, rather than a dark scene's temporary edges.
-        let kept = VideoGeometry.keptFraction(aspect: aspect, crop: detected)
+        let kept = VideoGeometry.keptFraction(aspect: aspect, crop: cropRatio)
         let left = Int((kept.minX * Double(width)).rounded()), right = Int(((1 - kept.maxX) * Double(width)).rounded())
         let top = Int((kept.minY * Double(height)).rounded()), bottom = Int(((1 - kept.maxY) * Double(height)).rounded())
-        // The colours just inside this frame's picture, not of its bars.
+        // The colours just inside this frame's picture, not of its cropped bars.
         let x0 = min(left, width - 1), x1 = max(x0 + 1, width - right)
         let y0 = min(top, height - 1), y1 = max(y0 + 1, height - bottom)
         func average(_ xs: Range<Int>, _ ys: Range<Int>) -> Color {

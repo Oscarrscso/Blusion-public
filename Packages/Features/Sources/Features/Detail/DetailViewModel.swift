@@ -560,6 +560,9 @@ public final class DetailViewModel {
     @ObservationIgnored private var scoresRevision = 0
 
     /// Changes when review credentials do, so the cards ask again.
+    public func download(_ request: StreamRequest) async { await services.downloads?.enqueueBest(request) }
+    public var downloadManager: DownloadManager? { services.downloads }
+
     public var reviewServicesRevision: Int { services.posterRatings.reviewServicesRevision }
 
     /// A visible card checks IMDb first; TMDb fills any remaining gaps. The store coalesces requests and controls refresh/retry times.

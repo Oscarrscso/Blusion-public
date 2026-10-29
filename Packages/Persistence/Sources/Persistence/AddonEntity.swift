@@ -146,14 +146,20 @@ public enum BlusionSchemaV4: VersionedSchema {
     public static var models: [any PersistentModel.Type] { [AddonEntity.self, WatchProgressEntity.self, LibraryEntity.self] }
 }
 
+public enum BlusionSchemaV5: VersionedSchema {
+    public static let versionIdentifier = Schema.Version(5, 0, 0)
+    public static var models: [any PersistentModel.Type] { [AddonEntity.self, WatchProgressEntity.self, LibraryEntity.self, DownloadEntity.self] }
+}
+
 public enum BlusionMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [BlusionSchemaV1.self, BlusionSchemaV2.self, BlusionSchemaV3.self, BlusionSchemaV4.self]
+        [BlusionSchemaV1.self, BlusionSchemaV2.self, BlusionSchemaV3.self, BlusionSchemaV4.self, BlusionSchemaV5.self]
     }
     public static var stages: [MigrationStage] {
         [.lightweight(fromVersion: BlusionSchemaV1.self, toVersion: BlusionSchemaV2.self),
          .lightweight(fromVersion: BlusionSchemaV2.self, toVersion: BlusionSchemaV3.self),
-         .lightweight(fromVersion: BlusionSchemaV3.self, toVersion: BlusionSchemaV4.self)]
+         .lightweight(fromVersion: BlusionSchemaV3.self, toVersion: BlusionSchemaV4.self),
+         .lightweight(fromVersion: BlusionSchemaV4.self, toVersion: BlusionSchemaV5.self)]
     }
 }
 #endif

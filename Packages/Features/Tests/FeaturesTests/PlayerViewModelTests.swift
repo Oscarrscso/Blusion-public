@@ -460,26 +460,27 @@ import StremioKitTestSupport
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
-        model.setDetectedPictureAspect(1.85)
+        model.setAspectRatio(.widescreenA)
+        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
+        model.pinchZoom(in: false)
+        #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit))
         model.pinchZoom(in: true)
         #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
         model.pinchZoom(in: true)
         #expect(model.zoomMode == .crop, "Crop is the last step")
-        model.pinchZoom(in: false)
-        #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit))
         model.setZoomMode(.stretch)
         model.pinchZoom(in: false)
         #expect(model.zoomMode == .normal)
         await model.close()
     }
 
-    /// Normal and Aspect Fit show the uncropped frame (unless a manual Aspect Ratio is chosen), Crop trims bars and fits proportionally,
+    /// Normal and Aspect Fit show the uncropped frame, Crop trims bars for the chosen Aspect Ratio and fits proportionally,
     /// Fill covers the viewport intentionally sacrificing outer edges, and Stretch fills non-uniformly.
     @Test func zoomModesSetTheRenderersLayout() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
-        #expect(model.zoomMode == .normal && model.aspectRatio == .auto, "the defaults: Normal, Auto")
+        #expect(model.zoomMode == .normal && model.aspectRatio == .original, "the defaults: Normal, Original")
         model.setSafeAreaInset(59)
         #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59), "Normal fits inside the safe area")
         model.setZoomMode(.aspectFit)
@@ -489,9 +490,9 @@ import StremioKitTestSupport
             #expect(model.zoomMode == .normal && model.videoLayout == VideoLayout(fit: .fit, inset: 59), "a Mac has no Aspect Fit")
         }
         model.setZoomMode(.crop)
-        #expect(model.videoLayout == VideoLayout(fit: .fit), "Auto with no detected bars preserves the whole frame without overshooting")
-        model.setDetectedPictureAspect(1.85)
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185), "Crop trims detected bars and proportionally fits")
+        #expect(model.videoLayout == VideoLayout(fit: .fit), "Original preserves the whole frame without overshooting")
+        model.setAspectRatio(.widescreenA)
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185), "Crop trims bars and proportionally fits")
         model.setZoomMode(.fill)
         #expect(model.videoLayout == VideoLayout(fit: .fill, crop: .ratio185), "Fill covers the screen intentionally")
         model.setZoomMode(.stretch)
@@ -515,65 +516,45 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    @Test func aspectRatioTrimsTheSourceInEveryModeWithoutReshapingIt() async throws {
+    @Test func selectingAspectRatioInNormalPromotesToCropAndKeepsManualCropAcrossModes() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
         model.setAspectRatio(.widescreenB)
-        for mode in PlayerViewModel.ZoomMode.available {
+        #expect(model.zoomMode == .crop && model.videoLayout == VideoLayout(fit: .fit, crop: .ratio2x1))
+        for mode in [PlayerViewModel.ZoomMode.crop, .fill, .stretch] {
             model.setZoomMode(mode)
             #expect(model.videoLayout.aspect == .source)
             #expect(model.videoLayout.crop == .ratio2x1)
             #expect(model.videoLayout.zoom == 1)
         }
         model.setZoomMode(.normal)
-        model.setAspectRatio(.auto)
+        #expect(model.videoLayout == VideoLayout(fit: .fit))
+        model.setAspectRatio(.original)
         #expect(model.videoLayout.aspect == .source && model.videoLayout.crop == .off)
         await model.close()
     }
 
-    @Test func manualCropStaysSelectedWhilePinchingRotatingAndDetectingBars() async throws {
-        let engines = Engines(["a": .plays(duration: 200)])
-        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+    @Test func manualCropStaysSelectedWhilePinchingRotatingAndSwitchingStreams() async throws {
+        let engines = Engines(["a": .plays(duration: 200), "b": .plays(duration: 200)])
+        let plan = PlaybackPlan(request: request, candidates: [candidate("a"), candidate("b")], retriesInFallbackEngine: true)
+        let model = PlayerViewModel(plan: plan, services: try await services(engines: engines))
         await model.start()
-        model.setDetectedPictureAspect(2)
         model.setAspectRatio(.anamorphicB)
         for _ in 0..<3 {
             model.pinchZoom(in: true)
             model.setSafeAreaInset(59)
             #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
             model.pinchZoom(in: false)
-            #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239, inset: 59))
+            #expect(model.videoLayout == VideoLayout(fit: .fit, inset: 59))
             model.setSafeAreaInset(0)
         }
-        model.setDetectedPictureAspect(nil)
-        #expect(model.videoLayout.crop == .ratio239 && model.videoLayout.aspect == .source)
-        model.setDetectedPictureAspect(2)
-        model.setZoomMode(.crop)
-        model.setAspectRatio(.auto)
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio2x1))
-        await model.close()
-    }
-
-    @Test func detectedBarsResetCleanlyOnStreamSwitchAndFallbackEngineSwitch() async throws {
-        let engines = Engines(["a": .plays(duration: 200), "b": .plays(duration: 200)])
-        let plan = PlaybackPlan(request: request, candidates: [candidate("a"), candidate("b")], retriesInFallbackEngine: true)
-        let model = PlayerViewModel(plan: plan, services: try await services(engines: engines))
-        await model.start()
-        model.setZoomMode(.crop)
-        model.setDetectedPictureAspect(2.39)
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
-
-        // Reopening in the fallback engine clears stale automatic bar detection immediately.
+        model.pinchZoom(in: true)
         await model.openInAdvancedPlayer()
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .off))
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
         #expect(engines.fallbackMade["a"] != nil)
-
-        // Switching to the next stream also clears stale automatic bar detection immediately.
-        model.setDetectedPictureAspect(1.85)
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio185))
         await model.nextStream()
-        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .off))
+        #expect(model.videoLayout == VideoLayout(fit: .fit, crop: .ratio239))
         await model.close()
     }
 

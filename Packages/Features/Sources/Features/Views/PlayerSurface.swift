@@ -226,7 +226,6 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     var superResolution: SuperResolutionRenderer?
     var sampler: PictureSampler?
     var onFirstVideoFrame: () -> Void = {}
-    var onPictureAspect: (Double?) -> Void = { _ in }
     #if DEBUG
     var onTestGeometry: ((String) -> Void)?
     #endif
@@ -248,7 +247,6 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
 
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         view.onFirstVideoFrame = onFirstVideoFrame
-        sampler?.onPictureAspect = onPictureAspect
         #if DEBUG
         view.onTestGeometry = onTestGeometry
         #endif
@@ -268,7 +266,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
                 superResolution.update(source: avEngine, wanted: upscaling == .ai, displayScale: Self.displayScale(of: view),
                                        gravity: view.videoGravity, embeddedSubtitlesOn: embeddedSubtitlesOn)
             }
-            sampler?.update(source: avEngine, ambient: ambientMode)
+            sampler?.update(source: avEngine, ambient: ambientMode, cropRatio: layout.crop.ratio)
         } else if let provider = engine as? any VideoSurfaceProviding, let surface = provider.videoSurface as? UIView {
             view.playerLayer.player = nil
             view.watch(nil)
@@ -284,8 +282,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
                 superResolution.update(source: engine as? any AVPlayerFrameSource, wanted: wanted, displayScale: Self.displayScale(of: view),
                                        gravity: host?.pictureGravity ?? .resizeAspect, embeddedSubtitlesOn: false)
             }
-            // AetherEngine plays through an AVPlayer most of the time; mpv supplies native original-frame screenshots.
-            sampler?.update(source: engine as? any AVPlayerFrameSource, ambient: ambientMode)
+            sampler?.update(source: engine as? any AVPlayerFrameSource, ambient: ambientMode, cropRatio: layout.crop.ratio)
         } else {
             view.playerLayer.player = nil
             view.watch(nil)

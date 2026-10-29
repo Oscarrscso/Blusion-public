@@ -4,6 +4,8 @@ import Foundation
 /// ID and the TMDb credential live in a `SecretStore`.
 public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
     public enum Keys {
+        public static let downloadsAllowCellular = "settings.downloadsAllowCellular"
+        public static let downloadsDeleteWhenWatched = "settings.downloadsDeleteWhenWatched"
         public static let preferredResolution = "settings.preferredResolution"
         public static let subtitleLanguage = "settings.subtitleLanguage"
         public static let fallbackEngineEnabled = "settings.fallbackEngineEnabled"
@@ -64,7 +66,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         let openSubtitlesAPIKey = await secret(Keys.openSubtitlesAPIKey)
         let openSubtitlesUsername = await secret(Keys.openSubtitlesUsername)
         let openSubtitlesPassword = await secret(Keys.openSubtitlesPassword)
-        return PlaybackSettings(preferredResolution: resolution > 0 ? resolution : nil, subtitleLanguage: language?.isEmpty == false ? language : nil,
+        var result = PlaybackSettings(preferredResolution: resolution > 0 ? resolution : nil, subtitleLanguage: language?.isEmpty == false ? language : nil,
                                 streamingServerURL: server, fallbackEngineEnabled: fallback, traktClientID: traktClientID, playerPreference: playerPreference,
                                 showsPosterRatings: posterRatings, autoPlayBestStream: defaults.bool(forKey: Keys.autoPlayBestStream),
                                 omdbAPIKey: omdbAPIKey, tmdbReadToken: tmdbReadToken,
@@ -76,9 +78,14 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 player: player,
                                 openSubtitlesAPIKey: openSubtitlesAPIKey, openSubtitlesUsername: openSubtitlesUsername,
                                 openSubtitlesPassword: openSubtitlesPassword)
+        result.downloadsAllowCellular = defaults.bool(forKey: Keys.downloadsAllowCellular)
+        result.downloadsDeleteWhenWatched = defaults.bool(forKey: Keys.downloadsDeleteWhenWatched)
+        return result
     }
 
     public func save(_ settings: PlaybackSettings) async {
+        defaults.set(settings.downloadsAllowCellular, forKey: Keys.downloadsAllowCellular)
+        defaults.set(settings.downloadsDeleteWhenWatched, forKey: Keys.downloadsDeleteWhenWatched)
         if let resolution = settings.preferredResolution, resolution > 0 {
             defaults.set(resolution, forKey: Keys.preferredResolution)
         } else {
