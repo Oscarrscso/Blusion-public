@@ -662,7 +662,7 @@ struct ModelDescriptionInterpreter: DescriptionInterpreting {
         do {
             let session = PrewarmedSessions.reading.take()
             let answer = try await session.respond(to: text, generating: GeneratedReading.self,
-                                                   options: GenerationOptions(sampling: .greedy)).content
+                                                   options: PrewarmedSessions.greedyOptions).content
             let plan = AISearchGrounding.plan(answer.reading, for: text)
             if !Task.isCancelled { await AISearchInferenceCache.shared.store(plan, for: text) }
             return plan
@@ -727,6 +727,15 @@ struct GeneratedSearchSelections {
 final class PrewarmedSessions: @unchecked Sendable {
     static let reading = PrewarmedSessions(instructions: ModelDescriptionInterpreter.instructions)
     static let ranking = PrewarmedSessions(instructions: ModelSearchCandidateRanker.instructions)
+
+    /// Xcode 27 renamed the sampling argument; keep the same greedy decoding with either SDK.
+    static var greedyOptions: GenerationOptions {
+        #if compiler(>=6.4)
+        GenerationOptions(samplingMode: .greedy)
+        #else
+        GenerationOptions(sampling: .greedy)
+        #endif
+    }
 
     private let lock = NSLock()
     private let instructions: String

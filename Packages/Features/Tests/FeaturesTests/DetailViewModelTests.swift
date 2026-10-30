@@ -695,15 +695,14 @@ private struct NoITunesTransport: HTTPTransport {
         #expect(!model.canPlayTrailer, "no trailer known: the button does nothing")
     }
 
-    @Test func heroComesBeforeMetadataButPlayUsesTheSavedEpisode() async throws {
+    @Test func metadataIsReadyBeforeWaitingForTheHeroAndPlayUsesTheSavedEpisode() async throws {
         let services = try await installedServices()
         await saveProgress(services, id: "mock:series1:2:2", type: "series", position: 300, duration: 1200, updatedAt: Date(),
                            season: 2, episode: 2)
         let model = DetailViewModel(preview: MetaPreview(id: "mock:series1", type: "series", name: "S"), services: services)
         let whenLoaded = SeenRequest()
-        // The hero is prioritised before the episode metadata request.
-        await model.load(afterHero: { whenLoaded.id = model.isLoading && model.detail.name == "S" ? "hero-first" : "metadata-first" })
-        #expect(whenLoaded.id == "hero-first")
+        await model.load(afterHero: { whenLoaded.id = !model.isLoading && model.detail.name != "S" ? "metadata-ready" : "still-loading" })
+        #expect(whenLoaded.id == "metadata-ready")
         #expect(model.primaryRequest?.id == "mock:series1:2:2", "Play resumes the saved episode once metadata arrives")
         #expect(model.selectedSeason == 2)
     }

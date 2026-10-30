@@ -47,6 +47,8 @@ public final class DetailViewModel {
     private let services: AppServices
     /// The Play request whose stream lookup was started from this page.
     private var prefetchedStreamRequest: StreamRequest?
+    /// A card's request includes its next episode; compute that once rather than sorting every season during redraws.
+    @ObservationIgnored private var episodeRequests: [String: StreamRequest] = [:]
     public private(set) var tmdbArtwork: TMDbArtwork?
     public private(set) var isLoadingArtwork = true
     // Separate from metadata: these requests start after hero and stream priority work.
@@ -152,12 +154,8 @@ public final class DetailViewModel {
         isLoadingFacts = true
         episodeRatingSeasons.removeAll()
         trailerSourcesTask = nil
-        // The picture and logo get the network first. Metadata must not compete with the hero's
-        // initial load; retain the existing hero timeout so a failed image cannot stall the page.
-        await loadArtwork()
-        guard !Task.isCancelled else { return }
-        if let hero, !hasSettledHero { await loadHero(hero) }
-        guard !Task.isCancelled else { return }
+        // Artwork and metadata load independently, so the page's content never waits for a picture.
+        async let artwork: Void = loadArtwork()
         // Essential metadata supplies the right episode and watch progress for stream selection.
         async let playbackSettings = services.settings.load()
         let result = await services.browse.detail(for: preview)
@@ -166,6 +164,7 @@ public final class DetailViewModel {
         let settings = await playbackSettings
         matchesEpisodeWidthToText = settings.matchesEpisodeWidthToText
         detail = result.detail
+        episodeRequests.removeAll()
         loadRevision += 1
         isFallback = result.isFallback
         if !result.isFallback { services.heroMeta.record(detail.preview, for: preview) }
@@ -176,6 +175,11 @@ public final class DetailViewModel {
         // A series opens on the season of its next episode, so the list starts where the viewer left off.
         if selectedSeason == nil { selectedSeason = nextUp?.season ?? detail.seasons.first }
         isLoading = false
+        // The content is usable already. Keep the hero ahead of secondary lookups without holding the page's metadata back.
+        await artwork
+        guard !Task.isCancelled else { return }
+        if let hero, !hasSettledHero { await loadHero(hero) }
+        guard !Task.isCancelled else { return }
         // Prime Play's stream lookup before starting any ratings, trailers, credits, or related-title requests.
         // Continue Watching primes its requested episode instead of an unrelated series episode.
         // The lookup runs independently after registration, so it does not block the page on addon responses.
@@ -508,13 +512,24 @@ public final class DetailViewModel {
     /// Mark every aired episode through the selected one, inclusive, in season/episode order.
     /// Specials have their own order and never mark the regular seasons (or vice versa).
     public func markEpisodesWatched(through selected: Video) async {
-        guard let season = selected.season else { return }
+        let remaining = episodesThrough(selected).filter { $0.hasAired() && !isWatched($0) }
+        guard !remaining.isEmpty else { return }
+        await setWatched(true, episodes: remaining)
+    }
+
+    /// True when the aired episodes through the selected one, inclusive, are all marked. The episode's menu fills its mark-through action then.
+    public func isWatchedThrough(_ selected: Video) -> Bool {
+        let aired = episodesThrough(selected).filter { $0.hasAired() }
+        return !aired.isEmpty && aired.allSatisfy { isWatched($0) }
+    }
+
+    /// The episodes through the selected one, inclusive, in season/episode order: none when the selected episode is not listed.
+    private func episodesThrough(_ selected: Video) -> [Video] {
+        guard let season = selected.season else { return [] }
         let seasons = season == 0 ? [0] : detail.seasons.filter { $0 > 0 && $0 <= season }
         let ordered = seasons.flatMap { detail.episodes(inSeason: $0) }
-        guard let index = ordered.firstIndex(where: { $0.id == selected.id }) else { return }
-        let remaining = ordered.prefix(through: index).filter { $0.hasAired() && !isWatched($0) }
-        guard !remaining.isEmpty else { return }
-        await setWatched(true, episodes: Array(remaining))
+        guard let index = ordered.firstIndex(where: { $0.id == selected.id }) else { return [] }
+        return Array(ordered.prefix(through: index))
     }
 
     /// True when the season has aired episodes and every one of them is marked.
@@ -618,7 +633,8 @@ public final class DetailViewModel {
     public var movieRequest: StreamRequest { StreamRequest(movie: detail.preview.type.isEmpty ? preview : detail.preview) }
 
     public func request(for video: Video) -> StreamRequest {
-        var request = StreamRequest(episode: video, of: detail)
+        var request = episodeRequests[video.id] ?? StreamRequest(episode: video, of: detail)
+        episodeRequests[video.id] = request
         if let minutes = episodeRuntimes[video.id] { request.expectedDuration = TimeInterval(minutes) * 60 }
         return request
     }

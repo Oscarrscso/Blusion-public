@@ -180,7 +180,7 @@ private struct ModelReviewThemeGenerator: ReviewThemeGenerating {
             let session = Self.themeSessions.take()
             let answer = try await session.respond(to: ReviewSummaryPipeline.prompt(for: sources, merging: merging),
                                                    generating: GeneratedReviewThemeGroups.self,
-                                                   options: GenerationOptions(sampling: .greedy)).content
+                                                   options: PrewarmedSessions.greedyOptions).content
             return ReviewThemeGroups(praise: answer.praise.map { ReviewThemeGroup(phrase: $0.phrase, sources: $0.sources) },
                                      complaints: answer.complaints.map { ReviewThemeGroup(phrase: $0.phrase, sources: $0.sources) },
                                      verdicts: answer.verdicts.map { ReviewThemeGroup(phrase: $0.phrase, sources: $0.sources) })
@@ -202,7 +202,7 @@ private struct ModelReviewThemeGenerator: ReviewThemeGenerating {
                 """)
             let answer = try await session.respond(to: ReviewSummaryPipeline.paragraphPrompt(for: sources, reviewCount: reviewCount),
                                                    generating: GeneratedReviewParagraph.self,
-                                                   options: GenerationOptions(sampling: .greedy)).content
+                                                   options: PrewarmedSessions.greedyOptions).content
             return answer.sentences.map { ReviewSummarySentence(text: $0.text, sources: $0.sources) }
         } catch {
             throw Self.mapped(error)

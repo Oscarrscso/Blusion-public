@@ -43,6 +43,8 @@ struct StreamPickerView: View {
     private static var lastResolutionBands: [Band] = [.uhd, .fullHD, .hd]
     /// The one addon whose streams are listed, or nil for every addon's.
     @State private var addonFilter: UUID?
+    /// Keep the last available addons while the next picker's streams load.
+    private static var lastAvailableAddons: [AddonSummary] = []
     /// A stream whose format Blusion can't play: the alert offers another player, or the next stream.
     @State private var unsupported: RankedStream?
     /// A hand-off whose player app is not installed: the alert offers its App Store page, or playing the stream in Blusion.
@@ -372,6 +374,9 @@ struct StreamPickerView: View {
             }
             // The first stream listed starts loading in the background the moment it arrives, in case it is the one played.
             .onChange(of: model.addonSections.first?.streams.first?.id) { startBackgroundLoad() }
+            .onChange(of: availableAddons, initial: true) { _, addons in
+                if !addons.isEmpty { Self.lastAvailableAddons = addons }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { isOpeningPlayer = false }
             }
@@ -770,10 +775,12 @@ struct StreamPickerView: View {
 
     private func band(of item: RankedStream) -> Band? { item.quality.resolution.map(Band.init) }
 
-    /// The addons with streams listed so far, in the list's order, each once.
+    /// Keep the previous addons while waiting for streams, then use the addons actually returned.
     private var availableAddons: [AddonSummary] {
         var seen = Set<UUID>()
-        return model.addonSections.map(\.addon).filter { seen.insert($0.id).inserted }
+        let addons = model.addonSections.map(\.addon).filter { seen.insert($0.id).inserted }
+        if addons.isEmpty && model.isLoading { return Self.lastAvailableAddons }
+        return addons
     }
 
     /// The chosen addon, while it still has streams listed. One that has gone falls back to all.
@@ -979,7 +986,7 @@ struct StreamPickerView: View {
                     }
             }
             // On a Mac one hover effect: the card's own highlight, without the system's on top of it. iPad keeps both, as before.
-            .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight))
+            .buttonStyle(PressableCardStyle(lifts: false, addsSystemHighlight: StreamCardMetrics.addsSystemHighlight, showsFocus: false))
             .contextMenu { contextActions(for: item) }
             .overlayPreferenceValue(StreamNativeDownloadSlotKey.self) { slot in
                 if let slot {

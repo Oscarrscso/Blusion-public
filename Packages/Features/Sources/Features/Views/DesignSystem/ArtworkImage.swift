@@ -187,30 +187,19 @@ struct ArtworkImage: View {
         if extendsArtworkDownward {
             GeometryReader { geometry in
                 let artworkHeight = geometry.size.width / (16.0 / 9.0)
-                // The blur sits under the artwork's lower fifth, so there's never a gap where the artwork fades out.
                 let fadeStart = 0.82
-                let blurStart = artworkHeight * 0.7 / max(1, geometry.size.height)
-                let blurEnd = min(1, artworkHeight * 0.97 / max(1, geometry.size.height))
+                let extensionHeight = max(0, geometry.size.height - artworkHeight)
                 ZStack(alignment: .top) {
                     if let edge = bottomEdge(of: image) {
+                        // Blur the continuation itself, so sharp streaks cannot show behind the text.
+                        // Overscan keeps the blur opaque at the card's edges; the sharp artwork fades over it.
                         Image(uiImage: edge).resizable()
+                            .frame(width: geometry.size.width + 160, height: geometry.size.height + 160)
+                            .blur(radius: 40, opaque: true)
                             .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
                             .overlay {
-                                Image(uiImage: edge).resizable()
-                                    .blur(radius: 40, opaque: true)
-                                    .mask {
-                                        LinearGradient(stops: [
-                                            .init(color: .clear, location: 0),
-                                            .init(color: .clear, location: blurStart),
-                                            .init(color: .black.opacity(0.35), location: blurStart + (blurEnd - blurStart) * 0.4),
-                                            .init(color: .black.opacity(0.85), location: blurStart + (blurEnd - blurStart) * 0.75),
-                                            .init(color: .black, location: blurEnd),
-                                            .init(color: .black, location: 1),
-                                        ], startPoint: .top, endPoint: .bottom)
-                                    }
-                            }
-                            .overlay {
-                                BottomFade(length: min(1, (max(0, geometry.size.height - artworkHeight) + 12) / max(1, geometry.size.height)), strength: 0.85)
+                                BottomFade(length: Double(min(1, (extensionHeight + 12) / max(1, geometry.size.height))), strength: 0.85)
                             }
                     }
                     Image(uiImage: image).resizable().scaledToFill()
@@ -334,4 +323,5 @@ struct ArtworkImage: View {
         }
     }
 }
+
 #endif

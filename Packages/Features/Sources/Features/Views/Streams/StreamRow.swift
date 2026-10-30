@@ -185,7 +185,7 @@ struct StreamRow: View {
     @ViewBuilder
     private var trailingMarks: some View {
         if savesToPlayer || downloadsToPlayer || downloadsNatively {
-            VStack(spacing: Theme.Spacing.s) {
+            actionLayout {
                 routeGlyph
                 if downloadsNatively {
                     let side = item.route.isPlayable ? StreamCardMetrics.playButtonSize : StreamCardMetrics.markSize
@@ -206,6 +206,14 @@ struct StreamRow: View {
         } else {
             routeGlyph
         }
+    }
+
+    private var actionLayout: AnyLayout {
+        #if targetEnvironment(macCatalyst)
+        AnyLayout(HStackLayout(spacing: Theme.Spacing.s))
+        #else
+        AnyLayout(VStackLayout(spacing: Theme.Spacing.s))
+        #endif
     }
 
     /// The round mark at the trailing edge: it shows what a tap does with this stream. A stream Blusion plays has the one play button,
@@ -250,10 +258,17 @@ struct StreamRow: View {
 
 /// Shared stream-card proportions on iPhone and Mac.
 enum StreamCardMetrics {
+    #if targetEnvironment(macCatalyst)
+    static let padding: CGFloat = Theme.Spacing.m
+    static let cornerRadius: CGFloat = Theme.Radius.card
+    static let markSize: CGFloat = 32
+    static let playButtonSize: CGFloat = 36
+    #else
     static let padding: CGFloat = Theme.Spacing.l
     static let cornerRadius: CGFloat = Theme.Radius.surface
     static let markSize: CGFloat = 36
     static let playButtonSize: CGFloat = 44
+    #endif
     static let providerBox = CGSize(width: 52, height: 36)
     static let providerBoxRadius: CGFloat = 10
     static let logoInset = CGSize(width: 12, height: 14)
@@ -340,7 +355,7 @@ struct StreamTechnicalDetails: View {
             Rectangle()
                 .fill(Theme.separator)
                 .frame(height: 1)
-                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.horizontal, StreamCardMetrics.padding)
                 .accessibilityHidden(true)
             Button {
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { isExpanded.toggle() }
@@ -356,11 +371,11 @@ struct StreamTechnicalDetails: View {
                 }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.horizontal, StreamCardMetrics.padding)
                 .padding(.vertical, Theme.Spacing.m)
                 .contentShape(Rectangle())
                 // The row is the card's foot: a plain highlight the card's own corners clip, and no ring of its own.
-                .pointerInteraction(cornerRadius: 0, showsFocus: false)
+                .pointerInteraction(cornerRadius: 0, showsFocus: false, systemHighlight: StreamCardMetrics.addsSystemHighlight)
             }
             .buttonStyle(.plain)
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")

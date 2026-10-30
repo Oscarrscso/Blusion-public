@@ -406,7 +406,7 @@ public final class DownloadManager {
                 }
             } catch {
                 await fail(id, "Storage unavailable")
-                active[id]?.cancel(byProducingResumeData: { _ in })
+                _ = await active[id]?.cancelByProducingResumeData()
             }
         case .file(let id, let taskID, let name, let response):
             guard let root else { return }

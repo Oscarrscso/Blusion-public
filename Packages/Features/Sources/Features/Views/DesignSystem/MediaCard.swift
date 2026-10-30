@@ -427,10 +427,13 @@ struct PressableCardStyle: ButtonStyle {
     var lifts = true
     /// False leaves out the system's hover highlight, so the card's own highlight is its one hover effect (a stream's card on a Mac).
     var addsSystemHighlight = true
+    var showsFocus = true
+    var tracksPointer = false
 
     func makeBody(configuration: Configuration) -> some View {
         // The label's pointerInteraction supplies the system highlight once.
-        PressableCardLabel(configuration: configuration, lifts: lifts, addsSystemHighlight: addsSystemHighlight)
+        PressableCardLabel(configuration: configuration, lifts: lifts, addsSystemHighlight: addsSystemHighlight, showsFocus: showsFocus,
+                           tracksPointer: tracksPointer)
     }
 }
 
@@ -439,6 +442,8 @@ private struct PressableCardLabel: View {
     let configuration: ButtonStyleConfiguration
     let lifts: Bool
     let addsSystemHighlight: Bool
+    let showsFocus: Bool
+    let tracksPointer: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -446,7 +451,8 @@ private struct PressableCardLabel: View {
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .opacity(configuration.isPressed ? 0.8 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
-            .pointerInteraction(lifts: lifts && !configuration.isPressed, systemHighlight: addsSystemHighlight)
+            .pointerInteraction(lifts: lifts && !configuration.isPressed, showsFocus: showsFocus, systemHighlight: addsSystemHighlight,
+                                tracksPointer: tracksPointer)
     }
 }
 #endif

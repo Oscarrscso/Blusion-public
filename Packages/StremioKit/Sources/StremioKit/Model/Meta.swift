@@ -88,7 +88,9 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
     public var season: Int?
     public var episode: Int?
     /// Air date as the addon sent it: `released`, or `firstAired` when that is missing.
-    public var released: String?
+    public var released: String? {
+        didSet { airDate = Self.parseAirDate(released) }
+    }
     public var thumbnail: URL?
     public var overview: String?
     /// Episode rating on a 0 to 10 scale. The addon's `imdbRating` or `rating` when it sends one; otherwise filled in from TMDb's
@@ -113,6 +115,7 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
         self.season = season
         self.episode = episode
         self.released = released
+        self.airDate = Self.parseAirDate(released)
         self.thumbnail = thumbnail
         self.overview = overview
         let usable = rating.flatMap { (0...10).contains($0) && $0 > 0 ? $0 : nil }
@@ -123,9 +126,10 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
     /// `84`, or nil without a usable rating: the score out of 100, never a decimal.
     public var ratingText: String? { rating.map { String(Int(($0 * 10).rounded())) } }
 
-    /// When the episode first aired, from `released`: ISO 8601, usually with fractional seconds. Nil when the addon gave no date
-    /// or one that does not read.
-    public var airDate: Date? {
+    /// Parsed once with the metadata, so drawing a long-running show's cards never reparses every air date.
+    public private(set) var airDate: Date?
+
+    private static func parseAirDate(_ released: String?) -> Date? {
         guard let released, !released.isEmpty else { return nil }
         let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
         return (try? fractional.parse(released)) ?? (try? Date.ISO8601FormatStyle().parse(released))
@@ -142,6 +146,11 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
         guard let head = id.split(separator: ":", omittingEmptySubsequences: false).first.map(String.init),
               LetterboxdRatings.isIMDbID(head), head != id else { return nil }
         return head
+    }
+
+    // The parsed date is derived from `released`, not an extra field in saved or addon metadata.
+    private enum CodingKeys: String, CodingKey {
+        case id, title, season, episode, released, thumbnail, overview, rating, ratingSource
     }
 
     private enum Keys: String, CodingKey {

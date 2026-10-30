@@ -243,6 +243,8 @@ struct DetailView: View {
                         }
                     }
                     .padding(.bottom, Theme.Spacing.xxl)
+                    // The hero reserves transparent space while its artwork loads; drags there must still scroll the page.
+                    .contentShape(Rectangle())
                     .detailLoadingTransition(model.isLoadingReviews)
                     .detailLoadingTransition(model.isLoadingRelated)
                     // The panel's appearance and disappearance moves the content below it, rather than jumping.

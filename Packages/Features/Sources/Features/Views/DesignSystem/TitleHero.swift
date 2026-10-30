@@ -434,6 +434,8 @@ struct HeroPicture: View {
         }
         .clipped()
         .accessibilityHidden(true)
+        // Artwork and its loading spinner are decorative; the page owns every scroll gesture.
+        .allowsHitTesting(false)
         // A view that is kept for another title chooses again.
         .onChange(of: preview.identity) { standIn = Self.standInURL(for: preview, backdropOnly: standInFromBackdrop) }
     }

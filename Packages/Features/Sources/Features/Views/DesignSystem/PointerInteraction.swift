@@ -8,10 +8,12 @@ private struct PointerInteractionModifier: ViewModifier {
     let highlightColor: Color
     let showsFocus: Bool
     let systemHighlight: Bool
+    let tracksPointer: Bool
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isFocused) private var isFocused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+    @State private var pointerLocation: CGPoint = .zero
 
     func body(content: Content) -> some View {
         content
@@ -24,10 +26,29 @@ private struct PointerInteractionModifier: ViewModifier {
                     }
                     .allowsHitTesting(false)
             }
+            .overlay {
+                if tracksPointer {
+                    GeometryReader { geometry in
+                        RadialGradient(colors: [.white.opacity(0.16), .clear],
+                                       center: UnitPoint(x: pointerLocation.x / max(1, geometry.size.width),
+                                                         y: pointerLocation.y / max(1, geometry.size.height)),
+                                       startRadius: 0, endRadius: 150)
+                            .opacity(isEnabled && isHovering ? 1 : 0)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+            }
+            .shadow(color: .black.opacity(tracksPointer && isEnabled && isHovering ? 0.25 : 0), radius: 12, y: 6)
             .scaleEffect(isEnabled && lifts && !reduceMotion && (isHovering || isFocused) ? 1.025 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
             .hoverEffect(.highlight, isEnabled: isEnabled && systemHighlight)
             .onHover { isHovering = isEnabled && $0 }
+            .onContinuousHover { phase in
+                guard tracksPointer else { return }
+                if case .active(let location) = phase { pointerLocation = location }
+            }
     }
 }
 
@@ -46,9 +67,9 @@ extension View {
     /// `showsFocus` false leaves out the ring a focused control gets, for a row inside a card whose own corners would cut the ring.
     /// `systemHighlight` false leaves out the system's hover highlight, so the fill drawn here is the only hover effect.
     func pointerInteraction(cornerRadius: CGFloat = Theme.Radius.card, lifts: Bool = false, highlightColor: Color = .white,
-                            showsFocus: Bool = true, systemHighlight: Bool = true) -> some View {
+                            showsFocus: Bool = true, systemHighlight: Bool = true, tracksPointer: Bool = false) -> some View {
         modifier(PointerInteractionModifier(cornerRadius: cornerRadius, lifts: lifts, highlightColor: highlightColor, showsFocus: showsFocus,
-                                            systemHighlight: systemHighlight))
+                                            systemHighlight: systemHighlight, tracksPointer: tracksPointer))
     }
 }
 #endif

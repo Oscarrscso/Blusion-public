@@ -38,13 +38,21 @@ extension View {
         }
     }
 
+    private static var streamGlowOpacity: Double {
+        #if targetEnvironment(macCatalyst)
+        0.12
+        #else
+        0.34
+        #endif
+    }
+
     /// A 4K REMUX's blurred 4K treatment: a soft champagne glow inside the card, under its content. It is a gradient rather than a blur
     /// filter, so the list scrolls as smoothly as the plain cards do.
     func streamLookGlow(_ look: StreamLook) -> some View {
         background {
             if look == .fourKDisc {
                 Rectangle()
-                    .fill(RadialGradient(colors: [QualityBadge.premium.opacity(0.34), QualityBadge.premium.opacity(0)],
+                    .fill(RadialGradient(colors: [QualityBadge.premium.opacity(Self.streamGlowOpacity), QualityBadge.premium.opacity(0)],
                                          center: .topTrailing, startRadius: 0, endRadius: 280))
             }
         }
@@ -61,6 +69,9 @@ private struct StreamLookEdgeLine<Style: ShapeStyle>: View {
     var body: some View {
         RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
             .strokeBorder(style, lineWidth: isEmphasised ? Self.emphasisedWidth : 1.5)
+            #if targetEnvironment(macCatalyst)
+            .opacity(isEmphasised ? 1 : 0.3)
+            #endif
             .brightness(isEmphasised ? 0.3 : 0)
             .allowsHitTesting(false)
     }

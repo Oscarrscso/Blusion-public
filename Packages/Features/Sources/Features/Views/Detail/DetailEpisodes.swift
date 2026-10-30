@@ -53,6 +53,8 @@ struct DetailEpisodes: View {
     /// gap between the still and the panel is the same round the corner as along the sides. With the panel's own radius the gap grew
     /// at the corners, which read as slightly off.
     private static let previewStillRadius: CGFloat = previewPanelRadius - previewPadding
+    /// The IMDb mark in the episode menus, in points. Both menus draw it at this size: the asset is 48 points, far larger than the check marks.
+    private static let menuLogoSize: CGFloat = 16
 
     var body: some View {
         let width = episodeWidth(pageWidth: pageWidth)
@@ -65,7 +67,8 @@ struct DetailEpisodes: View {
             }
             .padding(.horizontal, contentMargin)
             ScrollViewReader { proxy in
-                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing, lazy: false) {
+                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing,
+                            resetKey: "\(model.selectedSeason ?? -1):\(Int(width))") {
                     if model.isLoading && model.episodes.isEmpty {
                         ForEach(0..<3, id: \.self) { index in
                             VStack(alignment: .leading, spacing: 0) {
@@ -278,28 +281,32 @@ struct DetailEpisodes: View {
                         .padding(Theme.Spacing.s)
                 }
             }
+            // The whole card is its hit area, so a hold or tap on the text counts as on the artwork.
+            .contentShape(Rectangle())
         }
+        #if targetEnvironment(macCatalyst)
+        .buttonStyle(PressableCardStyle(addsSystemHighlight: false, tracksPointer: true))
+        #else
         .buttonStyle(PressableCardStyle())
+        #endif
         .allowsHitTesting(!isLoadingStreams)
         // An episode that has not aired cannot be opened: its card shows the air date instead.
         .disabled(airsLater || hasNoStreams)
         .titleTapHaptic()
         return Group {
             if isLandscape {
-                EpisodeContextMenu(content: card, preview: landscapePreview(video),
-                                   previewSize: CGSize(width: max(1, pageWidth / 2 - Self.previewPadding * 2),
-                                                       height: max(1, pageHeight - Self.previewPadding * 4)),
+                EpisodeContextMenu(content: card, preview: { landscapePreview(video, width: $0) },
+                                   previewSize: CGSize(width: max(1, min(400, pageWidth * 0.55)),
+                                                       height: pageHeight),
+                                   previewCornerRadius: Self.previewPanelRadius,
                                    menu: { landscapeEpisodeMenu(video) }, isPresented: $isHoldingEpisode)
                     .frame(width: width)
             } else {
                 card.contextMenu {
                     episodeActions(video)
                 } preview: {
-                    episodeCard(video, width: pageWidth - contentMargin * 2 - Self.previewPadding * 2, airsLater: airsLater,
-                                stillRadius: Self.previewStillRadius, showsWholeOverview: true)
-                        .padding(Self.previewPadding)
+                    episodePreview(video, width: pageWidth - contentMargin * 2)
                         .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
-                        .environment(ratings)
                         .onAppear { isHoldingEpisode = true }
                         .onDisappear { isHoldingEpisode = false }
                 }
@@ -308,82 +315,122 @@ struct DetailEpisodes: View {
         .accessibilityIdentifier("detail.episode.\(video.id)")
     }
 
-    private func landscapePreview(_ video: Video) -> some View {
-        GeometryReader { geometry in
-            ScrollView {
-                episodeCard(video, width: max(1, geometry.size.width - Self.previewPadding * 2), airsLater: !video.hasAired(),
-                            stillRadius: Self.previewStillRadius, showsWholeOverview: true)
-                    .padding(Self.previewPadding)
-            }
-        }
-        .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
-        .environment(ratings)
+    private func landscapePreview(_ video: Video, width: CGFloat) -> some View {
+        episodePreview(video, width: width)
+    }
+
+    /// Portrait and landscape share the same stacked card, padding and panel treatment.
+    private func episodePreview(_ video: Video, width: CGFloat) -> some View {
+        episodeCard(video, width: max(1, width - Self.previewPadding * 2), airsLater: !video.hasAired(),
+                    stillRadius: Self.previewStillRadius, showsWholeOverview: true)
+            .padding(Self.previewPadding)
+            .environment(ratings)
     }
 
     /// The same actions as the portrait menu, supplied directly to UIKit for the sized landscape preview (including on Catalyst).
     private func landscapeEpisodeMenu(_ video: Video) -> UIMenu {
         let request = model.request(for: video)
         let watched = model.isWatched(video)
-        let watchedAction = UIAction(title: watched ? "Mark as not watched" : "Mark as watched",
-                                     image: UIImage(systemName: watched ? "xmark.circle" : "checkmark.circle")) { _ in
+        let downloaded = model.downloadManager?.item(for: request) != nil
+        // The palette's titles do not show in the landscape preview, so Watched and Download carry their captions in their images.
+        // Each symbol fills while its state holds.
+        let watchedAction = UIAction(title: "Watched",
+                                     image: Self.paletteItem(Self.paletteSymbol(watched ? "checkmark.circle.fill" : "checkmark.circle"),
+                                                             caption: "Watched", mode: .alwaysTemplate)) { _ in
             Task { @MainActor in
                 await model.setWatched(!watched, for: request)
                 await titleActions.refresh()
             }
         }
-        let imdbAction = UIAction(title: "IMDb", image: UIImage(named: "ReviewIMDb")?
-            .withRenderingMode(ratings?.showsColouredLogos == true ? .alwaysOriginal : .alwaysTemplate)) { _ in
+        let downloadAction = UIAction(title: "Download",
+                                      image: Self.paletteItem(Self.paletteSymbol(downloaded ? "arrow.down.circle.fill" : "arrow.down.circle"),
+                                                              caption: "Download", mode: .alwaysTemplate)) { _ in
+            // A UIAction is not on the main actor, so the haptic has to come back to it.
+            Task { @MainActor in Haptics.tap(); await model.download(request) }
+        }
+        let imdbMode: UIImage.RenderingMode = ratings?.showsColouredLogos == true ? .alwaysOriginal : .alwaysTemplate
+        let imdbAction = UIAction(title: "IMDb", image: Self.paletteItem(Self.menuIMDbLogo(), caption: nil, mode: imdbMode)) { _ in
             Task { @MainActor in
                 guard let ratings else { return }
                 await EpisodeIMDbReviews.open(request, ratings: ratings)
             }
         }
-        let watchedThroughAction = UIAction(title: "Mark All Episodes Up to Here as Watched",
-                                            image: UIImage(systemName: "checkmark.circle.fill")) { _ in
+        let controls = UIMenu(options: [.displayInline, .displayAsPalette], children: [watchedAction, downloadAction, imdbAction])
+        controls.preferredElementSize = .large
+        let watchedThroughSymbol = model.isWatchedThrough(video) ? "checkmark.circle.fill" : "checkmark.circle"
+        let watchedThroughAction = UIAction(title: "All previous episodes watched",
+                                            image: UIImage(systemName: watchedThroughSymbol)) { _ in
             Task { @MainActor in
                 await model.markEpisodesWatched(through: video)
                 await titleActions.refresh()
             }
         }
-        let controls = UIMenu(options: [.displayInline, .displayAsPalette], children: [watchedAction, imdbAction])
-        controls.preferredElementSize = .large
-        let download = UIAction(title: "Download", image: UIImage(systemName: "arrow.down.circle")) { _ in
-            // A UIAction is not on the main actor, so the haptic has to come back to it.
-            Task { @MainActor in Haptics.tap(); await model.download(request) }
+        return UIMenu(children: [controls, UIMenu(options: .displayInline, children: [watchedThroughAction])])
+    }
+
+    /// Each palette item is one image: its glyph in a row of `paletteGlyphSide` points, with its caption, if any, under it. Every item is the
+    /// height of a captioned one, so the glyphs line up whether or not they have a caption.
+    private static let paletteGlyphSide: CGFloat = 22
+    private static var paletteCaptionFont: UIFont { .systemFont(ofSize: 10, weight: .medium) }
+    private static var paletteCaptionAttributes: [NSAttributedString.Key: Any] {
+        [.font: paletteCaptionFont, .foregroundColor: UIColor.black]
+    }
+
+    private static func paletteSymbol(_ name: String) -> UIImage? {
+        UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular))
+    }
+
+    /// The IMDb mark at the menu's size: the asset is 48 points, far larger than the glyphs beside it.
+    private static func menuIMDbLogo() -> UIImage? {
+        guard let logo = UIImage(named: "ReviewIMDb") else { return nil }
+        let size = CGSize(width: menuLogoSize, height: menuLogoSize)
+        return UIGraphicsImageRenderer(size: size).image { _ in logo.draw(in: CGRect(origin: .zero, size: size)) }
+    }
+
+    private static func paletteItem(_ glyph: UIImage?, caption: String?, mode: UIImage.RenderingMode) -> UIImage? {
+        guard let glyph else { return nil }
+        let captionSize = caption?.size(withAttributes: paletteCaptionAttributes) ?? .zero
+        let side = paletteGlyphSide
+        let size = CGSize(width: max(side, ceil(captionSize.width)), height: side + 2 + ceil(paletteCaptionFont.lineHeight))
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            glyph.draw(at: CGPoint(x: (size.width - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
+            caption?.draw(at: CGPoint(x: (size.width - captionSize.width) / 2, y: side + 2), withAttributes: paletteCaptionAttributes)
         }
-        return UIMenu(children: [controls, download, watchedThroughAction])
+        return image.withRenderingMode(mode)
     }
 
     @ViewBuilder
     private func episodeActions(_ video: Video) -> some View {
         let request = model.request(for: video)
-        Button("Download", systemImage: "arrow.down.circle") { Haptics.tap(); Task { await model.download(request) } }
-            let watched = model.isWatched(video)
-            ControlGroup {
-                Button(watched ? "Mark as not watched" : "Mark as watched",
-                       systemImage: watched ? "xmark.circle" : "checkmark.circle") {
-                    Task {
-                        await model.setWatched(!watched, for: request)
-                        await titleActions.refresh()
-                    }
-                }
-                Button {
-                    guard let ratings else { return }
-                    Task { await EpisodeIMDbReviews.open(request, ratings: ratings) }
-                } label: {
-                    Label {
-                        Text("IMDb")
-                    } icon: {
-                        ReviewSiteIcon(site: .imdb, size: 22, keepsColour: true)
-                    }
-                }
-            }
-            Button("Mark All Episodes Up to Here as Watched", systemImage: "checkmark.circle.fill") {
+        let watched = model.isWatched(video)
+        let downloaded = model.downloadManager?.item(for: request) != nil
+        // The palette holds Watched and Download with their labels, and the IMDb mark alone. Each symbol fills while its state holds.
+        ControlGroup {
+            Button("Watched", systemImage: watched ? "checkmark.circle.fill" : "checkmark.circle") {
                 Task {
-                    await model.markEpisodesWatched(through: video)
+                    await model.setWatched(!watched, for: request)
                     await titleActions.refresh()
                 }
             }
+            Button("Download", systemImage: downloaded ? "arrow.down.circle.fill" : "arrow.down.circle") {
+                Haptics.tap()
+                Task { await model.download(request) }
+            }
+            Button {
+                guard let ratings else { return }
+                Task { await EpisodeIMDbReviews.open(request, ratings: ratings) }
+            } label: {
+                ReviewSiteIcon(site: .imdb, size: Self.menuLogoSize, keepsColour: true)
+            }
+            .accessibilityLabel("IMDb")
+        }
+        Button("All previous episodes watched",
+               systemImage: model.isWatchedThrough(video) ? "checkmark.circle.fill" : "checkmark.circle") {
+            Task {
+                await model.markEpisodesWatched(through: video)
+                await titleActions.refresh()
+            }
+        }
     }
 
     /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes
@@ -448,6 +495,8 @@ private struct EpisodeRow: View {
     }
     let width: CGFloat
     @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = 128
+    @State private var overviewTextHeight: CGFloat = 0
+    @State private var overviewFrameHeight: CGFloat = 0
     /// Menu previews show all the text; shelf cards let the synopsis absorb title wrapping inside a fixed height.
     var showsWholeOverview = false
     /// Short cards show a small progress bar in the air-date slot, without adding another row.
@@ -467,6 +516,13 @@ private struct EpisodeRow: View {
     private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
 
     var body: some View {
+        stacked
+        .environment(\.colorScheme, .dark)
+        .multilineTextAlignment(.leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var stacked: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: width / CardAspect.wide.ratio)
             text
@@ -492,13 +548,9 @@ private struct EpisodeRow: View {
         }
         .animation(.smooth(duration: 0.25), value: isLoadingStreams)
         .mediaArtwork(cornerRadius: stillRadius)
-        .environment(\.colorScheme, .dark)
-        .multilineTextAlignment(.leading)
-        .accessibilityElement(children: .combine)
     }
 
-    /// The numbered title, the overview, and the date, length and score. A hairline sits above the overview and above the metadata, each
-    /// only when it has something under it, so both follow the title's own wrapping and the padding frames them.
+    /// Keep the synopsis's full space; move only the lower rule into the middle of the gap above the metadata.
     private var text: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             title
@@ -507,7 +559,11 @@ private struct EpisodeRow: View {
             if hasOverview { hairline }
             overview
                 .frame(maxWidth: .infinity, maxHeight: showsWholeOverview ? nil : .infinity, alignment: .topLeading)
-            if hasMetadata { hairline }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { overviewFrameHeight = $0 }
+            if hasMetadata {
+                hairline
+                    .offset(y: hasOverview ? (overviewTextHeight - overviewFrameHeight) / 2 : 0)
+            }
             dateAndScore
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
@@ -547,12 +603,11 @@ private struct EpisodeRow: View {
     @ViewBuilder
     private var overview: some View {
         if let overview = video.overview, !overview.isEmpty {
-            // No line limit: the text gets whatever height the title, hairlines and date leave, and truncates only at the last line
-            // that fits. The negative padding lets a last line use the gap above the metadata's hairline, which is as far as it can
-            // reach, so the text stops at the hairline rather than crossing it.
+            // Preserve the original line budget. Measuring before padding lets the divider move without resizing the text.
             Text(overview)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.85))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { overviewTextHeight = $0 }
                 .padding(.bottom, showsWholeOverview ? 0 : -Theme.Spacing.xs)
         }
     }
@@ -586,6 +641,7 @@ private struct EpisodeRow: View {
                     if showsProgress { Text("·") }
                 }
                 if showsProgress, let fraction {
+                    // The bar takes the width the row has to spare, so the score it leads into sits at the text's trailing margin.
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill").font(.system(size: 7, weight: .semibold))
                         Capsule()
@@ -593,9 +649,10 @@ private struct EpisodeRow: View {
                             .overlay(alignment: .leading) {
                                 Capsule().fill(.white).scaleEffect(x: fraction, y: 1, anchor: .leading)
                             }
-                            .frame(width: 40, height: 2)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 2)
                     }
-                    .frame(width: 52)
+                    .frame(minWidth: 52, maxWidth: .infinity, alignment: .leading)
                     .foregroundStyle(.white)
                 }
                 if date != nil || showsProgress, runtime != nil { Text("·") }
