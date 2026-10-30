@@ -67,8 +67,6 @@ struct DetailView: View {
     /// phone-only, since iPad landscape keeps the panel.
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
-    /// How far the page's scroll indicator is kept from the top and bottom of the screen.
-    private static let scrollIndicatorInset: CGFloat = 260
     /// The Mac title page's margin from the sidebar. The rows below follow it.
     private static let desktopMargin: CGFloat = 60
     /// How far the page blurs while an episode's menu is open.
@@ -255,8 +253,8 @@ struct DetailView: View {
                     .blur(radius: isHoldingEpisode ? Self.heldBlur : 0)
                     .animation(.easeOut(duration: 0.2), value: isHoldingEpisode)
                 }
-                // The track of the page's own scroll indicator is inset, so the bar is a short line rather than the whole screen height.
-                .contentMargins(.vertical, Self.scrollIndicatorInset, for: .scrollIndicators)
+                .scrollIndicators(.visible, axes: .vertical)
+                .scrollIndicatorsFlash(onAppear: true)
                 .contentMargins(.bottom, bottomExtra, for: .scrollContent)
                 // Phone landscape: scrolling down tucks the landscape bar away to Home, as on every other page.
                 .trackLandscapeTabScroll()

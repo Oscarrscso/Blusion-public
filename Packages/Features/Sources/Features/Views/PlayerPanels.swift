@@ -118,6 +118,8 @@ struct OpenSubtitlesSheet: View {
                     .accessibilityIdentifier("opensubtitles.result")
                 }
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .overlay {
                 if model.isSearchingOpenSubtitles { Spinner().controlSize(.large) }
             }

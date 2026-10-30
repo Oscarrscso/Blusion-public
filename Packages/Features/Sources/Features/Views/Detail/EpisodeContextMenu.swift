@@ -81,9 +81,10 @@ struct EpisodeContextMenu<Content: View, Preview: View>: UIViewControllerReprese
                         .scaleEffect(contentScale, anchor: .top)
                         .frame(width: geometry.size.width, height: cardSize.height * contentScale, alignment: .top)
                 }
+                .scrollIndicators(.visible, axes: .vertical)
+                .scrollIndicatorsFlash(onAppear: true)
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .scrollBounceBehavior(.basedOnSize)
-                .scrollIndicators(.visible)
             }
             .clipShape(RoundedRectangle(cornerRadius: owner.previewCornerRadius, style: .continuous))
             // The panel's outline stays on its visible bounds, outside the scrolling content.

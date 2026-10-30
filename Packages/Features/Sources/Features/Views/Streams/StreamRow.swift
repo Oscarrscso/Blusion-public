@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import StremioKit
+import PlayerKit
 
 /// One stream as a card, in the title page's design: a "Best match" label for the stream Auto Pick recommends, small badges for sharpness,
 /// REMUX, source, where iOS plays it over AirPods, Dolby Atmos, and whether TorBox holds the file already. A web release's streaming service sits in a box to the left of the
@@ -20,6 +21,9 @@ struct StreamRow: View {
     var downloadsNatively = false
     /// True while Blusion readies this stream to play: its play button turns into a spinner until the film is ready.
     var isPreparing = false
+    var preparation: PlaybackPreparation?
+    var preparationBeganAt: Date?
+    var preparationEndedAt: Date?
     /// Usenet or debrid, as the addon marks it, read once. Nil when its text says neither.
     private let delivery: StreamDelivery?
     /// Whether TorBox holds this stream's file already, as the addon marks it, read once. Nil for a stream that is not on TorBox.
@@ -28,9 +32,13 @@ struct StreamRow: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(item: RankedStream, isBest: Bool = false, isRemux: Bool = false, savesToPlayer: Bool = false, downloadsToPlayer: Bool = false, downloadsNatively: Bool = false,
-         isPreparing: Bool = false) {
+         isPreparing: Bool = false, preparation: PlaybackPreparation? = nil, preparationBeganAt: Date? = nil,
+         preparationEndedAt: Date? = nil) {
         self.item = item
         self.isPreparing = isPreparing
+        self.preparation = preparation
+        self.preparationBeganAt = preparationBeganAt
+        self.preparationEndedAt = preparationEndedAt
         self.delivery = StreamDelivery.detect(in: item.stream)
         self.isBest = isBest
         self.isRemux = isRemux
@@ -78,6 +86,9 @@ struct StreamRow: View {
                         .font(Theme.Typography.metaLine)
                         .foregroundStyle(Theme.metaText)
                         .lineLimit(1)
+                }
+                if let preparation, let preparationBeganAt {
+                    StreamPreparationStatus(progress: preparation, beganAt: preparationBeganAt, endedAt: preparationEndedAt)
                 }
                 if let routeNote {
                     Label(routeNote.text, systemImage: routeNote.symbol)
@@ -240,7 +251,8 @@ struct StreamRow: View {
     }
 
     private var routeMark: (symbol: String, tint: Color) {
-        switch item.route {
+        if preparation?.failure != nil { return ("exclamationmark.triangle", .orange) }
+        return switch item.route {
         case .native, .fallback, .hidden: ("play.fill", .white)
         case .handoff, .external: ("arrow.up.forward", .white)
         case .unsupported: ("exclamationmark.triangle.fill", .orange)
@@ -252,6 +264,110 @@ struct StreamRow: View {
         case .handoff(let player, _): ("Opens in \(player.displayName)", "arrow.up.forward.app", false)
         case .unsupported: ("Blusion can't play this yet", "exclamationmark.triangle", true)
         case .native, .fallback, .external, .hidden: nil
+        }
+    }
+}
+
+/// Fixed text rows keep stage changes, retries and missing measurements from moving the card's controls.
+private struct StreamPreparationStatus: View {
+    let progress: PlaybackPreparation
+    let beganAt: Date
+    let endedAt: Date?
+
+    var body: some View {
+        if let endedAt {
+            content(at: endedAt)
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in content(at: context.date) }
+        }
+    }
+
+    private func content(at date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .foregroundStyle(progress.failure == nil ? Theme.metaText : Color.orange)
+            Text(detail(at: date))
+                .foregroundStyle(Theme.metaText)
+            Text(metrics(at: date))
+                .foregroundStyle(Theme.metaText)
+            StreamPreparationMeter(progress: progress)
+                .frame(height: 2)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
+        }
+        .font(.caption2.weight(.medium))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("stream.preparation")
+    }
+
+    private var title: String {
+        if let failure = progress.failure { return failure.preparationDescription }
+        if progress.retryingAfter != nil { return "Retrying with \(progress.engine ?? "another engine")" }
+        return progress.stage.rawValue
+    }
+
+    private func detail(at date: Date) -> String {
+        if progress.failure != nil { return " " }
+        let buffer = progress.bufferedSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        if progress.startReason == .fastFill {
+            return buffer.map { "Starting early · \(seconds($0))s buffered" } ?? "Starting early"
+        }
+        if progress.startReason == .waitLimit {
+            return buffer.map { "Wait limit reached · \(seconds($0))s buffered" } ?? "Wait limit reached"
+        }
+        if let buffer {
+            let amount = progress.targetSeconds.map { "\(seconds(buffer)) / \(seconds($0))s buffered" } ?? "\(seconds(buffer))s buffered"
+            if let deadline = progress.waitDeadline {
+                return "\(amount) · \(Int(max(0, ceil(deadline.timeIntervalSince(date)))))s left"
+            }
+            return amount
+        }
+        return progress.retryingAfter == nil ? " " : progress.stage.rawValue
+    }
+
+    private func metrics(at date: Date) -> String {
+        let source = progress.retryingAfter?.preparationDescription ?? progress.engine
+        var parts = [source, "\(PlayerTime.format(max(0, date.timeIntervalSince(beganAt)))) elapsed"].compactMap { $0 }
+        if let bitrate = progress.networkBitrate, bitrate.isFinite, bitrate >= 0 {
+            parts.append(String(format: "%.1f MB/s", bitrate / 8_000_000))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func seconds(_ value: Double) -> String {
+        value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+}
+
+private struct StreamPreparationMeter: View {
+    let progress: PlaybackPreparation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.1))
+                if progress.failure != nil {
+                    Color.clear
+                } else if let ahead = progress.bufferedSeconds, ahead.isFinite, let target = progress.targetSeconds, target > 0 {
+                    Capsule().fill(.white.opacity(0.6))
+                        .frame(width: geometry.size.width * min(1, max(0, ahead / target)))
+                        .animation(reduceMotion ? nil : .linear(duration: 0.25), value: ahead)
+                } else if progress.stage != .ready {
+                    // A moving segment denotes an unknown amount of work; it never implies a percentage.
+                    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+                        let phase = reduceMotion ? 0.5 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                        Capsule().fill(.white.opacity(0.45))
+                            .frame(width: geometry.size.width * 0.25)
+                            .offset(x: geometry.size.width * (phase * 1.25 - 0.25))
+                    }
+                }
+            }
+            .clipShape(Capsule())
         }
     }
 }

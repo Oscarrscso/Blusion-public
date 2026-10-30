@@ -71,6 +71,7 @@ struct RootView: View {
         }
         #if targetEnvironment(macCatalyst)
         .modifier(MacWindowSize())
+        .background(MacTitlebar())
         #endif
         .environment(\.openURL, OpenURLAction { url in
             guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return .systemAction }
@@ -156,6 +157,19 @@ struct RootView: View {
 }
 
 #if targetEnvironment(macCatalyst)
+private struct MacTitlebar: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView { TitlebarView() }
+    func updateUIView(_ view: UIView, context: Context) {}
+
+    private final class TitlebarView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            window?.windowScene?.titlebar?.titleVisibility = .hidden
+            window?.windowScene?.titlebar?.toolbar = nil
+        }
+    }
+}
+
 /// A Mac window can be no larger than what it shows, and the first thing this app shows is a loading spinner: without room
 /// to grow the window opens 16 points wide and ignores the default size. A snapshot run sets its own size (`DebugSnapshot`).
 private struct MacWindowSize: ViewModifier {

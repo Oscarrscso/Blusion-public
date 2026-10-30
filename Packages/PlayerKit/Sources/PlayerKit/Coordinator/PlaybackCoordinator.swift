@@ -84,6 +84,7 @@ public final class PlaybackCoordinator {
     private var hasStartedCurrent = false
     /// How the current candidate failed before it started, if it did. `tryCandidate` decides what happens next.
     private var startFailure: PlaybackFailure?
+    private var retryFailure: PlaybackFailure?
     private var lastPosition: TimeInterval = 0
     private var stopped = false
 
@@ -186,6 +187,17 @@ public final class PlaybackCoordinator {
     public var capabilities: EngineCapabilities { engine?.capabilities ?? [] }
     public func statistics() -> PlaybackStatistics? { engine?.statistics() }
 
+    public var preparationProgress: PlaybackPreparation? {
+        var preparation = state.preparation ?? PlaybackPreparation(stage: .loadingMedia)
+        preparation.retryingAfter = phase == .exhausted || preparation.stage == .ready ? nil : retryFailure
+        if phase == .exhausted {
+            preparation.stage = .failed
+            preparation.failure = failedAttempts.last?.failure ?? PlaybackFailure(.noEngine, "There is nothing to play.")
+            preparation.waitDeadline = nil
+        }
+        return phase == .finished || stopped ? nil : preparation
+    }
+
     public func setVideoLayout(_ layout: VideoLayout) {
         videoLayout = layout
         engine?.apply(layout: layout)
@@ -262,6 +274,8 @@ public final class PlaybackCoordinator {
     private func tryCandidate(at index: Int, startPosition: TimeInterval, retryingAfter failure: PlaybackFailure? = nil,
                               routeOverride: PlaybackRoute? = nil) async {
         guard !stopped else { return }
+        retryFailure = failure
+        if failure != nil { notice = "The stream could not start. Retrying with another engine…" }
         engineGeneration += 1
         resolveStart(false)
         stallTimer?.cancel()
@@ -358,7 +372,9 @@ public final class PlaybackCoordinator {
             self?.resolveStart(false)
         }
         let started = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            if hasStartedCurrent { continuation.resume(returning: true) } else { startContinuation = continuation }
+            if hasStartedCurrent { continuation.resume(returning: true) }
+            else if stopped || startFailure != nil { continuation.resume(returning: false) }
+            else { startContinuation = continuation }
         }
         timer.cancel()
         return started

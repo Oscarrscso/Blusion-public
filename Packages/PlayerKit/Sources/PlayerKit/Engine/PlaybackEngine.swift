@@ -153,6 +153,53 @@ public struct PlaybackFailure: Error, Sendable, Equatable {
         self.kind = kind
         self.message = message
     }
+
+    /// Safe card text: engine errors can contain signed URLs and request headers.
+    public var preparationDescription: String {
+        switch kind {
+        case .network: "Network connection failed"
+        case .format: "Media or decoding failed"
+        case .unauthorized: "Stream access denied"
+        case .notFound: "Stream is no longer available"
+        case .timeout: "Stream preparation timed out"
+        case .noEngine: "Player is unavailable"
+        case .other: "Stream could not be prepared"
+        }
+    }
+}
+
+/// Only engine-confirmed work and measurements. Buffer progress is towards a startup cushion, never the film's duration.
+public struct PlaybackPreparation: Sendable, Equatable {
+    public enum Stage: String, Sendable, Equatable {
+        case resolvingStream = "Resolving stream"
+        case openingConnection = "Opening connection"
+        case loadingMedia = "Loading media"
+        case buffering = "Buffering"
+        case startingPlayback = "Starting playback"
+        case ready = "Ready"
+        case failed = "Preparation failed"
+    }
+
+    public enum StartReason: Sendable, Equatable {
+        case fastFill, waitLimit
+    }
+
+    public var stage: Stage
+    public var engine: String?
+    public var bufferedSeconds: TimeInterval?
+    public var targetSeconds: TimeInterval?
+    public var networkBitrate: Double?
+    /// The actual start gate deadline; reaching it starts with the available buffer.
+    public var waitDeadline: Date?
+    public var startReason: StartReason?
+    public var retryingAfter: PlaybackFailure?
+    public var failure: PlaybackFailure?
+
+    public init(stage: Stage, engine: String? = nil, targetSeconds: TimeInterval? = nil) {
+        self.stage = stage
+        self.engine = engine
+        self.targetSeconds = targetSeconds
+    }
 }
 
 public struct PlaybackState: Sendable, Equatable {
@@ -176,6 +223,7 @@ public struct PlaybackState: Sendable, Equatable {
     public var hasVideoFrame = false
     public var isExternalPlaybackActive = false
     public var chapters: [Chapter] = []
+    public var preparation: PlaybackPreparation?
 
     public init() {}
 

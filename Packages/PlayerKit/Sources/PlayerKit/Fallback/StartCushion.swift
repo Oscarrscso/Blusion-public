@@ -25,9 +25,9 @@ public struct StartCushion: Sendable, Equatable {
         self.startBudget = startBudget
     }
 
-    /// Thirty seconds of media, with up to 45 s to fill it and 50 s for load and fill together.
-    /// Keep the same minimum even on a briefly fast connection: remux bitrates arrive in bursts.
-    public static let standard = StartCushion(seconds: 30, earlySeconds: 30, fastFill: 2.5, maximumWait: 45, startBudget: 50)
+    /// Five seconds of media, or two when measured fill is at least 2.5× playback. Never spend more than eight seconds filling;
+    /// load and fill together still stay below the player's startup timeout.
+    public static let standard = StartCushion(seconds: 5, earlySeconds: 2, fastFill: 2.5, maximumWait: 8, startBudget: 50)
 
     /// How long the start may wait now, `loadTook` after the load began, with `ahead` seconds in hand. 0 starts at once, as does a
     /// backend that cannot say how much it holds (nil).

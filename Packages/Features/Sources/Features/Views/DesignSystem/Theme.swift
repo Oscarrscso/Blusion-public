@@ -119,16 +119,6 @@ extension View {
     func mediaArtwork(cornerRadius: CGFloat = Theme.Radius.card) -> some View {
         modifier(MediaArtworkModifier(cornerRadius: cornerRadius))
     }
-
-    /// Horizontal shelves hide their scroll indicators on a phone; a Mac window shows them so the pointer can scroll.
-    @ViewBuilder
-    func shelfIndicators() -> some View {
-        #if targetEnvironment(macCatalyst)
-        scrollIndicators(.visible, axes: .horizontal)
-        #else
-        scrollIndicators(.hidden, axes: .horizontal)
-        #endif
-    }
 }
 
 private struct MediaArtworkModifier: ViewModifier {

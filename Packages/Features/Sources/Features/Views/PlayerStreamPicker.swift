@@ -29,7 +29,8 @@ struct PlayerStreamPicker: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(12)
                 }
-                .scrollIndicators(.visible)
+                .scrollIndicators(.visible, axes: .vertical)
+                .scrollIndicatorsFlash(onAppear: true)
                 .scrollBounceBehavior(.basedOnSize)
                 .onAppear {
                     if candidates.indices.contains(currentIndex) {

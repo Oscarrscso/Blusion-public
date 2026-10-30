@@ -27,6 +27,8 @@ struct TraktAccountView: View {
                 Section { Text(message).foregroundStyle(.secondary).accessibilityIdentifier("trakt.message") }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .screenBackground()
         .navigationTitle("Trakt")

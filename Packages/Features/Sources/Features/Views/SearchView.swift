@@ -49,6 +49,8 @@ struct SearchView: View {
                 .padding(.vertical, Theme.Spacing.l)
                 .id(Self.topID)
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             // Any scroll of the page puts the keyboard away, so a swipe down clears the view of the results.
             .trackLandscapeTabScroll()
             .scrollDismissesKeyboard(.immediately)

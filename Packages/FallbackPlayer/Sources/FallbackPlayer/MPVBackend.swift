@@ -240,6 +240,7 @@ private final class MPVEventPump: @unchecked Sendable {
     private func run() {
         var lastPosition = -1.0
         var loaded = false
+        var lastSpeedUpdate = ContinuousClock.now - .seconds(1)
         while isRunning {
             guard let event = mpv_wait_event(handle, 0.25)?.pointee else { continue }
             switch event.event_id {
@@ -247,6 +248,8 @@ private final class MPVEventPump: @unchecked Sendable {
                 return
             case MPV_EVENT_START_FILE:
                 loaded = false
+                lastPosition = -1
+                continuation.yield(.preparing(.openingConnection))
             case MPV_EVENT_FILE_LOADED:
                 loaded = true
                 let tracks = properties.tracks()
@@ -274,6 +277,18 @@ private final class MPVEventPump: @unchecked Sendable {
                 }
                 if loaded, name == "chapter-list/count" {
                     continuation.yield(.chapters(properties.chapters()))
+                    continue
+                }
+                if name == "file-format", properties.string("file-format") != nil {
+                    continuation.yield(.preparing(.loadingMedia))
+                    continue
+                }
+                if name == "cache-speed" {
+                    let now = ContinuousClock.now
+                    if now - lastSpeedUpdate >= .milliseconds(500) {
+                        lastSpeedUpdate = now
+                        continuation.yield(.networkBitrate(properties.double("cache-speed").map { $0 * 8 }))
+                    }
                     continue
                 }
                 guard let value = property.data else { continue }
@@ -321,6 +336,7 @@ private final class MPVEventPump: @unchecked Sendable {
 /// libplacebo tone mapping and Dolby Vision (profiles 5 and 8, and 7's base layer with its RPU), and libass for styled subtitles.
 @MainActor
 public final class MPVBackend: FallbackBackend {
+    public var name: String { "mpv" }
     private let host = MPVHostView(frame: MPVHostView.initialFrame)
     private var handle: OpaquePointer?
     private var pump: MPVEventPump?
@@ -360,6 +376,10 @@ public final class MPVBackend: FallbackBackend {
     public func makeEventStream() -> AsyncStream<FallbackEvent> { events }
 
     public var startCushion: StartCushion? { .standard }
+    public var preparationBufferedAhead: TimeInterval? {
+        guard let handle else { return nil }
+        return MPVProperties(handle: handle).double("demuxer-cache-duration")
+    }
     public var bufferedAhead: TimeInterval? {
         guard let handle else { return nil }
         let read = MPVProperties(handle: handle)
@@ -413,6 +433,7 @@ public final class MPVBackend: FallbackBackend {
             return
         }
         for (name, format) in [("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("demuxer-cache-time", MPV_FORMAT_DOUBLE),
+                               ("cache-speed", MPV_FORMAT_DOUBLE), ("file-format", MPV_FORMAT_STRING),
                                ("pause", MPV_FORMAT_FLAG), ("paused-for-cache", MPV_FORMAT_FLAG), ("track-list/count", MPV_FORMAT_INT64),
                                ("chapter-list/count", MPV_FORMAT_INT64), ("aid", MPV_FORMAT_STRING), ("sid", MPV_FORMAT_STRING)] {
             mpv_observe_property(handle, 0, name, format)

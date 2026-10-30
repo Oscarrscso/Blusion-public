@@ -94,7 +94,8 @@ struct PlayerOptionsPanel: View {
                             .padding(.vertical, 12)
                     }
                     .scrollPosition($scrollPosition)
-                    .scrollIndicators(.visible)
+                    .scrollIndicators(.visible, axes: .vertical)
+                    .scrollIndicatorsFlash(onAppear: true)
                     .scrollBounceBehavior(.basedOnSize)
                     .onChange(of: tab) { _, _ in
                         videoMenu = nil
@@ -806,7 +807,7 @@ private struct PanelChips<Value: Hashable>: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.hidden, axes: .horizontal)
             .contentMargins(.horizontal, 2, for: .scrollContent)
         }
         .accessibilityElement(children: .contain)

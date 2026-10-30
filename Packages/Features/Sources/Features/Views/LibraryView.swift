@@ -62,6 +62,8 @@ struct LibraryView: View {
                 .padding(.bottom, Theme.Spacing.l)
                 .id(Self.topID)
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .trackLandscapeTabScroll()
             .screenBackground()
             .browsePageTopMargin()

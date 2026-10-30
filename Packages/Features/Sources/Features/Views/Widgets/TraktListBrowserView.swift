@@ -42,6 +42,8 @@ struct TraktListBrowserView: View {
             }
             .padding(.top, Theme.Spacing.s)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         // Margin, not padding: the last row scrolls fully clear of the tab bar and the mini-player.
         .contentMargins(.bottom, Theme.Spacing.xxl, for: .scrollContent)
         // The controls stay put while results scroll; the system's edge effect keeps rows legible under them.

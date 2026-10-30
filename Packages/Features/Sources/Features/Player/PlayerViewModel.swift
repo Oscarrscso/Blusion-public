@@ -111,6 +111,7 @@ public final class PlayerViewModel {
     /// Loads settings and resume position, starts playback (returns when playing or every stream failed), and fetches subtitles alongside.
     /// A player readied by `prepare` is not started again: it waits for that start, then plays from where it held.
     public func start() async {
+        guard !isClosed, !Task.isCancelled else { return }
         if let preparation {
             await preparation.value
             releaseHold()
@@ -125,6 +126,7 @@ public final class PlayerViewModel {
     /// no progress saved. Returns once it is ready, or once every stream has failed. `start` then plays it at once. Calling it again
     /// waits for the same start.
     public func prepare() async {
+        guard !isClosed, !Task.isCancelled else { return }
         if let preparation {
             await preparation.value
             return
@@ -141,6 +143,11 @@ public final class PlayerViewModel {
     public var isPrepared: Bool {
         guard preparation != nil, let phase = coordinator?.phase else { return false }
         return phase == .playing || phase == .exhausted
+    }
+
+    public var preparationProgress: PlaybackPreparation? {
+        guard !isClosed else { return nil }
+        return coordinator?.preparationProgress ?? PlaybackPreparation(stage: .loadingMedia)
     }
 
     /// The stream has started playing: until then the player shows no play or seek controls, only that it is loading.
@@ -163,7 +170,7 @@ public final class PlayerViewModel {
                 try? await snapshotStore.save(snapshot)
             }
         }
-        guard !isClosed else { return }
+        guard !isClosed, !Task.isCancelled else { return }
         // The saved session knows where the viewer actually was, past what the progress store had flushed; progress still resumes a
         // session whose snapshot was at its start.
         var resume = ProgressRecorder.resumePosition(for: previous)
@@ -216,6 +223,7 @@ public final class PlayerViewModel {
 
     public func close() async {
         isClosed = true
+        preparation?.cancel()
         // Closing ends any hold without a further engine call: the engine is being stopped.
         heldSpeed = nil
         cancelScrub()

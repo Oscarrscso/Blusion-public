@@ -40,6 +40,8 @@ struct WidgetBuilderView: View {
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             // The open setting's row is brought into view, so it stays clear of the panel at the foot of the screen.

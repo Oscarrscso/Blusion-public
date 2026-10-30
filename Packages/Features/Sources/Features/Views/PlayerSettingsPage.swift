@@ -133,6 +133,8 @@ struct PlayerSettingsPage: View {
                 Text("OpenSubtitles")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Player")
     }
 

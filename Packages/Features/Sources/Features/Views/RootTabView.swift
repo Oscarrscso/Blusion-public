@@ -306,12 +306,37 @@ extension View {
 /// A phone gets the plain tab bar, where Search always stands apart from the other tabs as a button of its own. The sidebar style, which
 /// an iPad and the Mac need, drew Search inside the bar with the rest on a phone whenever the bar was at full size.
 private struct TabBarStyle: ViewModifier {
+    let router: AppRouter
+    #if targetEnvironment(macCatalyst)
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+    #endif
+
     func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            List(selection: Binding<LaunchRoute.Tab?>(
+                get: { router.tab },
+                set: { if let tab = $0 { router.tapTab(tab) } }
+            )) {
+                Label("Home", systemImage: "house").tag(LaunchRoute.Tab.home)
+                Label("Discover", systemImage: "safari").tag(LaunchRoute.Tab.discover)
+                Label("Library", systemImage: "books.vertical").tag(LaunchRoute.Tab.library)
+                Label("Settings", systemImage: "gearshape").tag(LaunchRoute.Tab.settings)
+                Label("Widgets", systemImage: "rectangle.3.group").tag(LaunchRoute.Tab.widgets)
+                Label("Search", systemImage: "magnifyingglass").tag(LaunchRoute.Tab.search)
+            }
+            .listStyle(.sidebar)
+        } detail: {
+            content.tabViewStyle(.tabBarOnly)
+        }
+        .navigationSplitViewStyle(.balanced)
+        #else
         if UIDevice.current.userInterfaceIdiom == .phone {
             content.tabViewStyle(.tabBarOnly)
         } else {
             content.tabViewStyle(.sidebarAdaptable)
         }
+        #endif
     }
 }
 
@@ -605,14 +630,14 @@ public struct RootTabView: View {
                 .zoomTransitions()
             }
         }
-        .modifier(TabBarStyle())
+        .modifier(TabBarStyle(router: router))
         // Choosing Search goes straight to its field, with the keyboard up.
         .tabViewSearchActivation(.searchTabSelection)
         .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
         .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
         .pageTopBar(hidden: isPhoneLandscape)
         .tabBarMinimizeBehavior(isPhoneInLandscape ? .never : .onScrollDown)
-        .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+        .toolbar(isPhoneInLandscape || Self.isMacCatalyst ? .hidden : .automatic, for: .tabBar)
         .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage, isPhoneLandscape: isPhoneInLandscape))
         // The native bar stays hidden for *all* landscape scroll states. Replacing it mid-scroll
         // changes safe-area geometry and is what made the old detached Home button jump.

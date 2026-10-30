@@ -154,10 +154,14 @@ struct HomeView: View {
         switch model.phase {
         case .loading:
             ScrollView { VStack(spacing: Theme.rowSpacing) { continueRow; Spinner() }.padding(.top, Theme.Spacing.m) }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
                 .screenBackground()
                 .ignoresSafeArea(.container, edges: sideEdges)
         case .noAddons:
             ScrollView { VStack(spacing: Theme.rowSpacing) { continueRow; EmptyAddonsView(onOpenAddons: { router.showAddons() }) } }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
                 .screenBackground()
                 .ignoresSafeArea(.container, edges: sideEdges)
         case .noCatalogs:
@@ -168,6 +172,8 @@ struct HomeView: View {
                            actionTitle: "Open Addons", action: { router.showAddons() })
                 .accessibilityIdentifier("board.noCatalogs")
             } }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
                 .screenBackground()
                 .ignoresSafeArea(.container, edges: sideEdges)
         case .ready:
@@ -213,6 +219,8 @@ struct HomeView: View {
                 }
                 .id(Self.topID)
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .accessibilityIdentifier("board.rows")
             .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
                 heroPull = value

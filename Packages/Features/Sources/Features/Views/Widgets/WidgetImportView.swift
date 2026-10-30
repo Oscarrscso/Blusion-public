@@ -37,6 +37,8 @@ struct WidgetImportView: View {
                     .accessibilityIdentifier("widgetImport.text")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .screenBackground()
         .navigationTitle("Import Widgets")

@@ -36,7 +36,8 @@ struct PlayerEpisodePicker: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(12)
                 }
-                .scrollIndicators(.visible)
+                .scrollIndicators(.visible, axes: .vertical)
+                .scrollIndicatorsFlash(onAppear: true)
                 .scrollBounceBehavior(.basedOnSize)
                 // Opens on the episode playing, and on a season's first episode when the season changes.
                 .onChange(of: model.episodes.map(\.id)) { _, _ in

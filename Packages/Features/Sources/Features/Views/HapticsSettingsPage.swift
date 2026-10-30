@@ -92,6 +92,8 @@ struct HapticsSettingsPage: View {
                 .accessibilityIdentifier("settings.haptics.reset")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Haptics")
         .onAppear { draft = model.settings.haptics }
     }

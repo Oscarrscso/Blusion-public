@@ -48,6 +48,8 @@ struct WidgetSourcePicker: View {
                             Button("All Genres") { choose(choice, nil) }
                             ForEach(choice.genres, id: \.self) { genre in Button(genre) { choose(choice, genre) } }
                         }
+                        .scrollIndicators(.visible, axes: .vertical)
+                        .scrollIndicatorsFlash(onAppear: true)
                         .navigationTitle(choice.title)
                         .scrollContentBackground(.hidden)
                         .screenBackground()
@@ -57,6 +59,8 @@ struct WidgetSourcePicker: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .searchable(text: $query, prompt: "Find a catalog")
         .navigationTitle("Choose Source")
         .scrollContentBackground(.hidden)
@@ -100,6 +104,8 @@ private struct TraktListLinkForm: View {
                 if let problem { Text(problem).foregroundStyle(.red) }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .navigationTitle("Trakt List")
         .scrollContentBackground(.hidden)
         .screenBackground()

@@ -421,6 +421,8 @@ struct WidgetsManagerView: View {
             .padding(16)
             .onGeometryChange(for: CGFloat.self) { max(0, $0.size.width - 32) } action: { gridWidth = $0 }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         #if !targetEnvironment(macCatalyst)
         .scrollDisabled(drag != nil)
         #endif

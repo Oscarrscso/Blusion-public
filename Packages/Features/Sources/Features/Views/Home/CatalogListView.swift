@@ -24,6 +24,8 @@ struct CatalogListView: View {
             content
                 .padding(.bottom, Theme.Spacing.l)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         // A phone in landscape has no navigation bar here, so the filters and grid use the full height behind the floating Back control.
         .trackLandscapeTabScroll()
         .screenBackground()

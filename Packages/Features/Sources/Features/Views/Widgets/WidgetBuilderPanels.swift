@@ -818,6 +818,8 @@ private struct ChoiceList<Content: View>: View {
                 content()
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .frame(height: min(260, rowsHeight))
@@ -839,6 +841,8 @@ private struct ScrollsWhenLong<Content: View>: View {
             ScrollView {
                 content()
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .scrollDismissesKeyboard(.interactively)
         }
         .frame(maxHeight: 260)

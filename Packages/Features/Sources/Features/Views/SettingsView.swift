@@ -146,6 +146,8 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.section.about")
                 }
             }
+            .scrollIndicators(.visible, axes: .vertical)
+            .scrollIndicatorsFlash(onAppear: true)
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .readableColumn()
@@ -348,6 +350,8 @@ private struct PlaybackSettingsPage: View {
                 .accessibilityIdentifier("settings.subtitleLanguage")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Playback")
         .task {
             if let url = URL(string: "infuse://") { infuseInstalled = UIApplication.shared.canOpenURL(url) }
@@ -371,6 +375,8 @@ private struct AppearanceSettingsPage: View {
                 .accessibilityIdentifier("settings.colouredRatingLogos")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Appearance")
     }
 }
@@ -400,6 +406,8 @@ private struct LazyLoadSettingsPage: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Lazy load")
     }
 }
@@ -449,6 +457,8 @@ private struct ReviewServicesPage: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Review services")
         .task { model.refreshOMDbUsage() }
         .onChange(of: services.posterRatings.reviewServicesRevision) { model.refreshOMDbUsage() }
@@ -495,6 +505,8 @@ private struct IMDbRatingsPage: View {
                 Text("\(IMDbAttribution.notice) \(IMDbAttribution.terms)")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("IMDb ratings")
     }
 }
@@ -513,6 +525,8 @@ private struct AccountsSettingsPage: View {
                 .accessibilityIdentifier("settings.continueWatchingRefresh")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Continue refresh")
     }
 }
@@ -543,6 +557,8 @@ private struct ServerSettingsPage: View {
                     .accessibilityIdentifier("settings.serverURL.save")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Streaming server")
     }
 }
@@ -590,6 +606,8 @@ private struct FallbackSettingsPage: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Fallback player")
     }
 }
@@ -613,6 +631,8 @@ private struct DataSettingsPage: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Clear data")
         .confirmationDialog(pendingScope.map { "Clear \($0.title.lowercased())?" } ?? "",
                             isPresented: Binding(get: { pendingScope != nil }, set: { if !$0 { pendingScope = nil } }),
@@ -662,6 +682,8 @@ private struct ImageCacheSettingsPage: View {
                     .accessibilityIdentifier("settings.imageCache.clear")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Image cache")
         .task { inUse = ImagePipeline.shared.diskUsage }
         .onChange(of: megabytes) { _, chosen in
@@ -742,6 +764,8 @@ private struct AddonSpeedSettingsPage: View {
                 Text("Auto Pick waits for")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Addon Speed")
         .task { await model.load() }
         .task { for await path in NWPathMonitor() { isOnline = path.status == .satisfied } }
@@ -780,6 +804,8 @@ private struct AboutSettingsPage: View {
                     """)
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("About")
     }
 }
@@ -803,6 +829,8 @@ struct AcknowledgementsView: View {
             }
             .accessibilityElement(children: .contain)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .readableColumn()
         .screenBackground()

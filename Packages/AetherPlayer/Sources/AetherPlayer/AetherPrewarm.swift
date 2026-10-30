@@ -16,6 +16,8 @@ public enum AetherPrewarm {
 
     private static var running: [URL: Task<Void, Never>] = [:]
 
+    static func isWarming(_ url: URL) -> Bool { running[url] != nil }
+
     /// Starts warming `url`, sent with `headers` exactly as the load will send them. Nothing happens when it is warm or warming already.
     public static func start(url: URL, headers: [String: String]) {
         guard running[url] == nil, !AetherEngine.isPrewarmed(url: url) else { return }
@@ -34,12 +36,17 @@ public enum AetherPrewarm {
     static func waitForWarm(of url: URL) async {
         guard let task = running[url] else { return }
         let limit = longestWait
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await task.value }
-            group.addTask { try? await Task.sleep(for: limit) }
-            await group.next()
-            group.cancelAll()
+        // A task group's cancellation cannot interrupt a child awaiting another task's value: the old race still waited for
+        // the warm after its timeout. Finishing this stream releases the load immediately on timeout or caller cancellation.
+        let waiting = AsyncStream<Void> { continuation in
+            let completion = Task { await task.value; continuation.finish() }
+            let timeout = Task {
+                do { try await Task.sleep(for: limit) } catch { return }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in completion.cancel(); timeout.cancel() }
         }
+        for await _ in waiting { }
     }
 }
 #endif

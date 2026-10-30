@@ -78,6 +78,8 @@ struct WidgetEditorView: View {
                 }
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .readableColumn()
         .screenBackground()
@@ -217,6 +219,8 @@ private struct CollectionTileEditor: View {
             }
             TextField("Image URL (optional)", text: $imageURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .readableColumn()
         .screenBackground()

@@ -44,6 +44,7 @@ public final class AetherBackend: FallbackBackend {
     }
 
     public var videoSurface: AnyObject { session.view }
+    public var name: String { "AetherEngine" }
 
     /// Not `.engineSubtitles`: subtitle files are drawn by the app as on AVPlayer, and "full styling" moves the stream to mpv.
     public var capabilities: EngineCapabilities {
@@ -59,6 +60,7 @@ public final class AetherBackend: FallbackBackend {
     public var startCushion: StartCushion? { .standard }
     /// Downloaded media on both the remux and FEL routes; live streams start immediately.
     public var bufferedAhead: TimeInterval? { session.bufferedAhead }
+    public var preparationBufferedAhead: TimeInterval? { session.bufferedMediaAhead }
 
     public func load(url: URL, headers: [String: String], startPosition: TimeInterval) {
         session.load(url: url, headers: headers, startPosition: startPosition, options: options)
@@ -105,7 +107,8 @@ public final class AetherBackend: FallbackBackend {
         }
         return PlaybackStatistics(engine: stats.engine, decoder: stats.decoder, videoCodec: stats.videoCodec, width: stats.width, height: stats.height,
                                   frameRate: stats.frameRate, videoBitrate: stats.videoBitrate, audioBitrate: stats.audioBitrate,
-                                  bufferedAhead: stats.bufferedAhead, sourceColour: stats.sourceColour, dolbyVision: stats.dolbyVision,
+                                  networkBitrate: stats.networkBitrate, bufferedAhead: stats.bufferedAhead,
+                                  sourceColour: stats.sourceColour, dolbyVision: stats.dolbyVision,
                                   outputColour: stats.outputColour, audioCodec: stats.audioCodec, audioChannels: stats.audioChannels,
                                   audioOutput: stats.audioOutput, notes: notes)
     }
@@ -121,6 +124,15 @@ public final class AetherBackend: FallbackBackend {
 
     static func translate(_ event: AetherEvent) -> FallbackEvent {
         switch event {
+        case .preparing(let stage):
+            let mappedStage: PlaybackPreparation.Stage = switch stage {
+            case .resolvingStream: .resolvingStream
+            case .openingConnection: .openingConnection
+            case .loadingMedia: .loadingMedia
+            case .startingPlayback: .startingPlayback
+            }
+            return .preparing(mappedStage)
+        case .networkBitrate(let bitrate): return .networkBitrate(bitrate)
         case .loaded(let duration, let audio, let subtitles, let selectedAudio, let selectedSubtitle):
             return .loaded(duration: duration, audio: audio.map(audioTrack), subtitles: subtitles.map(subtitleTrack),
                            selectedAudio: selectedAudio.map { "a\($0)" }, selectedSubtitle: selectedSubtitle.map { "s\($0)" })
@@ -146,6 +158,7 @@ public final class AetherBackend: FallbackBackend {
         case .format: .format
         case .unauthorized: .unauthorized
         case .notFound: .notFound
+        case .timeout: .timeout
         case .other: .other
         }
         return PlaybackFailure(kind, failure.message)

@@ -89,7 +89,7 @@ struct ChipRow<Content: View>: View {
                 }
             }
         }
-        .shelfIndicators()
+        .scrollIndicators(.hidden, axes: .horizontal)
         .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
         .scrollClipDisabled()
         }

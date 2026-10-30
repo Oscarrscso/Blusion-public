@@ -271,7 +271,7 @@ struct ShelfScroll<Content: View>: View {
             if isHoveringShelf { shelfArrows }
         }
         #endif
-        .shelfIndicators()
+        .scrollIndicators(.hidden, axes: .horizontal)
         .contentMargins(.horizontal, margin, for: .scrollContent)
         .softSnappingScroll()
         .scrollClipDisabled()

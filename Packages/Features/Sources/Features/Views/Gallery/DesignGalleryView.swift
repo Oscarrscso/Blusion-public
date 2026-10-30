@@ -30,6 +30,8 @@ struct DesignGalleryView: View {
             }
             .padding(.vertical, Theme.Spacing.l)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .screenBackground()
         .navigationTitle("Gallery")
         .navigationBarTitleDisplayMode(.inline)

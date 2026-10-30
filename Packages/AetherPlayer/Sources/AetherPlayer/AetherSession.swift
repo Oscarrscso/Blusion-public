@@ -33,6 +33,8 @@ public final class AetherSession {
     private var lastChapters: [AetherChapter] = []
     private var pausedState: Bool?
     private var bufferingState = false
+    private var downloadSample: (bytes: Int64, at: ContinuousClock.Instant)?
+    private var networkBitrate: Double?
     private var hasEnded = false
     private var subtitleDelay: TimeInterval = 0
     /// The last play or pause Blusion asked for. Blusion says play straight after load, before AetherEngine has a session to play,
@@ -58,6 +60,13 @@ public final class AetherSession {
     /// Compressed media downloaded ahead, including FEL packets. The software clock does not
     /// advance before its first play, so read its published cache ranges while startup is paused.
     public var bufferedAhead: TimeInterval? {
+        guard let ahead = bufferedMediaAhead else { return nil }
+        // Nothing more to wait for when the remaining film is already downloaded.
+        if lastDuration > 0, engine.clock.currentTime + ahead >= lastDuration - 0.5 { return nil }
+        return ahead
+    }
+
+    public var bufferedMediaAhead: TimeInterval? {
         guard isLoaded, !engine.isLive else { return nil }
         let position = engine.clock.currentTime
         let frontier: Double
@@ -70,8 +79,6 @@ public final class AetherSession {
             }?.upperBound ?? engine.clock.bufferedPosition
         default: return nil
         }
-        // Nothing more to wait for when the remaining film is already downloaded.
-        if lastDuration > 0, frontier >= lastDuration - 0.5 { return nil }
         let ahead = frontier - position
         return ahead.isFinite ? max(0, ahead) : nil
     }
@@ -99,6 +106,8 @@ public final class AetherSession {
         hasEnded = false
         lastDuration = 0
         lastBuffered = -1
+        downloadSample = nil
+        networkBitrate = nil
         lastTracks = nil
         lastChapters = []
         pausedState = nil
@@ -129,6 +138,7 @@ public final class AetherSession {
         loadTask = Task { [weak self] in
             guard let self else { return }
             // A warm of this stream already under way (`AetherPrewarm`) hands its bytes and resolved link to the load.
+            if AetherPrewarm.isWarming(url) { self.continuation.yield(.preparing(.resolvingStream)) }
             await AetherPrewarm.waitForWarm(of: url)
             guard !Task.isCancelled, generation == self.generation else { return }
             do {
@@ -288,7 +298,8 @@ public final class AetherSession {
         }
         stats.frameRate = engine.sourceVideoFrameRate
         stats.videoBitrate = engine.sourceVideoBitrate > 0 ? Double(engine.sourceVideoBitrate) : nil
-        stats.bufferedAhead = bufferedAhead ?? max(0, engine.clock.bufferedPosition - engine.clock.currentTime)
+        stats.networkBitrate = networkBitrate
+        stats.bufferedAhead = bufferedMediaAhead
         let stream = engine.sourceVideoStreamFormat
         let colourDetails = [stream?.transferLabel, stream?.colorPrimariesLabel, stream?.bitDepth.map { "\($0)-bit" }].compactMap { $0 }
         let source = Self.formatName(engine.sourceVideoFormat)
@@ -334,6 +345,43 @@ public final class AetherSession {
     // MARK: Observation
 
     private func observe() {
+        engine.$startupProgress.compactMap { $0 }.removeDuplicates().receive(on: RunLoop.main).sink { [weak self] progress in
+            MainActor.assumeIsolated {
+                guard let self, !self.isLoaded else { return }
+                let stage: AetherPreparationStage = switch progress.stage {
+                case .connecting: .openingConnection
+                case .openingContainer, .analyzingStreams, .preparingDisplay, .selectingRoute, .buildingSession, .preparingPlayback: .loadingMedia
+                case .awaitingFirstFrame, .presenting: .startingPlayback
+                }
+                self.continuation.yield(.preparing(stage))
+            }
+        }.store(in: &subscriptions)
+        // Reuse the engine's 1 Hz telemetry. On loopback, AVPlayer's throughput measures localhost; source-byte deltas measure
+        // the actual download instead. Never turn a missing counter or a counter reset into a speed.
+        engine.diagnostics.$liveTelemetry.receive(on: RunLoop.main).sink { [weak self] telemetry in
+            MainActor.assumeIsolated {
+                guard let self, self.isLoaded else { return }
+                var bitrate: Double?
+                if let telemetry {
+                    let now = ContinuousClock.now
+                    let bytes = telemetry.demuxerBytesFetched
+                    if self.engine.videoRoute == .loopback {
+                        if bytes > 0, let previous = self.downloadSample, bytes >= previous.bytes {
+                            let elapsed = previous.at.duration(to: now).components
+                            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+                            if seconds > 0 { bitrate = Double(bytes - previous.bytes) * 8 / seconds }
+                        }
+                        self.downloadSample = bytes > 0 ? (bytes, now) : nil
+                    } else {
+                        bitrate = telemetry.networkThroughputMbps.map { $0 * 1_000_000 }
+                    }
+                } else {
+                    self.downloadSample = nil
+                }
+                self.networkBitrate = bitrate
+                self.continuation.yield(.networkBitrate(bitrate))
+            }
+        }.store(in: &subscriptions)
         engine.$state.receive(on: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.publishTransport() }
         }.store(in: &subscriptions)
@@ -511,12 +559,17 @@ public final class AetherSession {
         if let info = engine.errorInfo { return Self.failure(info) }
         let message = error?.localizedDescription ?? "AetherEngine could not play this stream."
         if let error = error as? URLError {
-            return AetherFailure(kind: error.code == .userAuthenticationRequired ? .unauthorized : .network, message: message)
+            let kind: AetherFailure.Kind = error.code == .timedOut ? .timeout
+                : error.code == .userAuthenticationRequired ? .unauthorized : .network
+            return AetherFailure(kind: kind, message: message)
         }
         return AetherFailure(kind: .other, message: message)
     }
 
     static func failure(_ info: PlaybackErrorInfo) -> AetherFailure {
+        if info.underlyingDomain == NSURLErrorDomain, info.underlyingCode == URLError.timedOut.rawValue {
+            return AetherFailure(kind: .timeout, message: info.message)
+        }
         let kind: AetherFailure.Kind
         switch info.kind {
         case .sourceRefused:

@@ -40,8 +40,8 @@ private struct PointerInteractionModifier: ViewModifier {
                     .accessibilityHidden(true)
                 }
             }
-            .shadow(color: .black.opacity(tracksPointer && lifts && isEnabled && isHovering ? 0.10 : 0), radius: 8, y: 3)
-            .scaleEffect(isEnabled && lifts && !reduceMotion && (isHovering || isFocused) ? (tracksPointer ? 1.008 : 1.025) : 1)
+            .shadow(color: .black.opacity(tracksPointer && lifts && isEnabled && isHovering ? 0.25 : 0), radius: 12, y: 6)
+            .scaleEffect(isEnabled && lifts && !reduceMotion && (isHovering || isFocused) ? (tracksPointer ? 1.04 : 1.025) : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
             .hoverEffect(.highlight, isEnabled: isEnabled && systemHighlight)
             .onHover { isHovering = isEnabled && $0 }

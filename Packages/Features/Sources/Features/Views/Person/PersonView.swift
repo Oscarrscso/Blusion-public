@@ -50,6 +50,8 @@ struct PersonView: View {
             }
             .padding(.bottom, Theme.Spacing.xxl)
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         // Phone landscape: no navigation bar; the page starts below the corner Back and the name sits on top of the landscape bar.
         .contentMargins(.top, isPhoneInLandscape ? LandscapeTabBarState.backClearance : 0, for: .scrollContent)
         .trackLandscapeTabScroll()
@@ -141,7 +143,7 @@ struct PersonView: View {
             }
             .scrollTargetLayout()
         }
-        .shelfIndicators()
+        .scrollIndicators(.hidden, axes: .horizontal)
         .contentMargins(.horizontal, margin, for: .scrollContent)
         .scrollClipDisabled()
         .softSnappingScroll()
@@ -171,7 +173,7 @@ struct PersonView: View {
                 }
                 .scrollTargetLayout()
             }
-            .shelfIndicators()
+            .scrollIndicators(.hidden, axes: .horizontal)
             .contentMargins(.horizontal, margin, for: .scrollContent)
             .scrollClipDisabled()
             .softSnappingScroll()

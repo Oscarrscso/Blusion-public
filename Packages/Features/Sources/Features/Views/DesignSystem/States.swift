@@ -119,7 +119,7 @@ struct SkeletonRow: View {
             }
             .shimmering()
         }
-        .shelfIndicators()
+        .scrollIndicators(.hidden, axes: .horizontal)
         .scrollDisabled(true)
         .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
         .scrollClipDisabled()

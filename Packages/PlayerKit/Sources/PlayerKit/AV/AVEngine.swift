@@ -55,6 +55,12 @@ public final class AVEngine: PlaybackEngine {
         broadcaster.makeStream(current: state)
     }
 
+    /// Called by the attached video layer, never inferred from the playback clock.
+    public func markVideoFrameReady() {
+        guard playerItem != nil else { return }
+        update { $0.hasVideoFrame = true }
+    }
+
     // MARK: PlaybackEngine
 
     public func load(_ item: PlaybackItem) {
@@ -65,6 +71,8 @@ public final class AVEngine: PlaybackEngine {
         pendingStart = item.startPosition
         var fresh = PlaybackState()
         fresh.status = .loading
+        // AVPlayer exposes item loading, but no separate redirect/connection checkpoints or fixed startup-buffer target.
+        fresh.preparation = PlaybackPreparation(stage: .loadingMedia, engine: "AVPlayer")
         publish(fresh)
 
         let made = AVAssetFactory.make(url: item.url, headers: item.headers)
@@ -224,6 +232,17 @@ public final class AVEngine: PlaybackEngine {
     private func update(_ change: (inout PlaybackState) -> Void) {
         var next = state
         change(&next)
+        if var preparation = next.preparation {
+            switch next.status {
+            case .failed(let failure):
+                preparation.stage = .failed
+                preparation.failure = failure
+            case .buffering: preparation.stage = .buffering
+            case .playing, .ready, .paused: preparation.stage = next.hasVideoFrame ? .ready : .startingPlayback
+            default: break
+            }
+            next.preparation = next.status == .idle ? nil : preparation
+        }
         publish(next)
     }
 
@@ -300,7 +319,20 @@ public final class AVEngine: PlaybackEngine {
             let error = item.error
             Task { @MainActor in self?.itemStatusChanged(status, error: error) }
         })
+        itemObservations.append(item.observe(\.loadedTimeRanges, options: [.initial, .new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self, self.playerItem === item else { return }
+                self.refreshPreparationBuffer()
+            }
+        })
         let center = NotificationCenter.default
+        itemTokens.append(center.addObserver(forName: AVPlayerItem.newAccessLogEntryNotification, object: item, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let bitrate = self.playerItem?.accessLog()?.events.last?.observedBitrate
+                self.update { $0.preparation?.networkBitrate = bitrate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } }
+            }
+        })
         itemTokens.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.didPlayToEnd() }
         })
@@ -361,6 +393,19 @@ public final class AVEngine: PlaybackEngine {
             // AVPlayer can refuse a rate its item cannot play: report the rate it is running at, not only the one asked for.
             if player.timeControlStatus == .playing, player.rate > 0 { $0.rate = player.rate }
         }
+        refreshPreparationBuffer()
+    }
+
+    private func refreshPreparationBuffer() {
+        guard let item = playerItem else { return }
+        let position = item.currentTime().seconds
+        guard position.isFinite else { return }
+        // A later disjoint range cannot fill a gap at the playhead.
+        let end = item.loadedTimeRanges.map(\.timeRangeValue).first {
+            $0.start.seconds <= position + 0.1 && $0.end.seconds > position
+        }?.end.seconds
+        let ahead = end.flatMap { $0.isFinite ? max(0, $0 - position) : nil } ?? 0
+        update { $0.preparation?.bufferedSeconds = ahead }
     }
 
     private func didPlayToEnd() {

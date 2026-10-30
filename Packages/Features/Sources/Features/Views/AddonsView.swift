@@ -27,6 +27,8 @@ struct AddonsView: View {
                 installedSection
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .readableColumn()
         .screenBackground()
@@ -228,6 +230,8 @@ struct AddonDetailView: View {
                 .accessibilityIdentifier("addonDetail.remove")
             }
         }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
         .scrollContentBackground(.hidden)
         .readableColumn()
         .screenBackground()

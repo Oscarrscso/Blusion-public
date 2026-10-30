@@ -42,12 +42,18 @@ public struct AetherChapter: Sendable, Equatable {
 }
 
 public struct AetherFailure: Error, Sendable, Equatable {
-    public enum Kind: Sendable, Equatable { case network, format, unauthorized, notFound, other }
+    public enum Kind: Sendable, Equatable { case network, format, unauthorized, notFound, timeout, other }
     public let kind: Kind
     public let message: String
 }
 
+public enum AetherPreparationStage: Sendable, Equatable {
+    case resolvingStream, openingConnection, loadingMedia, startingPlayback
+}
+
 public enum AetherEvent: Sendable, Equatable {
+    case preparing(AetherPreparationStage)
+    case networkBitrate(Double?)
     case loaded(duration: TimeInterval?, audio: [AetherTrack], subtitles: [AetherTrack], selectedAudio: Int?, selectedSubtitle: Int?)
     /// The length AetherEngine reported after `loaded`: its player can publish the duration a moment after the load finishes.
     case duration(TimeInterval)
@@ -119,6 +125,7 @@ public struct AetherStatistics: Sendable, Equatable {
     public var frameRate: Double?
     public var videoBitrate: Double?
     public var audioBitrate: Double?
+    public var networkBitrate: Double?
     public var bufferedAhead: TimeInterval?
     public var sourceColour: String?
     public var dolbyVision: String?

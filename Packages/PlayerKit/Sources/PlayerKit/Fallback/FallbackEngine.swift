@@ -12,6 +12,9 @@ public protocol VideoSurfaceProviding: AnyObject {
 }
 
 public enum FallbackEvent: Sendable, Equatable {
+    case preparing(PlaybackPreparation.Stage)
+    /// Bits per second from the source, nil when unavailable (never a local loopback transfer rate).
+    case networkBitrate(Double?)
     case loaded(duration: TimeInterval?, audio: [MediaTrack], subtitles: [MediaTrack], selectedAudio: String?, selectedSubtitle: String?)
     /// The length became known (or changed) after `loaded`. A player can learn it a moment after the load finishes.
     case duration(TimeInterval)
@@ -33,6 +36,7 @@ public enum FallbackEvent: Sendable, Equatable {
 /// so the engine, its state mapping and its tests need no third-party code.
 @MainActor
 public protocol FallbackBackend: AnyObject {
+    var name: String { get }
     var videoSurface: AnyObject { get }
     /// One stream for the backend's lifetime.
     func makeEventStream() -> AsyncStream<FallbackEvent>
@@ -64,9 +68,12 @@ public protocol FallbackBackend: AnyObject {
     var startCushion: StartCushion? { get }
     /// Seconds buffered ahead of the playhead, for the start cushion; nil when the backend cannot say, and then the start does not wait.
     var bufferedAhead: TimeInterval? { get }
+    /// The raw measurement for UI, including fully downloaded remaining media. Missing values must stay nil.
+    var preparationBufferedAhead: TimeInterval? { get }
 }
 
 public extension FallbackBackend {
+    var name: String { "Advanced player" }
     var capabilities: EngineCapabilities { [] }
     var maximumRate: Float { 2 }
     func setSubtitleDelay(_ seconds: TimeInterval) {}
@@ -79,6 +86,7 @@ public extension FallbackBackend {
     func statistics() -> PlaybackStatistics { PlaybackStatistics(engine: "Fallback") }
     var startCushion: StartCushion? { nil }
     var bufferedAhead: TimeInterval? { nil }
+    var preparationBufferedAhead: TimeInterval? { bufferedAhead }
 }
 
 /// `PlaybackEngine` for MKV, AVI, DTS and everything else AVPlayer cannot open (PLAN §4, M6).
@@ -111,7 +119,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         let events = backend.makeEventStream()
         eventTask = Task { [weak self] in
             for await event in events {
-                guard let self else { return }
+                guard let self, !Task.isCancelled, !self.isStopped else { return }
                 self.handle(event)
             }
         }
@@ -138,6 +146,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         loadBegan = .now
         var fresh = PlaybackState()
         fresh.status = .loading
+        fresh.preparation = PlaybackPreparation(stage: .loadingMedia, engine: backend.name, targetSeconds: backend.startCushion?.seconds)
         publish(fresh)
         backend.load(url: item.url, headers: item.headers, startPosition: item.startPosition)
     }
@@ -206,7 +215,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     public func statistics() -> PlaybackStatistics {
         var statistics = backend.statistics()
-        if statistics.bufferedAhead == nil { statistics.bufferedAhead = max(0, state.bufferedUntil - state.position) }
+        if statistics.bufferedAhead == nil { statistics.bufferedAhead = backend.preparationBufferedAhead }
         return statistics
     }
 
@@ -225,6 +234,10 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     private func handle(_ event: FallbackEvent) {
         switch event {
+        case .preparing(let stage):
+            update { $0.preparation?.stage = stage }
+        case .networkBitrate(let bitrate):
+            update { $0.preparation?.networkBitrate = bitrate.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
         case .loaded(let duration, let audio, let subtitles, let selectedAudio, let selectedSubtitle):
             isLoaded = true
             update {
@@ -270,10 +283,14 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     private func beginStart() {
         guard startGate == .closed, let cushion = backend.startCushion else { return openStart() }
         let loadTook = Self.seconds(loadBegan.duration(to: .now))
-        let wait = cushion.wait(ahead: backend.bufferedAhead, loadTook: loadTook)
-        guard wait > 0 else { return openStart() }
+        let ahead = backend.bufferedAhead
+        let wait = cushion.wait(ahead: ahead, loadTook: loadTook)
+        guard wait > 0 else {
+            let reason: PlaybackPreparation.StartReason? = if let ahead, ahead < cushion.seconds { .waitLimit } else { nil }
+            return openStart(reason: reason)
+        }
         startGate = .holding
-        update { _ in }
+        update { $0.preparation?.waitDeadline = Date().addingTimeInterval(wait) }
         let startAhead = backend.bufferedAhead ?? 0
         startHold = Task { [weak self] in
             let began = ContinuousClock.now
@@ -282,21 +299,32 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self, !Task.isCancelled, self.failure == nil else { return }
                 let waited = Self.seconds(began.duration(to: .now))
-                if cushion.isMet(ahead: self.backend.bufferedAhead, startAhead: startAhead, waited: waited) { break }
+                let ahead = self.backend.bufferedAhead
+                if cushion.isMet(ahead: ahead, startAhead: startAhead, waited: waited) {
+                    let reason: PlaybackPreparation.StartReason? = if let ahead, ahead < cushion.seconds { .fastFill } else { nil }
+                    self.openStart(reason: reason)
+                    return
+                }
             }
             guard let self, !Task.isCancelled, self.failure == nil else { return }
-            self.openStart()
+            self.openStart(reason: .waitLimit)
         }
     }
 
     /// Lets the first start through: playback starts if it is still wanted, and a first frame held back is shown.
-    private func openStart() {
+    private func openStart(reason: PlaybackPreparation.StartReason? = nil) {
         startHold = nil
         startGate = .open
         if wantsPlay { backend.setPaused(false) }
         let frame = heldFirstFrame
         heldFirstFrame = false
-        update { if frame { $0.hasVideoFrame = true } }
+        let hasTarget = backend.bufferedAhead != nil
+        update {
+            if frame { $0.hasVideoFrame = true }
+            $0.preparation?.waitDeadline = nil
+            $0.preparation?.startReason = reason
+            if !hasTarget { $0.preparation?.targetSeconds = nil }
+        }
     }
 
     private static func seconds(_ duration: Duration) -> TimeInterval {
@@ -319,6 +347,23 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         var next = state
         change(&next)
         next.status = isStopped ? .idle : deriveStatus()
+        if var preparation = next.preparation {
+            if let failure {
+                preparation.stage = .failed
+                preparation.failure = failure
+                preparation.waitDeadline = nil
+            } else if next.hasVideoFrame, startGate == .open {
+                preparation.stage = .ready
+            } else if startGate == .holding || isBuffering {
+                preparation.stage = .buffering
+            } else if isLoaded {
+                preparation.stage = .startingPlayback
+            }
+            if isLoaded, state.preparation?.stage != .ready {
+                preparation.bufferedSeconds = backend.preparationBufferedAhead.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            }
+            next.preparation = isStopped ? nil : preparation
+        }
         publish(next)
     }
 

@@ -422,7 +422,7 @@ private struct PrewarmHeroArtworkModifier: ViewModifier {
 /// How cards answer a touch or a pointer: pressed, they dim and shrink a little with a quick spring; under a pointer (Mac, iPad
 /// trackpad) they lift slightly and highlight. Reduce Motion keeps the card still.
 struct PressableCardStyle: ButtonStyle {
-    /// Poster shelves share a restrained pointer glow and lift on Mac; touch keeps its existing feel.
+    /// Poster shelves share a pointer glow and pronounced lift on Mac; touch keeps its existing feel.
     static var poster: PressableCardStyle {
         #if targetEnvironment(macCatalyst)
         PressableCardStyle(addsSystemHighlight: false, tracksPointer: true)

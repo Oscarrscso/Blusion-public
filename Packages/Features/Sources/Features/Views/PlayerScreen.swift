@@ -652,6 +652,7 @@ struct PlayerContent: View {
                       ambientMode: model.preferences.ambientMode, superResolution: superResolution, sampler: picture,
                       onFirstVideoFrame: {
                           guard let engine, model.coordinator?.engine === engine else { return }
+                          (engine as? AVEngine)?.markVideoFrameReady()
                           nativeFrameEngineID = ObjectIdentifier(engine)
                       })
         #if DEBUG
