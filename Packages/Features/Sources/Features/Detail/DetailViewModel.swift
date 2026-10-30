@@ -172,8 +172,10 @@ public final class DetailViewModel {
         // while the page loaded plays the episode it names.
         await refreshUserState()
         guard !Task.isCancelled else { return }
-        // A series opens on the season of its next episode, so the list starts where the viewer left off.
-        if selectedSeason == nil { selectedSeason = nextUp?.season ?? detail.seasons.first }
+        // Open at the same episode and season named by Play/Resume.
+        if selectedSeason == nil {
+            selectedSeason = nextUp?.season ?? detail.seasons.first { $0 > 0 }
+        }
         isLoading = false
         // The content is usable already. Keep the hero ahead of secondary lookups without holding the page's metadata back.
         await artwork

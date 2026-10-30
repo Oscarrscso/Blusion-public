@@ -163,7 +163,7 @@ struct PersonView: View {
                                          backdrop: model.knownForArtwork[credit.id]?.backdrop ?? credit.backdrop,
                                          logo: model.knownForArtwork[credit.id]?.logo, role: credit.roleText)
                         }
-                        .buttonStyle(PressableCardStyle())
+                        .buttonStyle(PressableCardStyle.poster)
                         .titleTapHaptic()
                         .reportsShelfEdge(id: credit.id)
                         .accessibilityIdentifier("person.knownFor.\(credit.id)")
@@ -315,7 +315,7 @@ private struct CreditRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassCardSurface()
         }
-        .buttonStyle(PressableCardStyle())
+        .buttonStyle(PressableCardStyle.poster)
         .titleTapHaptic()
         .accessibilityIdentifier("person.credit.\(credit.id)")
     }
@@ -368,7 +368,7 @@ struct PersonCardLink: View {
                 .frame(width: width, alignment: .leading)
             }
         }
-        .buttonStyle(PressableCardStyle())
+        .buttonStyle(PressableCardStyle.poster)
         .titleTapHaptic()
         .help(person.name)
         .accessibilityIdentifier("cast.\(person.id)")

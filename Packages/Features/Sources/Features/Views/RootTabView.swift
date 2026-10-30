@@ -327,11 +327,6 @@ private struct LandscapeTabControls: View {
     let hidesPageHeader: Bool
     let onHome: () -> Void
     let onReveal: () -> Void
-    @GestureState private var revealDistance: CGFloat = 0
-
-    private var reveal: CGFloat {
-        collapsed ? min(1, max(0, revealDistance / 100)) : 1
-    }
 
     private var currentTab: (symbol: String, title: String) {
         switch router.tab {
@@ -388,10 +383,10 @@ private struct LandscapeTabControls: View {
             .frame(width: Self.panelContentWidth)
             .padding(.leading, 10)
             .padding(.trailing, 12)
-            .opacity(reveal)
             // The clearer, more see-through variant of Liquid Glass; it clears away with the rest when scrolled.
-            .glassEffect(reveal == 0 ? .identity : .clear, in: Self.panelShape)
-            .mask(alignment: .leading) { Rectangle().frame(width: 44 + (Self.panelContentWidth + 22 - 44) * reveal) }
+            .glassEffect(.clear, in: Self.panelShape)
+            .opacity(collapsed ? 0 : 1)
+            .scaleEffect(collapsed ? Self.tuckedScale : 1, anchor: .bottomLeading)
             .allowsHitTesting(!collapsed)
             .accessibilityHidden(collapsed)
             .animation(Self.fade(collapsed: collapsed), value: collapsed)
@@ -405,7 +400,7 @@ private struct LandscapeTabControls: View {
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(router.tab == .home ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.regular, in: .circle)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(collapsed ? currentTab.title : "Home")
@@ -417,13 +412,10 @@ private struct LandscapeTabControls: View {
 
     private var tabDrag: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .named("landscapeTabs"))
-            .updating($revealDistance) { drag, distance, _ in
-                if collapsed, drag.translation.width > abs(drag.translation.height) {
-                    distance = drag.translation.width
-                }
-            }
             .onChanged { drag in
                 guard (!collapsed || drag.translation.width > 8), abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                // Open the whole panel once; reversing a held drag must not slice through its glass.
+                if collapsed { onReveal() }
                 // Boundaries sit halfway between the existing 44-point buttons, including Home's separate circle.
                 let tab: LaunchRoute.Tab
                 switch drag.location.x {
@@ -436,11 +428,6 @@ private struct LandscapeTabControls: View {
                 // A tick as the drag crosses into another tab, so the finger learns the tab changed before it lifts.
                 Haptics.selection()
                 if tab == .home { router.tapTab(.home) } else { router.tapTab(tab) }
-            }
-            .onEnded { drag in
-                if collapsed, drag.translation.width > 8, drag.translation.width > abs(drag.translation.height) {
-                    onReveal()
-                }
             }
     }
 

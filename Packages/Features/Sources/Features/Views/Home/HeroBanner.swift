@@ -161,7 +161,11 @@ private struct BannerFeature: View {
                     .allowsHitTesting(false)
             }
             .contentShape(Rectangle())
+            #if targetEnvironment(macCatalyst)
+            .heroPointerHighlight(cornerRadius: HeroBanner.cornerRadius)
+            #else
             .pointerInteraction(cornerRadius: HeroBanner.cornerRadius)
+            #endif
             .onTapGesture(perform: openTitle)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(item.name)

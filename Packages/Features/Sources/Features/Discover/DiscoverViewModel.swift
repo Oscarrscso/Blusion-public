@@ -114,7 +114,12 @@ public final class DiscoverViewModel {
     /// Otherwise the first type (by `types`) and its first source are selected.
     public func loadSources() async {
         sources = await services.browse.catalogSources()
-        if let current = selectedSource, sources.contains(current) { return }
+        guard !Task.isCancelled else { return }
+        if let current = selectedSource, sources.contains(current) {
+            // Leaving the tab cancels its task; resume the unfinished first page when it returns.
+            if state == .idle || state == .loadingFirstPage { await reload() }
+            return
+        }
         guard let type = types.first, let first = sources.first(where: { $0.type == type }) else {
             selectedSource = nil
             selectedType = nil
@@ -161,7 +166,7 @@ public final class DiscoverViewModel {
     }
 
     public func reload() async {
-        guard let source = selectedSource else { return }
+        guard !Task.isCancelled, let source = selectedSource else { return }
         generation += 1
         let current = generation
         items = []
@@ -182,7 +187,8 @@ public final class DiscoverViewModel {
             state = .loaded
         } catch {
             guard current == generation else { return }
-            state = .failed(AddonError.from(error))
+            let error = AddonError.from(error)
+            state = Task.isCancelled || error == .cancelled ? .idle : .failed(error)
         }
     }
 
@@ -227,7 +233,12 @@ public final class DiscoverViewModel {
         }
         guard current == generation else { return }
         if pages.isEmpty, let failure, !pending.isEmpty {
-            state = items.isEmpty ? .failed(AddonError.from(failure)) : .loaded
+            let error = AddonError.from(failure)
+            if Task.isCancelled || error == .cancelled {
+                state = items.isEmpty ? .idle : .loaded
+            } else {
+                state = items.isEmpty ? .failed(error) : .loaded
+            }
             return
         }
         for (index, page) in pages {

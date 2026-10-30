@@ -19,7 +19,7 @@ private struct PointerInteractionModifier: ViewModifier {
         content
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(highlightColor.opacity(isEnabled && isHovering ? 0.08 : 0))
+                    .fill(highlightColor.opacity(isEnabled && isHovering ? (tracksPointer ? 0.012 : 0.08) : 0))
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(highlightColor.opacity(isEnabled && isFocused && showsFocus ? 0.8 : 0), lineWidth: 2)
@@ -29,7 +29,7 @@ private struct PointerInteractionModifier: ViewModifier {
             .overlay {
                 if tracksPointer {
                     GeometryReader { geometry in
-                        RadialGradient(colors: [.white.opacity(0.16), .clear],
+                        RadialGradient(colors: [.white.opacity(0.04), .clear],
                                        center: UnitPoint(x: pointerLocation.x / max(1, geometry.size.width),
                                                          y: pointerLocation.y / max(1, geometry.size.height)),
                                        startRadius: 0, endRadius: 150)
@@ -40,8 +40,8 @@ private struct PointerInteractionModifier: ViewModifier {
                     .accessibilityHidden(true)
                 }
             }
-            .shadow(color: .black.opacity(tracksPointer && isEnabled && isHovering ? 0.25 : 0), radius: 12, y: 6)
-            .scaleEffect(isEnabled && lifts && !reduceMotion && (isHovering || isFocused) ? 1.025 : 1)
+            .shadow(color: .black.opacity(tracksPointer && lifts && isEnabled && isHovering ? 0.10 : 0), radius: 8, y: 3)
+            .scaleEffect(isEnabled && lifts && !reduceMotion && (isHovering || isFocused) ? (tracksPointer ? 1.008 : 1.025) : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isHovering)
             .hoverEffect(.highlight, isEnabled: isEnabled && systemHighlight)
             .onHover { isHovering = isEnabled && $0 }
@@ -53,6 +53,16 @@ private struct PointerInteractionModifier: ViewModifier {
 }
 
 extension View {
+    /// Hero artwork gets the same quiet Mac highlight, without lifting or casting a shadow.
+    @ViewBuilder
+    func heroPointerHighlight(cornerRadius: CGFloat = 0) -> some View {
+        #if targetEnvironment(macCatalyst)
+        pointerInteraction(cornerRadius: cornerRadius, systemHighlight: false, tracksPointer: true)
+        #else
+        self
+        #endif
+    }
+
     /// The system's hover highlight over something that can be clicked, so the pointer reacts to it. Mac only: a phone has no pointer.
     /// (Mac Catalyst has no SwiftUI cursor API, so this is the system's own pointer feedback rather than a hand cursor.)
     @ViewBuilder

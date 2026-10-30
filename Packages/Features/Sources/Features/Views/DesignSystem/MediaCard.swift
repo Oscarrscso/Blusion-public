@@ -333,7 +333,7 @@ struct MediaCardLink: View {
         NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID)) {
             stretches ? card.stretched() : card
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle.poster)
         .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
         .prewarmsHeroArtwork(item)
         .help(item.name)
@@ -422,6 +422,15 @@ private struct PrewarmHeroArtworkModifier: ViewModifier {
 /// How cards answer a touch or a pointer: pressed, they dim and shrink a little with a quick spring; under a pointer (Mac, iPad
 /// trackpad) they lift slightly and highlight. Reduce Motion keeps the card still.
 struct PressableCardStyle: ButtonStyle {
+    /// Poster shelves share a restrained pointer glow and lift on Mac; touch keeps its existing feel.
+    static var poster: PressableCardStyle {
+        #if targetEnvironment(macCatalyst)
+        PressableCardStyle(addsSystemHighlight: false, tracksPointer: true)
+        #else
+        PressableCardStyle()
+        #endif
+    }
+
     /// False keeps the card its own size under a pointer and only highlights it: a card as wide as its column (a stream) would grow past
     /// the column's edges.
     var lifts = true
@@ -448,7 +457,7 @@ private struct PressableCardLabel: View {
 
     var body: some View {
         configuration.label
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? (tracksPointer ? 0.985 : 0.96) : 1)
             .opacity(configuration.isPressed ? 0.8 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
             .pointerInteraction(lifts: lifts && !configuration.isPressed, showsFocus: showsFocus, systemHighlight: addsSystemHighlight,

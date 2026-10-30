@@ -580,7 +580,7 @@ struct DetailView: View {
                     NavigationLink(value: title.titleDestination) {
                         RelatedTitleCard(title: title, services: services)
                     }
-                    .buttonStyle(PressableCardStyle())
+                    .buttonStyle(PressableCardStyle.poster)
                     .titleTapHaptic()
                     .reportsShelfEdge(id: title.id)
                     .accessibilityIdentifier("detail.related.\(title.id)")

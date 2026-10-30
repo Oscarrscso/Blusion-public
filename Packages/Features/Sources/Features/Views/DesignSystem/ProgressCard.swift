@@ -141,7 +141,7 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
                 .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: CardAspect.wide.cornerRadius)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(PressableCardStyle())
+        .buttonStyle(PressableCardStyle.poster)
         .allowsHitTesting(!isBusy)
         // The hold is the system context menu: a custom long-press gesture here blocked the row's horizontal scroll.
         // No custom preview: the system snapshots the card itself (its artwork, bounds and clipping), and this shape gives the

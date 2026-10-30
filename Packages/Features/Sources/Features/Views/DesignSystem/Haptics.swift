@@ -227,20 +227,21 @@ struct ShelfScroll<Content: View>: View {
     let content: Content
     @State private var height: CGFloat?
     @State private var measuredKey: String?
-    #if targetEnvironment(macCatalyst)
-    /// Where the shelf is scrolled, how wide it is, and whether the pointer is over it, for the chevrons at its ends.
     @State private var shelfPosition = ScrollPosition()
+    #if targetEnvironment(macCatalyst)
+    /// How wide the shelf is and whether the pointer is over it, for the chevrons at its ends.
     @State private var shelfTracking = ShelfScrollTracking()
     @State private var canScrollBack = false
     @State private var canScrollForward = false
     @State private var isHoveringShelf = false
     #endif
 
-    init(margin: CGFloat, spacing: CGFloat, lazy: Bool = true, resetKey: String = "", @ViewBuilder content: () -> Content) {
+    init(margin: CGFloat, spacing: CGFloat, lazy: Bool = true, resetKey: String = "", initialID: String? = nil, @ViewBuilder content: () -> Content) {
         self.margin = margin
         self.spacing = spacing
         self.lazy = lazy
         self.resetKey = resetKey
+        _shelfPosition = State(initialValue: initialID.map { ScrollPosition(id: $0, anchor: .leading) } ?? ScrollPosition())
         self.content = content()
     }
 
@@ -254,8 +255,8 @@ struct ShelfScroll<Content: View>: View {
                     .scrollTargetLayout()
             }
         }
-        #if targetEnvironment(macCatalyst)
         .scrollPosition($shelfPosition)
+        #if targetEnvironment(macCatalyst)
         .onScrollGeometryChange(for: ShelfMetrics.self) { geometry in
             ShelfMetrics(offset: geometry.contentOffset.x, contentWidth: geometry.contentSize.width, viewWidth: geometry.containerSize.width)
         } action: { _, metrics in

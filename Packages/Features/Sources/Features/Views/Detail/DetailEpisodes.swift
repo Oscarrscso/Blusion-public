@@ -58,6 +58,8 @@ struct DetailEpisodes: View {
 
     var body: some View {
         let width = episodeWidth(pageWidth: pageWidth)
+        let initialEpisode = model.episodes.first { $0.id == model.nextUp?.id }
+            ?? model.episodes.first
         return VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             HStack(spacing: Theme.Spacing.m) {
                 seasonMenu
@@ -68,7 +70,8 @@ struct DetailEpisodes: View {
             .padding(.horizontal, contentMargin)
             ScrollViewReader { proxy in
                 ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing,
-                            resetKey: "\(model.selectedSeason ?? -1):\(Int(width))") {
+                            resetKey: "\(model.selectedSeason ?? -1):\(Int(width))",
+                            initialID: initialEpisode?.id) {
                     if model.isLoading && model.episodes.isEmpty {
                         ForEach(0..<3, id: \.self) { index in
                             VStack(alignment: .leading, spacing: 0) {
@@ -96,11 +99,13 @@ struct DetailEpisodes: View {
                             .id(episode.id).reportsShelfEdge(id: episode.id)
                     }
                 }
+                // Create the loaded season at its saved starting position, with no delayed scroll.
+                .id("\(model.isLoading):\(model.selectedSeason ?? -1)")
                 .animation(.snappy, value: model.matchesEpisodeWidthToText)
-                // Shuffle's episode becomes the first card in view, in its season, once the row has laid that season out.
                 .task(id: shuffledEpisode) {
                     guard let shuffledEpisode else { return }
                     try? await Task.sleep(for: .milliseconds(80))
+                    guard !Task.isCancelled else { return }
                     withAnimation(.snappy) { proxy.scrollTo(shuffledEpisode, anchor: .leading) }
                 }
             }
@@ -284,11 +289,7 @@ struct DetailEpisodes: View {
             // The whole card is its hit area, so a hold or tap on the text counts as on the artwork.
             .contentShape(Rectangle())
         }
-        #if targetEnvironment(macCatalyst)
-        .buttonStyle(PressableCardStyle(addsSystemHighlight: false, tracksPointer: true))
-        #else
-        .buttonStyle(PressableCardStyle())
-        #endif
+        .buttonStyle(PressableCardStyle.poster)
         .allowsHitTesting(!isLoadingStreams)
         // An episode that has not aired cannot be opened: its card shows the air date instead.
         .disabled(airsLater || hasNoStreams)

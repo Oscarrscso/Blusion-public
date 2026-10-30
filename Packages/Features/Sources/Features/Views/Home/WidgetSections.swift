@@ -203,7 +203,7 @@ struct CollectionRow: View {
                         CollectionTile(title: item.title, imageURL: item.imageURL ?? photos[HomeViewModel.tilePhotoKey(widgetID: widget.id, tile: item)],
                                        aspect: item.imageAspect.cardAspect, hideTitle: item.hideTitle)
                     }
-                    .buttonStyle(PressableCardStyle())
+                    .buttonStyle(PressableCardStyle.poster)
                     .titleTapHaptic()
                 }
             }

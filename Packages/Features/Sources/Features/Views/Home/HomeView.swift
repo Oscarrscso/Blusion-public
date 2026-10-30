@@ -8,6 +8,8 @@ import UIKit
 struct HomeView: View {
     @State private var model: HomeViewModel
     @State private var isScrolling = false
+    /// Keep each spotlight's selection while its lazy section is offscreen.
+    @State private var heroPages: [String: String] = [:]
     /// How far Home has been pulled down past its top; the spotlight stretches by this much (see `HeroCarousel`).
     @State private var heroPull: CGFloat = 0
     /// The status bar's height, the top safe area Home's content starts beneath. The navigation bar sits below it, not included.
@@ -227,7 +229,10 @@ struct HomeView: View {
             .onChange(of: router.spotlightRevision) { _, _ in
                 var transaction = Transaction(animation: nil)
                 transaction.disablesAnimations = true
-                withTransaction(transaction) { proxy.scrollTo(Self.topID, anchor: .top) }
+                withTransaction(transaction) {
+                    heroPages.removeAll()
+                    proxy.scrollTo(Self.topID, anchor: .top)
+                }
             }
             // A tap on Home's tab item goes back to its first page, and scrolls it to the top.
             .onChange(of: router.tabTapRevisions[.home, default: 0]) { _, _ in
@@ -273,7 +278,7 @@ struct HomeView: View {
     private func sectionView(_ section: HomeViewModel.Section) -> some View {
         switch section.widget.content {
         case .hero:
-            withWidgetMenu(HeroSection(section: section, onRetry: { retry(section) }), section)
+            withWidgetMenu(HeroSection(section: section, pageID: $heroPages[section.id], onRetry: { retry(section) }), section)
                 // The next shelf starts 20 pt below the hero: the shelf spacing that follows it, less the 20 pt gap wanted here.
                 .padding(.bottom, 20 - metrics.shelfSpacing)
         case .banner(let row):

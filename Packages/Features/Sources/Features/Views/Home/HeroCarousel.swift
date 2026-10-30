@@ -6,6 +6,7 @@ import SwiftUI
 /// it cannot load.
 struct HeroSection: View {
     let section: HomeViewModel.Section
+    @Binding var pageID: String?
     let onRetry: () -> Void
     @Environment(\.layoutMetrics) private var metrics
 
@@ -24,7 +25,7 @@ struct HeroSection: View {
         case .idle, .loading:
             HeroPlaceholder()
         case .loaded(let items) where !items.isEmpty:
-            HeroCarousel(items: items)
+            HeroCarousel(items: items, pageID: $pageID)
         case .loaded:
             if let issue = section.issue {
                 IssueMessage(issue: issue)
@@ -45,6 +46,8 @@ extension EnvironmentValues {
 /// A paging carousel of full-resolution portrait or landscape heroes, each clipped to its own page.
 struct HeroCarousel: View {
     let items: [MetaPreview]
+    /// Home owns the selection so scrolling this lazy section away does not reset it.
+    @Binding var pageID: String?
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     /// The landscape form: a phone turned sideways, or any Mac window.
@@ -57,8 +60,6 @@ struct HeroCarousel: View {
     @Environment(\.heroPull) private var heroPull
     @Environment(PosterRatingsStore.self) private var ratings
     @Environment(AppRouter.self) private var router
-    /// Keep the same title aligned when the window resizes or the device rotates.
-    @State private var pageID: String?
     #if targetEnvironment(macCatalyst)
     /// Whether the pointer is over the spotlight, which shows its page chevrons on Mac.
     @State private var isHoveringSpotlight = false
@@ -155,7 +156,9 @@ struct HeroCarousel: View {
                         Haptics.scrollSnap()
                     }
                     .onAppear {
-                        pageID = pageID ?? items.first?.identity
+                        if !items.contains(where: { $0.identity == pageID }) {
+                            pageID = items.first?.identity
+                        }
                     }
                 }
             }
@@ -385,6 +388,7 @@ private struct HeroPage: View {
                     .allowsHitTesting(false)
             }
         }
+        .heroPointerHighlight()
         .coordinateSpace(name: "hero/\(item.identity)")
         .task(id: "\(ratings.reviewServicesRevision)|\(isInWindow)") {
             guard isInWindow else { return }
