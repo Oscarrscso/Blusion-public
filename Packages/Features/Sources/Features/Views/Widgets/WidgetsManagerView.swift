@@ -393,7 +393,9 @@ struct WidgetsManagerView: View {
         #else
         // The press that lifts a card is on the page's scroll view (see `GridScroller`), not here.
         .sensoryFeedback(.impact(weight: .medium), trigger: liftCount)
-        .sensoryFeedback(.selection, trigger: swapCount)
+        // A tick as two cards change places. The app's own selection tick, so the Haptics page's switch reaches it. The lift above stays
+        // SwiftUI's: the Haptics page has no feel of that weight to offer, and the Mac's drag gives its own in the branch above.
+        .onChange(of: swapCount) { _, _ in Haptics.selection() }
         #endif
     }
 

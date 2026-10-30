@@ -142,7 +142,7 @@ struct PlayerEpisodePicker: View {
             choose(video)
         } label: {
             HStack(spacing: 12) {
-                ArtworkImage(url: video.thumbnail, title: video.title, maxPixelSize: 240)
+                ArtworkImage(url: video.thumbnail, title: video.title, maxPixelSize: nil)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .frame(width: 96, height: 54)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

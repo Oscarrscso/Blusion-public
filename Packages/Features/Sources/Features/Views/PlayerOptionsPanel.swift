@@ -37,6 +37,7 @@ enum PlayerPanelTab: String, CaseIterable, Identifiable {
 /// segments choose it (`PlayerControls`); a tap outside the card and the bar closes it.
 struct PlayerOptionsPanel: View {
     let model: PlayerViewModel
+    let infoModel: PlayerInfoModel
     @Binding var tab: PlayerPanelTab?
     var actions = PlayerControlActions()
     /// AI super resolution, for Info: what it is doing or why not, and the frames it scales. Only Info reads it, so its frame count
@@ -45,6 +46,15 @@ struct PlayerOptionsPanel: View {
     @State private var scrollPosition = ScrollPosition()
     /// Video's submenu that is open in place of its page: Zoom Mode or Aspect Ratio.
     @State private var videoMenu: VideoMenu?
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+
+    private var reviewHeightLimit: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        540
+        #else
+        isPhoneLandscape ? 540 : 300
+        #endif
+    }
 
     private enum VideoMenu {
         case zoomMode, aspectRatio
@@ -60,7 +70,7 @@ struct PlayerOptionsPanel: View {
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
-                Button(action: close) {
+                Button { Haptics.tap(); close() } label: {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
                 .buttonStyle(.glass)
@@ -75,22 +85,36 @@ struct PlayerOptionsPanel: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
             Divider()
-            ScrollView {
-                content
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
+            GeometryReader { viewport in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        content(reviewHeight: max(60, min(reviewHeightLimit, viewport.size.height - 62)))
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
+                    }
+                    .scrollPosition($scrollPosition)
+                    .scrollIndicators(.visible)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .onChange(of: tab) { _, _ in
+                        videoMenu = nil
+                        scrollPosition.scrollTo(edge: .top)
+                    }
+                    .onChange(of: videoMenu) { _, _ in scrollPosition.scrollTo(edge: .top) }
+                    .task(id: infoModel.openedReviews) {
+                        guard tab == .info else { return }
+                        // Wait for the expanded panel to be laid out before scrolling to it.
+                        try? await Task.sleep(for: .milliseconds(50))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(infoModel.openedReviews == nil ? PlayerInfoMedia.ratingsScrollID : DetailReviewsPanel.scrollID,
+                                           anchor: .top)
+                        }
+                    }
+                    // Keep the other menus' rows still; Info's synopsis and reviews animate in place.
+                    .transaction { if tab != .info { $0.animation = nil } }
+                }
             }
-            .scrollPosition($scrollPosition)
-            .scrollIndicators(.visible)
-            .scrollBounceBehavior(.basedOnSize)
-            .onChange(of: tab) { _, _ in
-                videoMenu = nil
-                scrollPosition.scrollTo(edge: .top)
-            }
-            .onChange(of: videoMenu) { _, _ in scrollPosition.scrollTo(edge: .top) }
-            // Rows never take part in a selection morph or an opening/closing transaction.
-            .transaction { $0.animation = nil }
         }
         .clipShape(.rect(cornerRadius: 24))
         .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
@@ -101,7 +125,7 @@ struct PlayerOptionsPanel: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(reviewHeight: CGFloat) -> some View {
         switch tab ?? .subtitles {
         case .subtitles: subtitles
         case .audio: audio
@@ -109,7 +133,12 @@ struct PlayerOptionsPanel: View {
             if let videoMenu { videoSubmenu(videoMenu) } else { picture }
         case .speed: speed
         case .chapters: chapters
-        case .info: info
+        case .info:
+            VStack(alignment: .leading, spacing: 18) {
+                PlayerInfoMedia(infoModel: infoModel, reviewHeight: reviewHeight)
+                info
+            }
+            .accessibilityIdentifier("player.panel.info")
         }
     }
 
@@ -183,7 +212,10 @@ struct PlayerOptionsPanel: View {
                         ForEach(SubtitleColour.allCases, id: \.self) { colour in
                             let rgb = colour.rgb
                             let selected = style.colour == colour
-                            Button { restyle { $0.colour = colour } } label: {
+                            Button {
+                                if !selected { Haptics.selection() }
+                                restyle { $0.colour = colour }
+                            } label: {
                                 Circle().fill(Color(red: rgb.red, green: rgb.green, blue: rgb.blue))
                                     .frame(width: 30, height: 30)
                                     .padding(4)
@@ -305,7 +337,7 @@ struct PlayerOptionsPanel: View {
     /// applies at once and the list stays, so its effect shows behind the panel.
     private func videoSubmenu(_ menu: VideoMenu) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Button { videoMenu = nil } label: {
+            Button { Haptics.tap(); videoMenu = nil } label: {
                 Label(PlayerPanelTab.picture.title, systemImage: "chevron.backward")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 4)
@@ -354,7 +386,10 @@ struct PlayerOptionsPanel: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
             ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in
                 let selected = model.state.rate == rate
-                Button { model.setRate(rate) } label: {
+                Button {
+                    if !selected { Haptics.selection() }
+                    model.setRate(rate)
+                } label: {
                     Text(rate == 1 ? "1×" : "\(rate.formatted())×")
                         .font(.body.weight(selected ? .semibold : .medium).monospacedDigit())
                         .frame(maxWidth: .infinity, minHeight: 54)
@@ -395,8 +430,7 @@ struct PlayerOptionsPanel: View {
 
     // MARK: Info
 
-    /// What is playing and how, refreshed every second: the stream as its addon lists it, then the picture, the sound and the
-    /// playback as the engine measures them.
+    /// Only technical information refreshes every second. Metadata and WebKit are outside this timeline.
     private var info: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             let stats = model.statistics()
@@ -424,7 +458,6 @@ struct PlayerOptionsPanel: View {
                 }
             }
         }
-        .accessibilityIdentifier("player.panel.info")
     }
 
     @ViewBuilder
@@ -486,6 +519,63 @@ struct PlayerOptionsPanel: View {
 
     private static func bitrate(_ bitsPerSecond: Double) -> String {
         bitsPerSecond >= 1_000_000 ? String(format: "%.1f Mb/s", bitsPerSecond / 1_000_000) : String(format: "%.0f kb/s", bitsPerSecond / 1_000)
+    }
+}
+
+/// Reuses the detail page's media controls without putting metadata or WebKit on the statistics timer.
+private struct PlayerInfoMedia: View {
+    @Bindable var infoModel: PlayerInfoModel
+    let reviewHeight: CGFloat
+    static let ratingsScrollID = "player.info.ratings"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(infoModel.title)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("player.info.title")
+            DetailSynopsis(description: infoModel.synopsis, isExpanded: $infoModel.isSynopsisExpanded,
+                           isTruncated: $infoModel.isSynopsisTruncated, isLoading: infoModel.isLoading)
+                .accessibilityIdentifier("player.info.synopsis")
+            Group {
+                if infoModel.isLoading || (infoModel.isLoadingEpisode && infoModel.episodeItem == nil) {
+                    Spinner().frame(height: 28).accessibilityLabel("Loading ratings")
+                } else if infoModel.isEpisode {
+                    if let item = infoModel.episodeItem, let url = ReviewSite.imdb.reviewsURL(for: item) {
+                        RatingButton(site: .imdb, score: infoModel.episodeRatings.shortText(for: .imdb),
+                                     isSearch: false, title: item.name, isOpen: infoModel.openedReviews?.site == .imdb,
+                                     isLoading: infoModel.reviewsLoading, showsLinkIcon: true) {
+                            infoModel.toggleReviews(.imdb, url: url, isSearch: false)
+                        }
+                        .frame(width: 120)
+                    }
+                } else {
+                    RatingButtonsRow(item: infoModel.item, openSite: infoModel.openedReviews?.site,
+                                     isLoading: infoModel.reviewsLoading, onOpen: infoModel.toggleReviews)
+                }
+            }
+            .id(Self.ratingsScrollID)
+
+            if let reviews = infoModel.openedReviews,
+               let item = infoModel.isEpisode ? infoModel.episodeItem : infoModel.item {
+                DetailReviewsPanel(reviews: reviews, shown: infoModel.shownReviews, item: item,
+                                   isLoading: infoModel.reviewsLoading,
+                                   onLoaded: { infoModel.reviewsDidLoad(reviews) }, onClose: infoModel.closeReviews,
+                                   viewportHeight: reviewHeight)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: infoModel.openedReviews)
+        .task(id: infoModel.openedReviews) {
+            guard let reviews = infoModel.openedReviews, infoModel.reviewsLoading else { return }
+            // Match the detail page's timeout so a stalled webpage cannot leave its rating spinning forever.
+            try? await Task.sleep(for: .seconds(25))
+            guard !Task.isCancelled, infoModel.reviewsLoading else { return }
+            infoModel.reviewsDidLoad(reviews)
+        }
+        .onDisappear { infoModel.closeReviews() }
+        .accessibilityIdentifier("player.info.media")
     }
 }
 
@@ -600,7 +690,10 @@ private struct PanelOptionRow: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if !selected { Haptics.selection() }
+            action()
+        } label: {
             HStack(alignment: .center, spacing: 12) {
                 if let symbol {
                     Image(systemName: symbol)
@@ -658,7 +751,7 @@ private struct PanelMenuRow: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button { Haptics.tap(); action() } label: {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.subheadline)
@@ -697,7 +790,10 @@ private struct PanelChips<Value: Hashable>: View {
                 HStack(spacing: 6) {
                     ForEach(options, id: \.self) { option in
                         let selected = option == selection
-                        Button { choose(option) } label: {
+                        Button {
+                            if !selected { Haptics.selection() }
+                            choose(option)
+                        } label: {
                             Text(label(option)).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 .padding(.horizontal, 14).frame(minHeight: 36)
                                 .foregroundStyle(.white)
@@ -732,7 +828,10 @@ private struct PanelStepper: View {
             Spacer()
             HStack(spacing: 0) {
                 stepButton("minus", -step, label: "Earlier")
-                Button(action: reset) {
+                Button {
+                    if value != 0 { Haptics.selection() }
+                    reset()
+                } label: {
                     Text("\(String(format: "%+.\(digits)f", value)) s").font(.subheadline.weight(.semibold).monospacedDigit())
                         .frame(minWidth: 72, minHeight: 40)
                         .contentShape(.rect)
@@ -749,7 +848,7 @@ private struct PanelStepper: View {
     }
 
     private func stepButton(_ symbol: String, _ delta: TimeInterval, label: String) -> some View {
-        Button { change(delta) } label: {
+        Button { Haptics.selection(); change(delta) } label: {
             Image(systemName: symbol).font(.subheadline.weight(.bold)).frame(width: 44, height: 40).contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -764,7 +863,10 @@ private struct PanelToggle: View {
     let set: (Bool) -> Void
 
     var body: some View {
-        Toggle(title, isOn: Binding(get: { isOn }, set: set))
+        Toggle(title, isOn: Binding(get: { isOn }, set: { value in
+            if value != isOn { Haptics.selection() }
+            set(value)
+        }))
             .font(.body.weight(.semibold))
             .tint(.green)
             .padding(.horizontal, 16).frame(minHeight: 52)
@@ -784,7 +886,7 @@ private struct PanelButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button { Haptics.tap(); action() } label: {
             Label(title, systemImage: symbol).font(.subheadline.weight(.semibold)).lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(.white.opacity(0.1), in: .capsule)

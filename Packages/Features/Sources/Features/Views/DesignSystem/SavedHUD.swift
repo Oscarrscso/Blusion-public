@@ -28,6 +28,8 @@ private struct SavedHUDModifier: ViewModifier {
                 }
             }
             .onChange(of: trigger) {
+                // The app's own success chime rather than SwiftUI's, so the Haptics page controls it with the other feels.
+                Haptics.success()
                 hideTask?.cancel()
                 withAnimation(.spring(duration: 0.35, bounce: 0.2)) { isShowing = true }
                 AccessibilityNotification.Announcement(message).post()
@@ -38,7 +40,6 @@ private struct SavedHUDModifier: ViewModifier {
                 }
             }
             .onDisappear { hideTask?.cancel() }
-            .sensoryFeedback(.success, trigger: trigger)
     }
 }
 

@@ -97,6 +97,7 @@ struct OpenSubtitlesSheet: View {
                 }
                 ForEach(model.openSubtitlesResults) { result in
                     Button {
+                        Haptics.tap()
                         Task {
                             await model.downloadOpenSubtitle(result)
                             if case .external = model.subtitleChoice { dismiss() }
@@ -123,7 +124,7 @@ struct OpenSubtitlesSheet: View {
             .navigationTitle("OpenSubtitles")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { Haptics.tap(); dismiss() } }
             }
         }
         .task { await model.searchOpenSubtitles() }

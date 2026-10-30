@@ -187,8 +187,8 @@ struct LibraryView: View {
                 .accessibilityIdentifier("library.sort")
             }
         }
-        .sensoryFeedback(.selection, trigger: model.filter)
-        .sensoryFeedback(.selection, trigger: model.downloadFilter)
+        .onChange(of: model.filter) { _, _ in Haptics.selection() }
+        .onChange(of: model.downloadFilter) { _, _ in Haptics.selection() }
         .accessibilityIdentifier("library.filters")
     }
 

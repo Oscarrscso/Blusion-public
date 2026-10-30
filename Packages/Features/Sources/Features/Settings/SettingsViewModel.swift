@@ -59,6 +59,9 @@ public final class SettingsViewModel {
 
     public func load() async {
         settings = await services.settings.load()
+        #if canImport(UIKit)
+        Haptics.apply(settings.haptics)
+        #endif
         serverURLText = settings.streamingServerURL ?? ""
         traktClientIDText = settings.traktClientID ?? ""
         omdbAPIKeyText = settings.omdbAPIKey ?? ""
@@ -95,6 +98,16 @@ public final class SettingsViewModel {
         settings = await services.settings.load()
         change(&settings.player)
         await services.settings.save(settings)
+    }
+
+    /// The Haptics page's tuning. Saved as it changes and applied at once, so the next tap is the one being tuned.
+    public func updateHaptics(_ change: (inout HapticPreferences) -> Void) async {
+        settings = await services.settings.load()
+        change(&settings.haptics)
+        await services.settings.save(settings)
+        #if canImport(UIKit)
+        Haptics.apply(settings.haptics)
+        #endif
     }
 
     /// Saves the OpenSubtitles API key and login as typed; blank fields remove them.

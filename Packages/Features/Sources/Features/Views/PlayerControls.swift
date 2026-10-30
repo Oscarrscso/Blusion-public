@@ -13,6 +13,7 @@ struct PlayerControlActions {
 
 struct PlayerControls: View {
     let model: PlayerViewModel
+    let infoModel: PlayerInfoModel
     let onClose: () -> Void
     let onNextEpisode: () -> Void
     let pipToggle: () -> Void
@@ -279,8 +280,8 @@ struct PlayerControls: View {
     private var bottomPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             if menuOpen {
-                PlayerOptionsPanel(model: model, tab: $panel, actions: actions, upscaling: upscaling)
-                    .frame(maxWidth: 510, maxHeight: 510)
+                PlayerOptionsPanel(model: model, infoModel: infoModel, tab: $panel, actions: actions, upscaling: upscaling)
+                    .frame(maxWidth: 510, maxHeight: panel == .info ? .infinity : 510)
                     .layoutPriority(1)
                     .transition(.opacity)
             } else {
@@ -293,12 +294,12 @@ struct PlayerControls: View {
 
     private var titleRow: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(headline).font(.title3.weight(.bold)).lineLimit(1)
+                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("player.title")
                 if let episodeLine {
                     Text(episodeLine).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
                 }
-                Text(headline).font(.title3.weight(.bold)).lineLimit(1)
-                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("player.title")
             }
             Spacer(minLength: 0)
             if model.hasNextEpisode && model.hasFinished {
@@ -325,6 +326,24 @@ struct PlayerControls: View {
                 .accessibilityValue(model.positionText)
             Slider(value: Binding(get: { model.fraction }, set: { model.updateScrub(fraction: $0) }), in: 0...1) { editing in
                 if editing { model.beginScrub() } else { Task { await model.endScrub() } }
+            }
+            .overlay {
+                GeometryReader { geometry in
+                    Color.clear
+                        .contentShape(.rect)
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { drag in
+                                    if !model.isScrubbing { model.beginScrub() }
+                                    model.updateScrub(fraction: drag.location.x / max(1, geometry.size.width))
+                                }
+                                .onEnded { drag in
+                                    model.updateScrub(fraction: drag.location.x / max(1, geometry.size.width))
+                                    Task { await model.endScrub() }
+                                }
+                        )
+                        .accessibilityHidden(true)
+                }
             }
             // Keep the system's percentage value for native slider adjustment.
             // Speak the useful clock information in its label instead.

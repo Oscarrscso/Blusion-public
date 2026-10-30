@@ -212,9 +212,11 @@ struct CircleActionButton: View {
         .accessibilityLabel(isLoading ? "\(title), loading" : (isOn ? (onTitle ?? title) : title))
         .help(isOn ? (onTitle ?? title) : title)
         .accessibilityAddTraits(isOn ? .isSelected : [])
-        // A tick when the state changes, but not when it is read in: a page that opens on a saved title is silent.
-        .sensoryFeedback(trigger: TickState(isOn: isOn, quietRevision: quietRevision)) { old, new in
-            old.isOn != new.isOn && old.quietRevision == new.quietRevision ? .selection : nil
+        // A tick when the state changes, but not when it is read in: a page that opens on a saved title is silent. The app's own
+        // selection tick, so the Haptics page's switch reaches it.
+        .onChange(of: TickState(isOn: isOn, quietRevision: quietRevision)) { old, new in
+            guard old.isOn != new.isOn, old.quietRevision == new.quietRevision else { return }
+            Haptics.selection()
         }
     }
 }

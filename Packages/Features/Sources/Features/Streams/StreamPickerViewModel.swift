@@ -67,6 +67,8 @@ public final class StreamPickerViewModel {
     /// Set for a picker that starts the best stream on opening whatever Auto Pick's switch says (a held poster): it then waits for the
     /// addon Auto Pick waits for, as with the switch on.
     public var startsAutomaticallyAnyway = false
+    /// Applies only to a single explicit Play-with-Infuse picker, not persisted Settings.
+    public var automaticPlayerOverride: ExternalPlayer?
 
     /// Extensions a file can carry for Infuse to name it by. Release names often end in something else ("...H.265-playWEB"), so only these
     /// count as the file's extension.
@@ -119,6 +121,7 @@ public final class StreamPickerViewModel {
         var config = settings.policy(fallbackEngineLinked: services.fallbackEngineLinked, backupEngineLinked: services.aetherEngineLinked,
                                      decodesAV1InHardware: services.decodesAV1InHardware)
         config.installedPlayers = installedPlayers
+        if automaticPlayerOverride == .infuse { config.playerPreference = .infuse }
         listing = StreamListing(asking: asked, config: config, preferences: settings.rankingPreferences)
         nobodyCanAnswer = asked.isEmpty
         hasLoaded = true
@@ -276,6 +279,18 @@ public final class StreamPickerViewModel {
     /// Without a session to resume, the best stream, as always.
     public var automaticStartCandidate: RankedStream? {
         resumeSnapshot != nil ? matchedResumeStream() : bestToPlay
+    }
+
+    /// Select only streams that this external player can really accept, using the existing quality ranking.
+    public func bestHandoffCandidate(for player: ExternalPlayer) -> RankedStream? {
+        guard installedPlayers.contains(player) else { return nil }
+        let eligible = listing.items.filter { item in
+            guard StreamAvailability.canStartAutomatically(item),
+                  let url = PlaybackPolicy.playbackURL(for: item.stream, config: listing.config) else { return false }
+            return player.canPlay(streamURL: url, headers: item.stream.behaviorHints.proxyHeaders?.request ?? [:])
+        }
+        return AutoStreamRanking.best(from: eligible, duration: request.expectedDuration,
+                                      preferences: settings.rankingPreferences)?.item
     }
 
     /// The saved session to hand to the player when it opens `item`, if `item` is the session's stream.

@@ -38,7 +38,11 @@ struct PlayerSettingsPage: View {
 
             Section("Subtitle style") {
                 LabeledContent("Size") {
-                    Slider(value: binding(\.subtitleStyle.scale), in: SubtitleStyle.scaleRange, step: 0.1)
+                    Slider(value: Binding(get: { player.subtitleStyle.scale }, set: { value in
+                        Task { await model.updatePlayer { $0.subtitleStyle.scale = value } }
+                    }), in: SubtitleStyle.scaleRange, step: 0.1, onEditingChanged: { editing in
+                        if !editing { Haptics.selection() }
+                    })
                         .frame(maxWidth: 220)
                         .accessibilityValue("\(Int(player.subtitleStyle.scale * 100)) percent")
                 }
@@ -49,7 +53,11 @@ struct PlayerSettingsPage: View {
                     ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 LabeledContent("Height") {
-                    Slider(value: binding(\.subtitleStyle.bottomMargin), in: SubtitleStyle.positionRange, step: 1)
+                    Slider(value: Binding(get: { player.subtitleStyle.bottomMargin }, set: { value in
+                        Task { await model.updatePlayer { $0.subtitleStyle.bottomMargin = value } }
+                    }), in: SubtitleStyle.positionRange, step: 1, onEditingChanged: { editing in
+                        if !editing { Haptics.selection() }
+                    })
                         .frame(maxWidth: 220)
                         .accessibilityValue("\(Int(player.subtitleStyle.bottomMargin)) percent from the bottom")
                 }

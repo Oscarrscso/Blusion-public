@@ -4,8 +4,8 @@ import ImageIO
 import os
 import UIKit
 
-/// Loads, downsamples and caches artwork for `ArtworkImage`. Images are decoded at the size they are shown, not at the size
-/// of the file, so a long row of posters keeps a few megabytes decoded rather than hundreds.
+/// Loads and caches artwork for `ArtworkImage`. Most pictures are downsampled for display; episode artwork explicitly requests
+/// original pixels with a nil `maxPixelSize`. Both paths share the download queue and decoded cache.
 actor ImagePipeline {
     static let shared = ImagePipeline()
 
@@ -18,7 +18,7 @@ actor ImagePipeline {
     private nonisolated(unsafe) let files: URLCache
     /// The picture being checked for a newer copy now, if any: one at a time.
     private var refreshing: String?
-    /// `NSCache` is thread-safe, which is what lets `cachedImage` answer without hopping onto the actor.
+    /// `NSCache` is thread-safe and can evict under memory pressure. It has no fixed app-imposed memory limit.
     private nonisolated(unsafe) let decoded = NSCache<NSString, UIImage>()
     /// What the cache cannot be asked: the sizes each address has been decoded at, and the addresses that answered "not found". Behind a
     /// lock, so views can read it without hopping onto the actor.
@@ -59,7 +59,6 @@ actor ImagePipeline {
         checks.urlCache = nil
         checks.requestCachePolicy = .reloadIgnoringLocalCacheData
         refreshSession = URLSession(configuration: checks)
-        decoded.totalCostLimit = 256 * 1024 * 1024
     }
 
     // MARK: The cache on disk
@@ -80,7 +79,7 @@ actor ImagePipeline {
 
     /// A picture that is already decoded, without waiting. A card that scrolls back into view shows its artwork in the same
     /// frame instead of flashing its placeholder.
-    nonisolated func cachedImage(for url: URL, maxPixelSize: CGFloat) -> UIImage? {
+    nonisolated func cachedImage(for url: URL, maxPixelSize: CGFloat?) -> UIImage? {
         decoded.object(forKey: Self.key(url, maxPixelSize: maxPixelSize) as NSString)
     }
 
@@ -92,7 +91,8 @@ actor ImagePipeline {
         var gone: [Int] = []
         var found: UIImage?
         for size in sizes.sorted(by: >) {
-            if let image = decoded.object(forKey: "\(size)|\(address)" as NSString) {
+            let key = size == Int.max ? "original|\(address)" : "\(size)|\(address)"
+            if let image = decoded.object(forKey: key as NSString) {
                 found = image
                 break
             }
@@ -115,26 +115,27 @@ actor ImagePipeline {
     }
 
     /// Drops the decoded picture for this URL and size from memory. A view that still shows it keeps its own reference.
-    nonisolated func evict(_ url: URL, maxPixelSize: CGFloat) {
+    nonisolated func evict(_ url: URL, maxPixelSize: CGFloat?) {
         decoded.removeObject(forKey: Self.key(url, maxPixelSize: maxPixelSize) as NSString)
     }
 
     /// The size is part of the key: a 44 pt thumbnail and a full-width backdrop of one title are different images.
-    private static func key(_ url: URL, maxPixelSize: CGFloat) -> String {
-        "\(Int(min(max(maxPixelSize.rounded(), 1), 4096)))|\(url.absoluteString)"
+    private static func key(_ url: URL, maxPixelSize: CGFloat?) -> String {
+        guard let maxPixelSize else { return "original|\(url.absoluteString)" }
+        return "\(Int(min(max(maxPixelSize.rounded(), 1), 4096)))|\(url.absoluteString)"
     }
 
-    /// The image at `url`, decoded no larger than `maxPixelSize` on its long edge. Memory-cached; concurrent requests for
+    /// The image at `url`, decoded no larger than `maxPixelSize` on its long edge, or at full source resolution when nil. Concurrent requests for
     /// the same URL and size share one download. Only http, https and file URLs are loaded; a file is read from disk, never fetched.
     ///
     /// An `urgent` request does not wait for one of the download slots: it starts at once, past the limit, so a page the user has just
     /// opened is not held up by posters. A download already waiting for a slot is moved ahead when an urgent caller joins it.
-    func image(for url: URL, maxPixelSize: CGFloat, priority: TaskPriority = .medium, urgent: Bool = false,
+    func image(for url: URL, maxPixelSize: CGFloat?, priority: TaskPriority = .medium, urgent: Bool = false,
                order: Int? = nil) async throws -> UIImage {
         guard let scheme = url.scheme?.lowercased(), ["http", "https", "file"].contains(scheme) else {
             throw ImagePipelineError.unsupportedURL
         }
-        let size = min(max(maxPixelSize.rounded(), 1), 4096)
+        let size = maxPixelSize.map { min(max($0.rounded(), 1), 4096) }
         try Task.checkCancellation()
         let key = Self.key(url, maxPixelSize: maxPixelSize)
         if let cached = decoded.object(forKey: key as NSString) { return cached }
@@ -176,7 +177,7 @@ actor ImagePipeline {
             decoded.setObject(image, forKey: key as NSString, cost: Self.cost(of: image))
             known.withLock { known in
                 if known.sizes.count >= Self.knownLimit { known.sizes.removeAll() }
-                known.sizes[url.absoluteString, default: []].insert(Int(size))
+                known.sizes[url.absoluteString, default: []].insert(size.map { Int($0) } ?? Int.max)
             }
             return image
         } onCancel: {
@@ -194,7 +195,7 @@ actor ImagePipeline {
     }
 
     /// Reorders queued work only. The caller keeps its existing consumer and shares the same download.
-    func prioritize(_ url: URL, maxPixelSize: CGFloat, priority: TaskPriority, order: Int?) {
+    func prioritize(_ url: URL, maxPixelSize: CGFloat?, priority: TaskPriority, order: Int?) {
         promote(key: Self.key(url, maxPixelSize: maxPixelSize), priority: priority, order: order)
     }
 
@@ -268,7 +269,7 @@ actor ImagePipeline {
 
     /// Runs off the actor, so a slow download or decode never blocks requests for other images. `isDue` is true when the picture came
     /// from the disk cache and has been there long enough to be checked for a newer copy.
-    private nonisolated static func fetch(_ url: URL, maxPixelSize: CGFloat, session: URLSession,
+    private nonisolated static func fetch(_ url: URL, maxPixelSize: CGFloat?, session: URLSession,
                                           files: URLCache) async throws -> (image: UIImage, isDue: Bool) {
         // A file on this device (a download's cached artwork) is read as it is: it is never stale and never checked for a newer copy.
         if url.isFileURL {
@@ -331,7 +332,9 @@ actor ImagePipeline {
             }
             return
         }
-        guard (200..<300).contains(http.statusCode), decode(data, maxPixelSize: 64) != nil else { return }
+        // Validate the compressed source without making a reduced image, including for original-resolution episode requests.
+        guard (200..<300).contains(http.statusCode), let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetStatus(source) == .statusComplete, CGImageSourceGetCount(source) > 0 else { return }
         files.storeCachedResponse(CachedURLResponse(response: http, data: data), for: plain)
     }
 
@@ -347,9 +350,17 @@ actor ImagePipeline {
         }
     }
 
-    /// ImageIO builds the thumbnail straight from the compressed data, so the full-size bitmap is never created.
-    private nonisolated static func decode(_ data: Data, maxPixelSize: CGFloat) -> UIImage? {
+    /// Original requests decode the provider's complete image; other requests retain ImageIO's direct thumbnail decoding.
+    private nonisolated static func decode(_ data: Data, maxPixelSize: CGFloat?) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        guard let maxPixelSize else {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+            else { return nil }
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+            let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+            let orientations: [UIImage.Orientation] = [.up, .upMirrored, .down, .downMirrored, .leftMirrored, .right, .rightMirrored, .left]
+            return UIImage(cgImage: cgImage, scale: 1, orientation: orientations[(1...8).contains(orientation) ? orientation - 1 : 0])
+        }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

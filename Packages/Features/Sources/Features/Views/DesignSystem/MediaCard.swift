@@ -70,11 +70,11 @@ struct MediaCard: View {
     private var stretches = false
     private var zoomID: String?
     /// True while a held poster's streams load: a spinner over the artwork, as on an episode's card.
-    private var isLoadingStreams = false
     /// True while the picture on show is the usual poster, which stands in for a BetterPosters picture that has not loaded (or did not).
     @State private var posterFellBack = false
-    /// Mac: TMDb's backdrop with no words on it for this title, once it has been looked up. A landscape poster shows it in place of the
-    /// addon's own, which often carries the title in some language under the logo the card draws.
+    @State private var isVisible = false
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
+    /// Mac: use a wordless backdrop already known when the card appears, without starting a second artwork lookup while browsing.
     @State private var textlessBackdrop: URL?
     /// Optional, as the rating badges read it: a screen without the store keeps the addon's picture.
     @Environment(PosterRatingsStore.self) private var ratingsStore: PosterRatingsStore?
@@ -98,7 +98,12 @@ struct MediaCard: View {
     var body: some View {
         let fixed = resolvedWidth
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            artwork
+            if isVisible && sectionIsVisible {
+                artwork
+            } else {
+                artworkSpace.background(Theme.placeholder)
+                    .clipShape(RoundedRectangle(cornerRadius: artworkAspect.cornerRadius))
+            }
             if showsCaption { captions }
         }
         // The caption is laid out inside the artwork's width and never widens the card: it is cut off instead.
@@ -106,19 +111,16 @@ struct MediaCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(spokenName)
         .accessibilityIdentifier("poster.\(item.id)")
+        .onGeometryChange(for: Bool.self) { proxy in
+                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
+                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
+            } action: { isVisible = $0 }
     }
 
     /// The card takes whatever width it is offered rather than its fixed width. Only a grid column offers a real width; a row does not.
     func stretched() -> MediaCard {
         var copy = self
         copy.stretches = true
-        return copy
-    }
-
-    /// Spins over the artwork while the card's streams load (see `PosterPlayLauncher`).
-    func loadingStreams(_ loading: Bool) -> MediaCard {
-        var copy = self
-        copy.isLoadingStreams = loading
         return copy
     }
 
@@ -220,20 +222,6 @@ struct MediaCard: View {
                     PosterRatingsOverlay(item: item, isLandscape: isLandscape)
                 }
             }
-            .overlay {
-                if isLoadingStreams {
-                    ZStack {
-                        Color.black.opacity(0.35)
-                        Spinner()
-                            .controlSize(.large)
-                    }
-                    .transition(.opacity)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Loading streams")
-                    .accessibilityIdentifier("poster.loadingStreams")
-                }
-            }
-            .animation(.smooth(duration: 0.25), value: isLoadingStreams)
             .mediaArtwork(cornerRadius: artworkAspect.cornerRadius)
             .zoomSource(id: zoomID ?? "", in: zoomID == nil ? nil : zoomNamespace)
             #if targetEnvironment(macCatalyst)
@@ -247,22 +235,12 @@ struct MediaCard: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// Mac: looks up the title's wordless backdrop for a landscape poster. A title already looked up this session answers at once; any other
-    /// waits until the card has been on screen for a moment and takes its turn among the lookups, as a hero prewarm does.
+    /// Mac: keep browsing artwork stable. A later appearance can use a backdrop found by a hover prewarm or the title page.
     private func findTextlessBackdrop() async {
         guard usesLandscapeArtwork, let ratingsStore, ratingsStore.canLookUpHeroArtwork else {
             textlessBackdrop = nil
             return
         }
-        if let known = ratingsStore.cachedHeroArtwork(for: item) {
-            textlessBackdrop = Self.cardSized(known.textlessBackdrop)
-            return
-        }
-        textlessBackdrop = nil
-        try? await Task.sleep(for: .milliseconds(400))
-        guard !Task.isCancelled else { return }
-        await ratingsStore.prewarmHeroArtwork(for: item)
-        guard !Task.isCancelled else { return }
         textlessBackdrop = Self.cardSized(ratingsStore.cachedHeroArtwork(for: item)?.textlessBackdrop)
     }
 
@@ -320,7 +298,7 @@ struct MediaCard: View {
     }
 }
 
-/// `MediaCard` that opens the title: `NavigationLink(value: item)` with `PressableCardStyle`.
+/// `MediaCard` that opens the title.
 struct MediaCardLink: View {
     let item: MetaPreview
     let aspect: CardAspect
@@ -333,7 +311,6 @@ struct MediaCardLink: View {
     private var stretches = false
     @Environment(\.zoomScope) private var zoomScope
     @Environment(TitleActions.self) private var actions: TitleActions?
-    @Environment(PosterPlayLauncher.self) private var posterPlay: PosterPlayLauncher?
 
     init(item: MetaPreview, aspect: CardAspect = .poster, size: CardSize = .medium, showsTitle: Bool? = nil, showsRating: Bool = true,
          width: CGFloat? = nil, subtitle: String? = nil, usesBetterPosters: Bool = false) {
@@ -353,21 +330,13 @@ struct MediaCardLink: View {
         let card = MediaCard(item: item, aspect: aspect, size: size, showsTitle: showsTitle, showsRating: showsRating, width: width,
                              subtitle: subtitle, usesBetterPosters: usesBetterPosters)
             .zoomSource(sourceID)
-            .loadingStreams(posterPlay?.isLoading(item) == true)
         NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID)) {
             stretches ? card.stretched() : card
         }
-        .buttonStyle(PressableCardStyle())
-        .pointerFeedback()
-        // The light tap of opening a title, but not for the lift that ends a hold, which has given its own.
-        .simultaneousGesture(TapGesture().onEnded {
-            if posterPlay?.isHeldPress(item) != true { Haptics.tap() }
-        })
+        .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
         .prewarmsHeroArtwork(item)
         .help(item.name)
-        // Holding a poster for a second plays it, on iPhone and Mac. On iPhone that takes the hold its menu had; the menu's actions are on
-        // the title's page. The Mac keeps the menu, which a right click opens.
-        .holdsToPlay(item)
         #if targetEnvironment(macCatalyst)
         .contextMenu {
             if let actions {
@@ -406,7 +375,7 @@ struct MediaCardLink: View {
 }
 
 extension View {
-    /// Looks up a card's title in TMDb once the card has been on screen for a moment, so its page opens with the picture and logo already known.
+    /// Looks up a card's title in TMDb after a brief hover on Mac, or a moment on screen on iPhone, so its page opens with artwork known.
     /// Only the lookup runs (no picture), and a card that scrolls away before the moment is up asks nothing. Does nothing without TMDb.
     func prewarmsHeroArtwork(_ item: MetaPreview) -> some View {
         modifier(PrewarmHeroArtworkModifier(item: item))
@@ -415,15 +384,33 @@ extension View {
 
 private struct PrewarmHeroArtworkModifier: ViewModifier {
     let item: MetaPreview
+    @State private var isVisible = false
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
+    #if targetEnvironment(macCatalyst)
+    @State private var isHovering = false
+    #endif
     /// Optional, as the rating badges read it: a screen without the store simply does not prewarm.
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
 
     func body(content: Content) -> some View {
         let item = self.item
         let ratings = self.ratings
-        return content.task(id: item.identity, priority: .low) {
+        #if targetEnvironment(macCatalyst)
+        let shouldPrewarm = isVisible && sectionIsVisible && isHovering
+        #else
+        let shouldPrewarm = isVisible && sectionIsVisible
+        #endif
+        return content
+            .onGeometryChange(for: Bool.self) { proxy in
+                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
+                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
+            } action: { isVisible = $0 }
+            #if targetEnvironment(macCatalyst)
+            .onHover { isHovering = $0 }
+            #endif
+            .task(id: "\(item.identity)|\(shouldPrewarm)", priority: .low) {
             // Without TMDb there is nothing to look up, so the card starts no wait at all.
-            guard let ratings, ratings.canLookUpHeroArtwork else { return }
+            guard shouldPrewarm, let ratings, ratings.canLookUpHeroArtwork else { return }
             // `.task` is cancelled when the card scrolls away, which ends the wait before any lookup starts.
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
@@ -442,8 +429,8 @@ struct PressableCardStyle: ButtonStyle {
     var addsSystemHighlight = true
 
     func makeBody(configuration: Configuration) -> some View {
+        // The label's pointerInteraction supplies the system highlight once.
         PressableCardLabel(configuration: configuration, lifts: lifts, addsSystemHighlight: addsSystemHighlight)
-            .pointerFeedback(addsSystemHighlight)
     }
 }
 

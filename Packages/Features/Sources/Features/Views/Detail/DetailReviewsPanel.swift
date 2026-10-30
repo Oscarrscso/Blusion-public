@@ -43,6 +43,8 @@ struct DetailReviewsPanel: View {
     /// Called once the page has loaded, or has failed to.
     var onLoaded: () -> Void = {}
     let onClose: () -> Void
+    /// Embedded panels can fit their page to the available scroll viewport.
+    var viewportHeight: CGFloat? = nil
     /// The id the page scrolls to when the reviews open, so they are in view.
     static let scrollID = "detail.reviewsPanel"
     /// How tall the site's page is on the page. A Mac window has room for more of it than a phone.
@@ -121,7 +123,7 @@ struct DetailReviewsPanel: View {
                         .accessibilityHidden(!isVisible || showsSkeleton)
                 }
             }
-            .frame(height: pageHeightNow)
+            .frame(height: viewportHeight ?? pageHeightNow)
             .overlay {
                 if showsSkeleton {
                     VStack(alignment: .leading, spacing: Theme.Spacing.l) {

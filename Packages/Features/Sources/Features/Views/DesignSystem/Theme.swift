@@ -8,7 +8,7 @@ enum Theme {
     /// All controls derived from Play share this tint on iPhone and Mac. See docs/DESIGN_SPEC.md.
     @MainActor
     static func playControlColour(hex: String?) -> Color? {
-        PlayColourStore.colour(hex: hex)?.opacity(0.50)
+        PlayColourStore.colour(hex: hex)?.opacity(0.38)
     }
 
     enum Spacing {

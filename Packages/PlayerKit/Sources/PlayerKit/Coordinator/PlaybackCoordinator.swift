@@ -155,6 +155,8 @@ public final class PlaybackCoordinator {
         self.rate = rate
         engine?.setRate(rate)
     }
+    /// The fastest the engine playing now plays cleanly; 1 with no engine.
+    public var maximumRate: Float { engine?.maximumRate ?? 1 }
     public func setVolume(_ volume: Float) {
         self.volume = min(1, max(0, volume))
         chosenVolume = self.volume

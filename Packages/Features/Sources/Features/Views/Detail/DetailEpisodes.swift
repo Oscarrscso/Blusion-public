@@ -3,8 +3,7 @@ import SwiftUI
 import StremioKit
 import UIKit
 
-/// A series' seasons and episodes: the season picker and the episode-width toggle, then the episodes of the selected season, each a row
-/// with its still, progress and watched mark.
+/// A series' seasons and episodes: the season picker and width toggle, then artwork cards with integrated information and progress.
 struct DetailEpisodes: View {
     let model: DetailViewModel
     let pageWidth: CGFloat
@@ -66,23 +65,24 @@ struct DetailEpisodes: View {
             }
             .padding(.horizontal, contentMargin)
             ScrollViewReader { proxy in
-                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing,
-                            resetKey: "\(model.selectedSeason ?? -1)|\(model.matchesEpisodeWidthToText)|\(Int(width))") {
+                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing, lazy: false) {
                     if model.isLoading && model.episodes.isEmpty {
                         ForEach(0..<3, id: \.self) { index in
-                            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                                RoundedRectangle(cornerRadius: Theme.Radius.small)
-                                    .fill(Theme.placeholder)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Theme.placeholder
                                     .frame(width: width, height: width / CardAspect.wide.ratio)
                                     .loadingCardSpinner()
                                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                     DetailSkeletonLine(font: Theme.Typography.eyebrow, width: 70)
-                                    DetailSkeletonParagraph(style: .headline, lines: 2)
-                                    DetailSkeletonParagraph(style: .footnote, lines: 3)
-                                    DetailSkeletonLine(font: Theme.Typography.metaLine, width: width * 0.65)
+                                    DetailSkeletonParagraph(style: .footnote, lines: 2)
+                                    DetailSkeletonParagraph(style: .caption1, lines: 2)
+                                    DetailSkeletonLine(font: .caption2, width: width * 0.65)
                                 }
+                                .padding(Theme.Spacing.s)
                             }
-                            .frame(width: width, alignment: .leading)
+                            .frame(width: width)
+                            .background(Theme.placeholder)
+                            .mediaArtwork(cornerRadius: Theme.Radius.card)
                             .reportsShelfEdge(id: index)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Loading episode")
@@ -117,7 +117,10 @@ struct DetailEpisodes: View {
     private var seasonMenu: some View {
         Menu {
             ForEach(model.seasons, id: \.self) { season in
-                Button(season == 0 ? "Specials" : "Season \(season)") { model.selectedSeason = season }
+                Button(season == 0 ? "Specials" : "Season \(season)") {
+                    if model.selectedSeason != season { Haptics.selection() }
+                    model.selectedSeason = season
+                }
             }
             if let season = model.selectedSeason {
                 Divider()
@@ -243,14 +246,14 @@ struct DetailEpisodes: View {
         .titleTapHaptic()
         .accessibilityLabel("Episode width")
         .help("Episode width")
-        .accessibilityValue(isWide ? "Full width" : "Fixed width")
+        .accessibilityValue(isWide ? (isLandscape ? "Wide" : "Full width") : "Fixed width")
         .accessibilityIdentifier("detail.episodeWidthToggle")
     }
 
-    /// The text above the episodes runs from one page margin to the other. With the toggle on, each card is that wide, so the cards
-    /// line up with it; otherwise they keep their fixed width.
+    /// Wide mode fills the text column in portrait and uses a compact wider card in landscape. Normal cards match the reviews.
     private func episodeWidth(pageWidth: CGFloat) -> CGFloat {
-        model.matchesEpisodeWidthToText ? pageWidth - contentMargin * 2 : metrics.episodeWidth
+        model.matchesEpisodeWidthToText ? min(max(1, pageWidth - contentMargin * 2), isLandscape ? metrics.episodeWidth * 1.5 : .infinity)
+            : min(max(1, pageWidth - contentMargin * 2), metrics.episodeWidth)
     }
 
     private func episodeRow(_ video: Video, width: CGFloat) -> some View {
@@ -264,11 +267,15 @@ struct DetailEpisodes: View {
             guard !isLoadingStreams, !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
             play(request, .episode)
         } label: {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                episodeCard(video, width: width, airsLater: airsLater,
-                            isLoadingStreams: loadingTrigger == .episode && loadingRequest?.id == request.id)
+            episodeCard(video, width: width, airsLater: airsLater,
+                        isLoadingStreams: loadingTrigger == .episode && loadingRequest?.id == request.id)
+            .overlay(alignment: .topLeading) {
                 if hasNoStreams {
-                    Text("No streams").font(.caption).foregroundStyle(.secondary)
+                    Text("No streams")
+                        .font(.caption).foregroundStyle(.white)
+                        .padding(Theme.Spacing.s)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .padding(Theme.Spacing.s)
                 }
             }
         }
@@ -305,7 +312,7 @@ struct DetailEpisodes: View {
         GeometryReader { geometry in
             ScrollView {
                 episodeCard(video, width: max(1, geometry.size.width - Self.previewPadding * 2), airsLater: !video.hasAired(),
-                            stillRadius: Self.previewStillRadius, showsWholeOverview: true, sideBySide: true)
+                            stillRadius: Self.previewStillRadius, showsWholeOverview: true)
                     .padding(Self.previewPadding)
             }
         }
@@ -341,6 +348,7 @@ struct DetailEpisodes: View {
         let controls = UIMenu(options: [.displayInline, .displayAsPalette], children: [watchedAction, imdbAction])
         controls.preferredElementSize = .large
         let download = UIAction(title: "Download", image: UIImage(systemName: "arrow.down.circle")) { _ in
+            // A UIAction is not on the main actor, so the haptic has to come back to it.
             Task { @MainActor in Haptics.tap(); await model.download(request) }
         }
         return UIMenu(children: [controls, download, watchedThroughAction])
@@ -379,14 +387,15 @@ struct DetailEpisodes: View {
     }
 
     /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes
-    /// `showsWholeOverview` for both expanded layouts. The list follows the full-width setting.
+    /// `showsWholeOverview` lets menu previews expand; shelf cards share a fixed information height.
     private func episodeCard(_ video: Video, width: CGFloat, airsLater: Bool, isLoadingStreams: Bool = false,
-                             stillRadius: CGFloat = Theme.Radius.small, showsWholeOverview: Bool? = nil, sideBySide: Bool = false) -> some View {
+                             stillRadius: CGFloat = Theme.Radius.card, showsWholeOverview: Bool = false) -> some View {
         EpisodeRow(video: video, fraction: model.progressFraction(for: video), watched: model.isWatched(video),
                    artwork: model.backdropURL, score: model.score(for: video), runtimeMinutes: model.runtimeMinutes(for: video), width: width,
-                   showsWholeOverview: showsWholeOverview ?? model.matchesEpisodeWidthToText, airsLater: airsLater,
+                   showsWholeOverview: showsWholeOverview,
+                   isShortWidth: !model.matchesEpisodeWidthToText && !showsWholeOverview, airsLater: airsLater,
                    isLoadingStreams: isLoadingStreams || model.downloadManager?.loadingRequests.contains(model.request(for: video).identity) == true,
-                   stillRadius: stillRadius, sideBySide: sideBySide)
+                   stillRadius: stillRadius)
             .overlay(alignment: .topTrailing) {
                 if let item = model.downloadManager?.item(for: model.request(for: video)) {
                     DownloadProgressGlyph(item: item)
@@ -421,8 +430,7 @@ enum EpisodeIMDbReviews {
     }
 }
 
-/// One episode: its still with the progress line or watched mark over it, the numbered title, the air date, length and rating, and the
-/// overview: three lines in a fixed-width card, all of it when the list is set to full width.
+/// One episode's sharp 16:9 artwork continues downward into a diffused background behind its independently sized information stack.
 private struct EpisodeRow: View {
     let video: Video
     let fraction: Double?
@@ -439,107 +447,120 @@ private struct EpisodeRow: View {
         runtimeMinutes.map { Duration.seconds($0 * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide)) }
     }
     let width: CGFloat
-    /// Set for a full-width card: the whole overview shows at its own height, so the rating sits under this episode's own text.
+    @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = 128
+    /// Menu previews show all the text; shelf cards let the synopsis absorb title wrapping inside a fixed height.
     var showsWholeOverview = false
+    /// Short cards show a small progress bar in the air-date slot, without adding another row.
+    var isShortWidth = false
     /// Set for an episode that has not aired: its still is dimmed, and the card cannot be opened.
     var airsLater = false
     /// Set while this episode's streams load: a spinner over its still, as Play has one.
     var isLoadingStreams = false
     /// The still's corner radius. The menu's preview gives it one that follows its panel's, which is rounder than a card's.
-    var stillRadius: CGFloat = Theme.Radius.small
-    /// Landscape preview: image and title share the top row; the full overview and metadata use the width below it.
-    var sideBySide = false
+    var stillRadius: CGFloat = Theme.Radius.card
 
-    private var stillWidth: CGFloat { sideBySide ? (width * 0.45).rounded() : width }
+    private var hasProgress: Bool {
+        !watched && fraction.map { $0.isFinite && $0 > 0 && $0 < 1 } == true
+    }
 
     /// How far the progress line and the watched mark move in from the still's edges, so a rounder corner does not cut into them.
     private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
 
     var body: some View {
-        Group {
-            if sideBySide {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    HStack(alignment: .top, spacing: Theme.Spacing.m) {
-                        still
-                        title.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    overview
-                    dateAndScore
+        VStack(spacing: 0) {
+            Color.clear.frame(height: width / CardAspect.wide.ratio)
+            text
+                .fixedSize(horizontal: false, vertical: showsWholeOverview)
+                .padding(Theme.Spacing.s + overlayInset)
+                .frame(width: width, height: showsWholeOverview ? nil : informationHeight, alignment: .topLeading)
+        }
+        .frame(width: width, alignment: .topLeading)
+        .background { still }
+        .overlay(alignment: .topTrailing) {
+            if watched { checkmark.padding(overlayInset) }
+        }
+        .overlay {
+            if isLoadingStreams {
+                ZStack {
+                    Color.black.opacity(0.35)
+                    Spinner().controlSize(.large)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    still
-                    text
-                }
+                .transition(.opacity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading streams")
             }
         }
-        .frame(width: width, alignment: .leading)
+        .animation(.smooth(duration: 0.25), value: isLoadingStreams)
+        .mediaArtwork(cornerRadius: stillRadius)
+        .environment(\.colorScheme, .dark)
         .multilineTextAlignment(.leading)
         .accessibilityElement(children: .combine)
     }
 
-    /// The numbered title, the overview, and the date, length and score.
+    /// The numbered title, the overview, and the date, length and score. A hairline sits above the overview and above the metadata, each
+    /// only when it has something under it, so both follow the title's own wrapping and the padding frames them.
     private var text: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             title
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            if hasOverview { hairline }
             overview
+                .frame(maxWidth: .infinity, maxHeight: showsWholeOverview ? nil : .infinity, alignment: .topLeading)
+            if hasMetadata { hairline }
             dateAndScore
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var hasOverview: Bool { video.overview?.isEmpty == false }
+
+    /// Whether the air date, length or score has anything to show, so the metadata line and its hairline are there.
+    private var hasMetadata: Bool { video.airDate != nil || hasProgress || runtime != nil || score != nil }
+
+    /// Half a point in `Theme.separator`: a quiet rule between the title, the synopsis and the metadata.
+    private var hairline: some View {
+        Rectangle().fill(Theme.separator).frame(height: 0.5).accessibilityHidden(true)
     }
 
     private var title: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             if let episode = video.episode {
-                Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.secondary)
+                Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.white.opacity(0.75))
             }
             Group {
                 if showsWholeOverview {
                     Text(video.title)
                 } else {
                     Text(video.title)
-                        .lineLimit(2, reservesSpace: true)
+                        .lineLimit(2)
                 }
             }
-            .font(.headline)
+            .font(.footnote.weight(.medium))
+            .allowsTightening(true)
+            .foregroundStyle(.white)
         }
     }
 
     @ViewBuilder
     private var overview: some View {
         if let overview = video.overview, !overview.isEmpty {
-            JustifiedText(text: overview, textStyle: .footnote, color: .secondaryLabel,
-                          lineLimit: showsWholeOverview ? 0 : 3, reservesSpace: !showsWholeOverview)
+            // No line limit: the text gets whatever height the title, hairlines and date leave, and truncates only at the last line
+            // that fits. The negative padding lets a last line use the gap above the metadata's hairline, which is as far as it can
+            // reach, so the text stops at the hairline rather than crossing it.
+            Text(overview)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.bottom, showsWholeOverview ? 0 : -Theme.Spacing.xs)
         }
     }
 
     /// The episode's own still, or the series' backdrop when the addon sent none.
     private var still: some View {
-        ArtworkImage(url: video.thumbnail ?? artwork, maxPixelSize: stillWidth * 3)
-            .frame(width: stillWidth, height: stillWidth / CardAspect.wide.ratio)
+        ArtworkImage(url: video.thumbnail ?? artwork, maxPixelSize: nil, fallbackURL: artwork, extendsArtworkDownward: true)
             .opacity(airsLater ? 0.45 : 1)
-            .overlay {
-                if !watched, let fraction {
-                    PlaybackProgressOverlay(fraction: fraction, width: stillWidth, inset: overlayInset)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if watched { checkmark.padding(overlayInset) }
-            }
-            .overlay {
-                if isLoadingStreams {
-                    ZStack {
-                        Color.black.opacity(0.35)
-                        Spinner()
-                            .controlSize(.large)
-                    }
-                    .transition(.opacity)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Loading streams")
-                }
-            }
-            .animation(.smooth(duration: 0.25), value: isLoadingStreams)
-            .mediaArtwork(cornerRadius: stillRadius)
     }
 
     private var checkmark: some View {
@@ -557,12 +578,29 @@ private struct EpisodeRow: View {
     @ViewBuilder
     private var dateAndScore: some View {
         let date = video.airDate?.formatted(date: .abbreviated, time: .omitted)
-        if date != nil || runtime != nil || score != nil {
+        let showsProgress = hasProgress
+        if hasMetadata {
             HStack(spacing: 5) {
-                if let date { Text(date) }
-                if date != nil, runtime != nil { Text("·") }
+                if let date, !isShortWidth || !showsProgress {
+                    Text(date)
+                    if showsProgress { Text("·") }
+                }
+                if showsProgress, let fraction {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill").font(.system(size: 7, weight: .semibold))
+                        Capsule()
+                            .fill(.white.opacity(0.3))
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(.white).scaleEffect(x: fraction, y: 1, anchor: .leading)
+                            }
+                            .frame(width: 40, height: 2)
+                    }
+                    .frame(width: 52)
+                    .foregroundStyle(.white)
+                }
+                if date != nil || showsProgress, runtime != nil { Text("·") }
                 if let runtime { Text(runtime).monospacedDigit() }
-                if date != nil || runtime != nil, score != nil { Text("·") }
+                if date != nil || showsProgress || runtime != nil, score != nil { Text("·") }
                 if let score {
                     if score.isIMDb {
                         ReviewSiteIcon(site: .imdb, size: 13)
@@ -573,11 +611,14 @@ private struct EpisodeRow: View {
                     if !score.isIMDb, video.ratingSource == .tmdb { Text("TMDb") }
                 }
             }
-            .font(Theme.Typography.metaLine)
-            .foregroundStyle(.secondary)
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.75))
             .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel([date, spokenRuntime, score.map {
+            .accessibilityLabel([isShortWidth && showsProgress ? nil : date,
+                                 showsProgress ? fraction.map { "\(Int(($0 * 100).rounded()))% watched" } : nil,
+                                 spokenRuntime, score.map {
                 "\($0.isIMDb ? "IMDb rating" : video.ratingSource == .tmdb ? "TMDb rating" : "Rating") \($0.text)"
             }].compactMap { $0 }.joined(separator: ", "))
         }

@@ -37,8 +37,21 @@ private struct UpNextEpisode {
     let model: PlayerViewModel
 }
 
+/// The press-and-hold on the picture: whether a hold is under way, the height it began at, and whether the press rested long enough to
+/// be no tap when it lifts. A reference type, so following the finger changes nothing the view draws.
+@MainActor
+private final class PictureHoldTrack {
+    var holdBegan = false
+    /// Stays latched after release/cancellation until the next touch starts, regardless of callback order.
+    var ownsTouch = false
+    var baselineY: CGFloat = 0
+    /// The press rested for the hold delay, so it is not a tap when it lifts, whether or not a hold began.
+    var restedLong = false
+}
+
 struct PlayerContent: View {
     @State private var model: PlayerViewModel
+    @State private var infoModel: PlayerInfoModel
     @State private var isPreparingNext = false
     @Environment(\.windowSafeArea) private var windowSafeArea
     #if canImport(UIKit) && canImport(AVKit)
@@ -76,12 +89,10 @@ struct PlayerContent: View {
     @GestureState private var isDragGestureActive = false
     /// Ignore release taps from a pinch or swipe, including when one finger lifts before the other.
     @State private var pictureGestureEndedAt: Date?
-    /// The picture is being pressed and held: double speed until the finger lifts.
-    @GestureState private var isHoldingFast = false
     /// When the last hold ended: the tap its release makes does not toggle the controls.
     @State private var holdEndedAt: Date?
-    /// The drag under way began as a hold: it neither seeks nor closes the player.
-    @State private var dragIsHold = false
+    /// The press-and-hold on the picture (`PictureHoldGesture`). Kept out of state: following the finger must not redraw the player.
+    @State private var holdTrack = PictureHoldTrack()
     @State private var nativeFrameEngineID: ObjectIdentifier?
     /// The next episode, readied during this one's last minute (`UpNextTiming`).
     @State private var upNext: UpNextEpisode?
@@ -117,6 +128,7 @@ struct PlayerContent: View {
         self.services = services
         self.onNextPlan = onNextPlan
         _model = State(initialValue: prepared ?? Self.makeModel(plan: plan, services: services))
+        _infoModel = State(initialValue: PlayerInfoModel(request: plan.request, services: services))
         PlayerPreload.begin(plan, services: services)
     }
 
@@ -183,7 +195,7 @@ struct PlayerContent: View {
             .animation(.easeInOut(duration: 0.18), value: panel != nil || showsEpisodes || showsStreams)
             // Retain the controls (and native scrubber) while hidden. Their local
             // fade cannot change the video viewport or animate the renderer.
-            PlayerControls(model: model, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
+            PlayerControls(model: model, infoModel: infoModel, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
                            onShowEpisodes: toggleEpisodes, episodesOpen: showsEpisodes,
                            panel: $panel, actions: controlActions, upscaling: upscalingRenderer,
                            onShowStreams: { guard !model.plan.isOffline else { return }; closeMenus(); model.showControls(); showsStreams = true },
@@ -221,9 +233,9 @@ struct PlayerContent: View {
                     .accessibilityLabel("Seek position")
                     .accessibilityValue(PlayerTime.format(fraction * (model.duration ?? 0)))
                     .accessibilityIdentifier("player.seekPosition")
-                } else if model.heldRate != nil { doubleSpeedBadge.transition(.opacity) }
+                } else if model.heldSpeed != nil { doubleSpeedBadge.transition(.opacity) }
             }
-            .animation(.easeInOut(duration: 0.15), value: model.heldRate != nil)
+            .animation(.easeInOut(duration: 0.15), value: model.heldSpeed != nil)
             if let notice = model.notice, noticeVisible, model.failureMessage == nil {
                 VStack {
                     Spacer()
@@ -257,15 +269,11 @@ struct PlayerContent: View {
             model.setSafeAreaInset(inset)
         }
         .onChange(of: panel) { old, new in
+            if new != .info { infoModel.closeReviews() }
             // A closed menu leaves the controls up, with a fresh idle delay, whichever way it was closed.
             if old != nil && new == nil { model.showControls() }
             // One pop-out at a time: a menu opened from the bar closes the episodes.
             if new != nil { showsEpisodes = false; showsStreams = false }
-        }
-        .onChange(of: isHoldingFast) { _, holding in
-            if !holding { holdEndedAt = Date() }
-            model.holdDoubleSpeed(holding)
-            if holding && model.heldRate != nil { Haptics.tap() }
         }
         #if !targetEnvironment(macCatalyst)
         .onChange(of: isPinching) { _, pinching in
@@ -298,6 +306,12 @@ struct PlayerContent: View {
             withAnimation(.easeInOut(duration: 0.2)) { hiddenSkipMarker = marker }
         }
         .task { await model.start() }
+        .task(id: infoModel.ratingsRevision) {
+            await infoModel.load()
+            guard !Task.isCancelled, infoModel.openedReviews == nil,
+                  let item = infoModel.reviewItem, let url = infoModel.imdbReviewsURL else { return }
+            ReviewPreloader.shared.preload(site: .imdb, url: url, item: item, width: 360)
+        }
         .task(id: waitingForPlayback) {
             guard waitingForPlayback else {
                 showsStall = false
@@ -319,6 +333,8 @@ struct PlayerContent: View {
         .onChange(of: scenePhase) { _, phase in
             // Leaving the front keeps the session on the air, but its snapshot should already say where it is if the app is killed.
             if phase != .active { Task { await model.recordSessionSnapshot(force: true) } }
+            // A hold must not carry on in the background or through a lock: the speed comes back now.
+            if phase != .active { endPictureHold() }
         }
         .fileImporter(isPresented: $importsSubtitle, allowedContentTypes: SubtitleFileTypes.subtitles) { result in
             if case .success(let url) = result { Task { await model.loadSubtitleFile(at: url) } }
@@ -333,12 +349,22 @@ struct PlayerContent: View {
         .onChange(of: model.hasFinished) { _, finished in
             if finished { Task { await handleEnd() } }
         }
+        // Both timeline handlers and picture swipes share this state: one tick per scrub, never per seek update.
+        .onChange(of: model.isScrubbing) { _, scrubbing in
+            if scrubbing { Haptics.tap() }
+        }
+        .onChange(of: model.heldSpeed) { old, new in
+            if let old, let new, old.rate != new.rate { Haptics.selection() }
+            if old != nil, new == nil { endPictureHold() }
+        }
         .onAppear {
             // The screen is up: its session is the app's live one. A session the screen itself handed over and rebuilt (Up Next) sits
             // in `prepared`, so what presents here is already this plan's player.
             livePlayback.present(model)
         }
         .onDisappear {
+            if let url = infoModel.imdbReviewsURL { ReviewPreloader.shared.discard(url: url) }
+            endPictureHold()
             leaveUpNext()
             // An actual dismissal releases the session (a closed one forgets itself idempotently). A disappearance that comes with
             // the app leaving the front — backgrounding, a lock — does not: the session stays on the air at the app level, and this
@@ -516,10 +542,11 @@ struct PlayerContent: View {
             .frame(width: 64, height: 64).glassEffect(.regular, in: .circle)
     }
 
-    /// At the top while a hold plays at double speed.
+    /// At the top while a hold temporarily speeds up playback. It shows the speed the engine reports it is playing at.
     private var doubleSpeedBadge: some View {
-        VStack {
-            Label("2×", systemImage: "forward.fill")
+        let rate = model.state.rate.formatted()
+        return VStack {
+            Label("\(rate)×", systemImage: "forward.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14).padding(.vertical, 8)
@@ -529,7 +556,7 @@ struct PlayerContent: View {
         }
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Playing at double speed")
+        .accessibilityLabel("Playing at \(rate) times speed")
         .accessibilityIdentifier("player.doubleSpeed")
     }
 
@@ -649,12 +676,14 @@ struct PlayerContent: View {
     }
 
     private var acceptsPictureTap: Bool {
-        !isPinching && !isDragGestureActive && !isDragging
+        !holdTrack.ownsTouch && !isPinching && !isDragGestureActive && !isDragging
             && (pictureGestureEndedAt.map { Date().timeIntervalSince($0) >= 0.25 } ?? true)
     }
 
     /// Tap toggles the controls; double-tap on the left or right third skips back or forward 10 s; press and hold plays at double speed
-    /// until the finger lifts (the Mac: click and hold). On iPhone and iPad a sideways drag anywhere on the picture seeks live,
+    /// until the finger lifts (the Mac: click and hold). While held, dragging up steps the speed 1× per 40 points, to 4× where the
+    /// engine allows it, and dragging down steps back, never below 2× (`SpeedHoldRules`). A hold owns the finger: nothing else acts on
+    /// its movement until it lifts. On iPhone and iPad a sideways drag anywhere on the picture seeks live,
     /// coarsely at the top and finely at the bottom (`SwipeSeek`); a vertical swipe on the left third sets the brightness
     /// (Settings can turn it off), a swipe down in the middle closes, and a pinch zooms. a vertical swipe on the right third sets system volume.
     /// The layer covers the whole screen, edges included, under the controls: a drag that starts on a control (the timeline, the menu
@@ -665,6 +694,7 @@ struct PlayerContent: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { location in
                     guard acceptsPictureTap else { return }
+                    Haptics.tap()
                     let third = proxy.size.width / 3
                     if location.x < third {
                         Task { await model.skip(by: -10) }
@@ -676,15 +706,19 @@ struct PlayerContent: View {
                 }
                 .onTapGesture {
                     guard acceptsPictureTap else { return }
-                    // The release that ends a hold at double speed is not a tap.
-                    if model.heldRate != nil || holdEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true { return }
+                    // The release that ends a hold (or a press that rested as one) is not a tap.
+                    if model.heldSpeed != nil || holdTrack.restedLong || holdEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true { return }
                     model.toggleControls()
                 }
-                .simultaneousGesture(LongPressGesture(minimumDuration: 0.4, maximumDistance: 10)
-                    .sequenced(before: DragGesture(minimumDistance: 0))
-                    .updating($isHoldingFast) { value, holding, _ in
-                        if case .second(true, _) = value { holding = true }
-                    })
+                // The UIKit delegate lets both recognizers track the finger. Ownership lasts through the final swipe callback.
+                .gesture(PictureHoldGesture(minimumDuration: SpeedHoldRules.holdDelay,
+                                                        touchBegan: {
+                                                            endPictureHold()
+                                                            holdTrack.ownsTouch = false
+                                                        },
+                                                        began: { pictureHoldBegan($0) },
+                                                        moved: { pictureHoldMoved($0) },
+                                                        ended: { endPictureHold() }))
                 #if !targetEnvironment(macCatalyst)
                 .simultaneousGesture(DragGesture(minimumDistance: 12)
                     .updating($isDragGestureActive) { _, active, _ in active = true }
@@ -695,16 +729,57 @@ struct PlayerContent: View {
                     .updating($isPinching) { _, pinching, _ in pinching = true }
                     .onEnded { value in
                         pictureGestureEndedAt = Date()
+                        // A hold owns the picture while it lasts: a pinch during it changes no zoom.
+                        guard !holdTrack.ownsTouch else { return }
+                        let previousZoom = model.zoomMode
                         // A shortcut for the saved Zoom Mode: pinch out for Fill, pinch in for Normal.
                         if value.magnification > 1.08 {
                             model.pinchZoom(in: true)
                         } else if value.magnification < 0.92 {
                             model.pinchZoom(in: false)
                         }
+                        if model.zoomMode != previousZoom { Haptics.selection() }
                     })
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
+    }
+
+    // MARK: Press and hold
+
+    /// The press rested for `SpeedHoldRules.holdDelay`. It is a hold if the film is playing and no menu is open; otherwise it keeps its
+    /// ordinary handling, so a drag from a paused film still seeks. Either way it is no tap when it lifts.
+    private func pictureHoldBegan(_ point: CGPoint) {
+        holdTrack.restedLong = true
+        guard panel == nil, !showsEpisodes, !showsStreams, !isDragging, !isPinching,
+              model.beginHeldSpeed() else { return }
+        holdTrack.ownsTouch = true
+        holdTrack.holdBegan = true
+        holdTrack.baselineY = point.y
+        // Confirms the hold has taken. A hold the film cannot take stays silent.
+        Haptics.tap()
+    }
+
+    /// The held finger moved: its height from where the hold began steps the speed (`SpeedHoldRules`). Nothing else reads the movement.
+    private func pictureHoldMoved(_ point: CGPoint) {
+        guard holdTrack.holdBegan else { return }
+        let displacement = Double(point.y - holdTrack.baselineY)
+        model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum,
+                                             current: model.heldSpeed?.rate))
+    }
+
+    /// The press ended: it lifted, the system took it, or it moved too far before the hold began. A hold returns the film to the speed it
+    /// was at. Idempotent, so leaving the app, the screen going and the film ending may call it too.
+    private func endPictureHold() {
+        if holdTrack.holdBegan {
+            holdTrack.holdBegan = false
+            pictureGestureEndedAt = Date()
+            model.endHeldSpeed()
+        }
+        if holdTrack.restedLong {
+            holdTrack.restedLong = false
+            holdEndedAt = Date()
+        }
     }
 
     // Picture drag seeking is intentionally touch-only; Mac keeps its timeline and keyboard controls, as requested.
@@ -717,9 +792,8 @@ struct PlayerContent: View {
     private func swipeChanged(_ value: DragGesture.Value, in size: CGSize) {
         // An open menu owns its own scrolling.
         guard panel == nil, !showsEpisodes, !showsStreams else { return }
-        // A finger that moves on after a hold at double speed is still holding.
-        if model.heldRate != nil { dragIsHold = true }
-        guard !dragIsHold else { return }
+        // A hold owns its finger: a drag that follows it neither seeks nor sets a level.
+        guard !holdTrack.ownsTouch else { return }
         if !isDragging {
             isDragging = true
             if isPinching { dragIsPinch = true }
@@ -799,14 +873,13 @@ struct PlayerContent: View {
 
     private func swipeEnded(_ value: DragGesture.Value, in size: CGSize) {
         pictureGestureEndedAt = Date()
+        guard !holdTrack.ownsTouch else { dragFinished(); return }
         guard panel == nil, !showsEpisodes, !showsStreams else { return }
-        if dragIsHold {
-            dragIsHold = false
-            return
-        }
         // Use the existing seek state to include the final movement before clearing the gesture.
         if seekSwipeFraction != nil { swipeChanged(value, in: size) }
         let wasPinch = dragIsPinch
+        // Only a drag that classified as a swipe can dismiss: a release after a hold (which never classified) must not close the player.
+        let wasSwiping = dragDirection != nil
         isDragging = false
         dragIsPinch = false
         dragDirection = nil
@@ -822,7 +895,10 @@ struct PlayerContent: View {
         withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
         let third = size.width / 3
         let inMiddle = value.startLocation.x >= third && value.startLocation.x <= 2 * third
-        if !wasLevel, value.translation.height > 140, inMiddle || !model.preferences.swipeGestures { close() }
+        if wasSwiping, !wasLevel, value.translation.height > 140, inMiddle || !model.preferences.swipeGestures {
+            Haptics.tap()
+            close()
+        }
     }
 
     /// A pinch takes over a drag: keep the last live position and stop issuing seeks.
@@ -850,7 +926,6 @@ struct PlayerContent: View {
         isDragging = false
         dragIsPinch = false
         dragDirection = nil
-        dragIsHold = false
     }
     #endif
 

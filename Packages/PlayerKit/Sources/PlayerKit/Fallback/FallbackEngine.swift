@@ -41,6 +41,8 @@ public protocol FallbackBackend: AnyObject {
     func setPaused(_ paused: Bool)
     func seek(to position: TimeInterval) async
     func setRate(_ rate: Float)
+    /// The fastest rate the backend plays cleanly (`PlaybackEngine.maximumRate`).
+    var maximumRate: Float { get }
     /// 0 (silent) to 1 (full).
     func setVolume(_ volume: Float)
     func setMuted(_ muted: Bool)
@@ -66,6 +68,7 @@ public protocol FallbackBackend: AnyObject {
 
 public extension FallbackBackend {
     var capabilities: EngineCapabilities { [] }
+    var maximumRate: Float { 2 }
     func setSubtitleDelay(_ seconds: TimeInterval) {}
     func setAudioDelay(_ seconds: TimeInterval) {}
     func addSubtitle(_ subtitle: ExternalSubtitle) {}
@@ -192,6 +195,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     }
 
     public var capabilities: EngineCapabilities { backend.capabilities }
+    public var maximumRate: Float { backend.maximumRate }
     public func setSubtitleDelay(_ seconds: TimeInterval) { backend.setSubtitleDelay(seconds) }
     public func setAudioDelay(_ seconds: TimeInterval) { backend.setAudioDelay(seconds) }
     public func addExternalSubtitle(_ subtitle: ExternalSubtitle) { backend.addSubtitle(subtitle) }

@@ -10,7 +10,7 @@ public final class HomeStartup {
 
     private init() {}
 
-    /// Home's rows have all answered once (or Home has nothing to load).
+    /// Home's first visible row has answered (or Home has nothing to load).
     func markSettled() {
         isSettled = true
     }

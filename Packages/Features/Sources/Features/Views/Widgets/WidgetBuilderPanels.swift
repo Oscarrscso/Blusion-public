@@ -278,7 +278,10 @@ struct WidgetFieldPanel: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: Binding(get: { value }, set: { update($0) }), in: 0...10, step: 0.5)
+            Slider(value: Binding(get: { value }, set: { next in
+                if next != value { Haptics.selection() }
+                update(next)
+            }), in: 0...10, step: 0.5)
                 .accessibilityLabel(title)
         }
     }

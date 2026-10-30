@@ -25,6 +25,8 @@ public final class MockEngine: PlaybackEngine {
     public private(set) var selectedEmbeddedSubtitles: [String?] = []
     public private(set) var isStopped = false
     public var capabilities: EngineCapabilities = []
+    /// Generous by default, so a test of the hold's ceiling sets the engine's limit itself.
+    public var maximumRate: Float = 4
     public private(set) var subtitleDelays: [TimeInterval] = []
     public private(set) var audioDelays: [TimeInterval] = []
     public private(set) var addedSubtitles: [ExternalSubtitle] = []

@@ -187,14 +187,18 @@ struct HomeView: View {
                         if model.isOffline {
                             ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
                                 if case .continueWatching = section.widget.content {
-                                    sectionView(section).prioritizesArtwork(order: index)
+                                    sectionView(section)
+                                    .modifier(VisibleHomeSection(model: model, sectionID: section.id, revision: model.loadRevision))
+                                    .prioritizesArtwork(order: index)
                                 }
                             }
                             OfflineBanner()
                         } else {
                             ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
                                 if model.isCustomised || !isEmptyRow(section) {
-                                    sectionView(section).prioritizesArtwork(order: index)
+                                    sectionView(section)
+                                    .modifier(VisibleHomeSection(model: model, sectionID: section.id, revision: model.loadRevision))
+                                    .prioritizesArtwork(order: index)
                                 }
                             }
                         }
@@ -388,6 +392,24 @@ private struct HomeWidgetEditor: View {
             await model.load()
             loaded = true
         }
+    }
+}
+
+/// Visibility is local to each section, so scrolling does not rebuild all of Home.
+private struct VisibleHomeSection: ViewModifier {
+    let model: HomeViewModel
+    let sectionID: String
+    let revision: Int
+    @State private var isVisible = false
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.loadsVisibleArtwork, isVisible)
+            .onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
+            .task(id: "\(sectionID)|\(revision)|\(isVisible)") {
+                guard isVisible else { return }
+                await model.loadVisibleSection(sectionID)
+            }
     }
 }
 

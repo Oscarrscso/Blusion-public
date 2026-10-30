@@ -35,6 +35,8 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var autoPickSource: StreamSourcePreference
     /// Subtitle, audio, picture and gesture preferences for the built-in player.
     public var player: PlayerPreferences
+    /// The listener's own tuning of the app's haptics (see `HapticPreferences` and the Haptics page in Settings).
+    public var haptics: HapticPreferences
     /// OpenSubtitles.com: an API key from the user's own (free) developer account, and optionally their login, which raises the
     /// daily download allowance. Stored as secrets.
     public var openSubtitlesAPIKey: String?
@@ -46,8 +48,10 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
                 autoPlayBestStream: Bool = false, omdbAPIKey: String? = nil, tmdbReadToken: String? = nil,
                 continueWatchingRefreshSeconds: Int? = 300, showsColouredRatingLogos: Bool = false, matchesEpisodeWidthToText: Bool = false,
                 autoPickWait: AutoPickWait = .allAddons, autoPickSource: StreamSourcePreference = .balanced, player: PlayerPreferences = PlayerPreferences(),
-                openSubtitlesAPIKey: String? = nil, openSubtitlesUsername: String? = nil, openSubtitlesPassword: String? = nil) {
+                openSubtitlesAPIKey: String? = nil, openSubtitlesUsername: String? = nil, openSubtitlesPassword: String? = nil,
+                haptics: HapticPreferences = HapticPreferences()) {
         self.player = player
+        self.haptics = haptics
         self.openSubtitlesAPIKey = openSubtitlesAPIKey
         self.openSubtitlesUsername = openSubtitlesUsername
         self.openSubtitlesPassword = openSubtitlesPassword

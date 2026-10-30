@@ -60,7 +60,7 @@ struct TitleStreams: Equatable {
 
     /// A Continue Watching card opened the page on this item: as if Play had been tapped, so Play spins.
     mutating func open(_ request: StreamRequest) {
-        if hasStarted { restarts += 1 }
+        if self.request != nil { restarts += 1 }
         self.request = request
         trigger = .play
         isReady = false

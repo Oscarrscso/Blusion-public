@@ -50,10 +50,6 @@ struct StreamPickerView: View {
     /// The streams saved to another player's library from this picker, whose bookmarks are filled.
     @State private var savedStreams: Set<RankedStream.ID> = []
     @State private var pendingSaves: [String: RankedStream.ID] = [:]
-    #if targetEnvironment(macCatalyst)
-    /// The Mac cards whose technical details are open.
-    @State private var openDetails: Set<RankedStream.ID> = []
-    #endif
     /// True when ghost mode stopped a stream that only opens in another app.
     @State private var ghostBlocked = false
     /// The stream cards that have already come in, so a card scrolled away and back does not animate again.
@@ -84,6 +80,8 @@ struct StreamPickerView: View {
     private let onAutomaticStart: ((Bool) -> Void)?
     /// True for a picker that starts the best stream on opening whatever Auto Pick's switch says: a poster held to play it.
     private let forcesAutomaticStart: Bool
+    /// A one-off player chosen from the title's Play context menu.
+    private let preferredAutomaticPlayer: ExternalPlayer?
     /// Recovery shows the choices without immediately retrying the stream that just failed.
     private let allowsAutomaticStart: Bool
     /// True from the moment the streams open with Auto Pick's switch on until it has had nothing to start. Meanwhile `onReady` waits, so
@@ -112,12 +110,14 @@ struct StreamPickerView: View {
     init(request: StreamRequest, services: AppServices, isEmbedded: Bool = false, isRevealed: Bool = true, onClose: (() -> Void)? = nil,
          onReady: ((Bool) -> Void)? = nil, scrollToRow: ((AnyHashable) -> Void)? = nil, episodeScore: DetailViewModel.EpisodeScore? = nil,
          episodeSwitcher: EpisodeSwitcher? = nil, isHeadless: Bool = false, forcesAutomaticStart: Bool = false,
-         onAutomaticStart: ((Bool) -> Void)? = nil, playColourHex: String? = nil, allowsAutomaticStart: Bool = true) {
+         onAutomaticStart: ((Bool) -> Void)? = nil, playColourHex: String? = nil, allowsAutomaticStart: Bool = true,
+         preferredAutomaticPlayer: ExternalPlayer? = nil) {
         self.episodeScore = episodeScore
         self.episodeSwitcher = episodeSwitcher
         self.playColourHex = playColourHex
         self.isHeadless = isHeadless
         self.forcesAutomaticStart = forcesAutomaticStart
+        self.preferredAutomaticPlayer = preferredAutomaticPlayer
         self.allowsAutomaticStart = allowsAutomaticStart
         self.onAutomaticStart = onAutomaticStart
         self.services = services
@@ -292,11 +292,8 @@ struct StreamPickerView: View {
                     .padding(.horizontal, streamMargin)
                 addonChips
                     .padding(.horizontal, streamMargin)
-                #if !targetEnvironment(macCatalyst)
-                // On a Mac the filter sits in Auto Pick's row instead (see `playBestButton`).
                 resolutionChips
                     .padding(.horizontal, streamMargin)
-                #endif
                 failures
                 emptyState
                 loadingRows
@@ -323,6 +320,7 @@ struct StreamPickerView: View {
             .task {
                 // Asked once, here: routing hands streams to these players only, and the menus offer only these.
                 model.setInstalledPlayers(Set(ExternalPlayer.allCases.filter(isInstalled)))
+                model.automaticPlayerOverride = preferredAutomaticPlayer
                 await model.loadAutoPlayPreference()
                 // The previous viewing session for this title, when the app was left or killed: its own stream resumes
                 // (`automaticStartCandidate`), and a stream another player played is handed its position and choices.
@@ -339,7 +337,13 @@ struct StreamPickerView: View {
                     if startsAutomatically, !hasSelectedManually {
                         // All automatic launches take the same ranked route as normal Play:
                         // Blusion by default, Infuse only when the saved preference calls for it.
-                        if let candidate = model.automaticStartCandidate {
+                        let candidate: RankedStream?
+                        if let preferredAutomaticPlayer {
+                            candidate = model.bestHandoffCandidate(for: preferredAutomaticPlayer)
+                        } else {
+                            candidate = model.automaticStartCandidate
+                        }
+                        if let candidate {
                             select(candidate, automatically: true)
                         } else {
                             finishAutomaticStart(started: false)
@@ -650,13 +654,8 @@ struct StreamPickerView: View {
 
     /// How much the switch is scaled so it is as tall as the Auto Pick button. 1 until both have been measured.
     private var autoPickSwitchScale: CGFloat {
-        #if targetEnvironment(macCatalyst)
-        // A Mac's switch keeps the Mac's own size.
-        return 1
-        #else
         guard autoPickButtonHeight > 0, autoPickSwitchSize.height > 0 else { return 1 }
         return autoPickButtonHeight / autoPickSwitchSize.height
-        #endif
     }
 
     /// Embedded in a title page: a small round X, as tall as Auto Pick, that takes the streams away and puts the details back.
@@ -712,10 +711,7 @@ struct StreamPickerView: View {
                         }
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
-                        #if !targetEnvironment(macCatalyst)
-                        // On a Mac it is as wide as its label, so the row is one compact line of controls.
                         .frame(maxWidth: .infinity)
-                        #endif
                     }
                     .buttonStyle(.primaryActionCompact)
                     .controlSize(.small)
@@ -745,11 +741,6 @@ struct StreamPickerView: View {
                     .accessibilityLabel("Always pick the best stream")
                     .accessibilityHint("Starts the best stream at once whenever you open a title's streams")
                     .accessibilityIdentifier("streams.autoPickAlways")
-                    #if targetEnvironment(macCatalyst)
-                    // The filter joins the row on a Mac, at its own width, rather than a full-width bar of its own under Best Blu-ray.
-                    resolutionChips
-                        .fixedSize()
-                    #endif
                 }
                 if let message = model.autoPickMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
             }
@@ -839,10 +830,6 @@ struct StreamPickerView: View {
             } set: { index in
                 addonFilter = index > 0 && index <= addons.count ? addons[index - 1].id : nil
             }, accessibilityID: "streams.addonFilter")
-            #if targetEnvironment(macCatalyst)
-            // On a Mac it keeps its own width at the leading edge, as the sharpness filter does in Auto Pick's row.
-            .fixedSize()
-            #endif
         }
     }
 
@@ -986,13 +973,9 @@ struct StreamPickerView: View {
                           isPreparing: preparingItemID == item.id)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         guard order < 3, height > 0 else { return }
-                        #if targetEnvironment(macCatalyst)
-                        Self.lastStreamCardHeights[order] = height
-                        #else
                         // Include the collapsed footer, regardless of whether this card's details are currently expanded.
                         Self.lastStreamCardHeights[order] = height + 1 + Theme.Spacing.m * 2
                             + UIFont.preferredFont(forTextStyle: .footnote).lineHeight.rounded(.up)
-                        #endif
                     }
             }
             // On a Mac one hover effect: the card's own highlight, without the system's on top of it. iPad keeps both, as before.
@@ -1038,23 +1021,7 @@ struct StreamPickerView: View {
                     }
                 }
             }
-            #if targetEnvironment(macCatalyst)
-            // A Mac card opens its technical details from a chevron at the end of its facts line, set in the room the card keeps there.
-            .overlayPreferenceValue(StreamDetailsSlotKey.self) { slot in
-                if let slot {
-                    GeometryReader { proxy in
-                        StreamDetailsDisclosure(isExpanded: openDetails.contains(item.id)) { toggleDetails(of: item) }
-                            .position(x: proxy[slot].midX, y: proxy[slot].midY)
-                            .accessibilityIdentifier("stream.details.\(item.title)")
-                    }
-                }
-            }
-            #endif
-            #if targetEnvironment(macCatalyst)
-            StreamTechnicalDetails(item: item, openedOutside: openDetails.contains(item.id))
-            #else
             StreamTechnicalDetails(item: item)
-            #endif
         }
         .cardSurface(cornerRadius: StreamCardMetrics.cornerRadius)
         .streamLookGlow(look)
@@ -1143,7 +1110,13 @@ struct StreamPickerView: View {
         hasSelectedManually = true
         autoPickTask?.cancel()
         autoPickTask = Task {
-            guard let choice = await model.choose(item) else {
+            let choice: StreamPickerViewModel.Choice?
+            if automatically, let preferredAutomaticPlayer {
+                choice = await model.handoffChoice(for: item, player: preferredAutomaticPlayer)
+            } else {
+                choice = await model.choose(item)
+            }
+            guard let choice else {
                 isOpeningPlayer = false
                 if automatically { finishAutomaticStart(started: false) }
                 return
@@ -1316,14 +1289,6 @@ struct StreamPickerView: View {
         return true
     }
 
-    #if targetEnvironment(macCatalyst)
-    /// Opens or folds a Mac card's technical details, with the motion the row on iPhone has, or none with Reduce Motion on.
-    private func toggleDetails(of item: RankedStream) {
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
-            if openDetails.contains(item.id) { openDetails.remove(item.id) } else { openDetails.insert(item.id) }
-        }
-    }
-    #endif
 
     /// Bookmark saves return to Blusion on confirmation. Downloads stay in Infuse unless
     /// Infuse reports an error; neither action claims the video has finished downloading.

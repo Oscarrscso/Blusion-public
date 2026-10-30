@@ -68,7 +68,7 @@ struct HeroCarousel: View {
     /// pictures are decoded larger and too big to hold more. The nearest page and its neighbour start at once; the rest of the window
     /// follows. Pages beyond it let go of their picture and show whatever is still cached, else their poster, until a swipe brings them in
     /// range.
-    static func loadWindow(isLandscape: Bool) -> Int { isLandscape ? 2 : 4 }
+    static func loadWindow(isLandscape: Bool) -> Int { 0 }
 
     /// True on a Mac build. The spotlight keeps its landscape form in every window shape there, rather than following the window's aspect.
     static var isMacCatalyst: Bool {
@@ -151,6 +151,7 @@ struct HeroCarousel: View {
                     .onChange(of: pageID) { oldID, newID in
                         guard let oldID, let newID, oldID != newID,
                               items.contains(where: { $0.identity == oldID }) else { return }
+                        // A whole page of content is replaced, so this is the harder click rather than the standard tap.
                         Haptics.scrollSnap()
                     }
                     .onAppear {
@@ -167,37 +168,6 @@ struct HeroCarousel: View {
                 if isHoveringSpotlight && items.count > 1 { pageArrows }
             }
             #endif
-            .task(id: items.map(\.identity)) { await preload() }
-    }
-
-    /// Loads every item's stand-in, then every item's logo, nearest the current page first, so no page shows a grey box or a missing logo
-    /// when a swipe reaches it. The stand-in is the one `HeroPicture` shows, at the size it asks for. Failures are ignored; a page that
-    /// needs one asks again.
-    private func preload() async {
-        let nearestFirst = items.enumerated().sorted { abs($0.offset - currentIndex) < abs($1.offset - currentIndex) }.map(\.element)
-        await withTaskGroup(of: Void.self) { group in
-            for (index, item) in nearestFirst.enumerated() {
-                guard let url = PosterQuality.poster(for: item) else { continue }
-                let priority: TaskPriority = index <= 1 ? .high : .low
-                group.addTask(priority: priority) {
-                    _ = try? await ImagePipeline.shared.image(for: url, maxPixelSize: TitleHero.placeholderPixelSize, priority: priority)
-                }
-            }
-        }
-        guard !Task.isCancelled else { return }
-        let ratings = ratings
-        let portrait = !isLandscape
-        await withTaskGroup(of: Void.self) { group in
-            for item in nearestFirst {
-                group.addTask(priority: .medium) {
-                    let artwork = await ratings.heroArtwork(for: item)
-                    // A portrait picture that carries the title hides the logo, so there is nothing to warm.
-                    guard !Task.isCancelled, !(portrait && artwork?.portraitHidesLogo == true),
-                          let url = item.logo ?? artwork?.logo else { return }
-                    await HeroLoader.warmLogo(url, priority: .medium)
-                }
-            }
-        }
     }
 
     /// The page dots. In portrait they sit at the page's bottom edge, under the metadata line, which now runs lower (see `HeroPage.pageContent`),
@@ -249,6 +219,7 @@ private struct HeroPage: View {
     let artworkHeight: CGFloat
     /// Pages between this one and the one on screen. Only pages inside `HeroCarousel.loadWindow(isLandscape:)` load their picture.
     let distance: Int
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.heroContainerWidth) private var containerWidth
@@ -281,7 +252,7 @@ private struct HeroPage: View {
         _certification = State(initialValue: cachedCertification)
     }
 
-    private var isInWindow: Bool { distance <= HeroCarousel.loadWindow(isLandscape: isLandscape) }
+    private var isInWindow: Bool { sectionIsVisible && distance == 0 }
     /// The nearest two pages jump the queue; the next one waits behind them.
     private var loadPriority: TaskPriority { distance <= 1 ? .high : .medium }
 
@@ -429,9 +400,9 @@ private struct HeroPage: View {
             guard !Task.isCancelled else { return }
             certification = loaded
         }
-        .task(id: "meta|\(distance <= 1)") {
-            // The page on screen and its neighbours ask for their details, so the line is ready before a swipe reaches it.
-            guard distance <= 1 else { return }
+        .task(id: "meta|\(isInWindow)") {
+            // Only the current page asks for details.
+            guard isInWindow else { return }
             await heroMeta?.load(for: item)
             guard !Task.isCancelled else { return }
             detailsSettled = true
@@ -439,8 +410,8 @@ private struct HeroPage: View {
         // The title's Play colour is read while its page is on show, as a poster card reads it, so its title page has the colour on the
         // first frame: a dull poster takes the logo's colour, and the title page only reads a logo that is already loaded. Asked again
         // once the page reveals, when its stand-in poster has surely loaded.
-        .task(id: "play-colour|\(distance == 0)|\(isRevealed)") {
-            guard distance == 0 else { return }
+        .task(id: "play-colour|\(isInWindow)|\(isRevealed)") {
+            guard isInWindow else { return }
             await PlayColourStore.shared.read(identity: item.identity, pictures: PlayColourStore.pictures(for: item),
                                               logos: PlayColourStore.logos(for: item))
         }
@@ -522,8 +493,10 @@ private struct HeroPage: View {
     private var artwork: some View {
         Color.clear
             .overlay {
-                HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, preview: item,
-                            standInFromBackdrop: HeroCarousel.isMacCatalyst)
+                if isInWindow {
+                    HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, preview: item,
+                                standInFromBackdrop: HeroCarousel.isMacCatalyst)
+                }
             }
     }
 

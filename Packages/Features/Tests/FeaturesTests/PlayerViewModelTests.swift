@@ -16,10 +16,16 @@ import StremioKitTestSupport
         var made: [String: MockEngine] = [:]
         var fallbackMade: [String: MockEngine] = [:]
         let outcomes: [String: MockEngine.Outcome]
-        init(_ outcomes: [String: MockEngine.Outcome]) { self.outcomes = outcomes }
+        /// The fastest rate each engine plays, by candidate; the mock's generous default otherwise.
+        let maximumRates: [String: Float]
+        init(_ outcomes: [String: MockEngine.Outcome], maximumRates: [String: Float] = [:]) {
+            self.outcomes = outcomes
+            self.maximumRates = maximumRates
+        }
         func make(_ candidate: PlaybackCandidate) -> (any PlaybackEngine)? {
             guard let outcome = outcomes[candidate.id] else { return nil }
             let engine = MockEngine(outcome)
+            if let maximum = maximumRates[candidate.id] { engine.maximumRate = maximum }
             if case .fallback = candidate.route {
                 fallbackMade[candidate.id] = engine
             } else {
@@ -437,23 +443,168 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// Holding the picture plays at double speed; letting go returns to the speed before. A paused film is not started.
-    @Test func holdingPlaysAtDoubleSpeedUntilLetGo() async throws {
+    /// A hold begins at 2×; dragging up steps it to 3× and 4×, dragging back steps it down, and letting go returns the film to the speed it
+    /// was at, exactly. Each step is one engine call, and a finger moving within one step makes none.
+    @Test func holdStepsUpAndDownAndReturnsToTheSpeedBeforeLetGo() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
         try await waitUntil { model.isPlaying }
         model.setRate(1.25)
-        model.holdDoubleSpeed(true)
-        #expect(model.heldRate == 1.25)
-        model.holdDoubleSpeed(true)   // a second report while held changes nothing
-        model.holdDoubleSpeed(false)
-        #expect(model.heldRate == nil)
-        #expect(engines.made["a"]?.rates.suffix(3) == [1.25, 2, 1.25])
+        #expect(model.beginHeldSpeed())
+        #expect(model.heldSpeed == PlayerViewModel.HeldSpeed(restoreRate: 1.25, rate: 2))
+        #expect(model.state.rate == 2, "the badge reads the speed the engine reports")
+        let steps: [(Double, Float)] = [(-40, 3), (-80, 4), (-200, 4), (-40, 3), (-20, 2), (0, 2)]
+        for (displacement, expected) in steps {
+            model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum))
+            #expect(model.heldSpeed?.rate == expected, "\(displacement) points from the hold's start")
+        }
+        model.endHeldSpeed()
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates == [1.25, 2, 3, 4, 3, 2, 1.25])
+        await model.close()
+    }
+
+    /// The engine's own ceiling caps the hold: a hold on an engine topping out at 2× never asks for more.
+    @Test func holdStopsAtTheEnginesOwnCeiling() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        engines.made["a"]?.maximumRate = 2
+        #expect(model.heldSpeedMaximum == 2)
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(SpeedHoldRules.rate(displacement: -300, maximum: model.heldSpeedMaximum))
+        #expect(model.heldSpeed?.rate == 2)
+        #expect(engines.made["a"]?.rates == [2], "the engine is asked for 2× once, never 3× or 4×")
+        model.endHeldSpeed()
+        await model.close()
+    }
+
+    @Test func heldSpeedRejectsInvalidRatesAndClampsBothEnds() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(-1)
+        model.setHeldSpeed(.nan)
+        model.setHeldSpeed(.infinity)
+        model.setHeldSpeed(100)
+        model.setHeldSpeed(100)
+        model.endHeldSpeed()
+        #expect(engines.made["a"]?.rates == [1.25, 2, 4, 1.25])
+        await model.close()
+    }
+
+    /// A paused film takes no hold, and the engine hears nothing of the press.
+    @Test func aPausedFilmTakesNoHold() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
         model.togglePlayPause()
         try await waitUntil { !model.isPlaying }
-        model.holdDoubleSpeed(true)
-        #expect(model.heldRate == nil, "a paused film is not sped up")
+        #expect(model.beginHeldSpeed() == false)
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates.isEmpty == true)
+        await model.close()
+    }
+
+    /// Begin and end are idempotent: a second begin takes nothing, a second end undoes nothing, and a repeated step makes no call.
+    @Test func repeatedBeginAndEndDoNothingTwice() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        #expect(model.beginHeldSpeed() == false)
+        model.setHeldSpeed(2)
+        model.endHeldSpeed()
+        model.endHeldSpeed()
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates == [1.25, 2, 1.25])
+        await model.close()
+    }
+
+    /// Holds come and go: each release returns the film to its speed, and the next hold starts again from there.
+    @Test func consecutiveHoldsEachReturnToTheSpeedBeforeThem() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(3)
+        model.endHeldSpeed()
+        #expect(model.beginHeldSpeed())
+        model.endHeldSpeed()
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates == [1.25, 2, 3, 1.25, 2, 1.25])
+        await model.close()
+    }
+
+    /// A speed chosen from the Speed panel during a hold is the one the hold returns to; the speed held now is unchanged.
+    @Test func aSpeedChosenDuringAHoldIsTheOneItReturnsTo() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        model.setRate(1.5)
+        #expect(model.heldSpeed == PlayerViewModel.HeldSpeed(restoreRate: 1.5, rate: 2))
+        model.endHeldSpeed()
+        #expect(engines.made["a"]?.rates == [1.25, 2, 1.5])
+        await model.close()
+    }
+
+    /// A film that ends mid-hold comes back to its speed, so the next film does not start at the held speed.
+    @Test func theFilmEndingReleasesAHold() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(3)
+        engines.made["a"]?.simulateEnd()
+        try await waitUntil { model.hasFinished }
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates.last == 1.25)
+        await model.close()
+    }
+
+    /// Closing the player drops a hold without an engine call, because the engine is being stopped.
+    @Test func closingDuringAHoldDropsIt() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        #expect(model.beginHeldSpeed())
+        await model.close()
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates == [2])
+    }
+
+    /// Replacing the stream ends the old picture's hold before applying session settings to the new engine.
+    @Test func changingStreamsRestoresThePreHoldSpeed() async throws {
+        let engines = Engines(["a": .plays(duration: 200), "b": .plays(duration: 200)], maximumRates: ["b": 2])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a"), candidate("b")]),
+                                    services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(SpeedHoldRules.rate(displacement: -200, maximum: model.heldSpeedMaximum))
+        #expect(model.heldSpeed?.rate == 4)
+        await model.selectStream(at: 1)
+        try await waitUntil { model.isPlaying }
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["b"]?.rates.isEmpty == true, "the replacement starts at the original 1×")
+        model.endHeldSpeed()
+        #expect(engines.made["b"]?.rates.isEmpty == true)
         await model.close()
     }
 

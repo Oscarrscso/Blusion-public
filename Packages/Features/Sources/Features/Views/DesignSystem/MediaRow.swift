@@ -126,7 +126,12 @@ struct MediaRow<Content: View>: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(subviews: content()) { card in
+                        #if targetEnvironment(macCatalyst)
+                        // This row sizes itself; only iPhone haptics consume its card-edge preferences.
+                        card.id(card.id)
+                        #else
                         card.id(card.id).reportsShelfEdge(id: card.id)
+                        #endif
                     }
                 }
                 .scrollTargetLayout()
@@ -150,13 +155,8 @@ struct MediaRow<Content: View>: View {
     }
 }
 
-/// A grid of titles that fills the width: three posters across a phone, as many as fit in a Mac window. Whatever the layout, it keeps the
-/// posters of the "Lazy load" buffer (see `LazyLoadLookahead`) above and below the visible titles loaded, so they are in memory before
-/// they scroll on screen, and unloads them from memory once they are further away. `onLastAppear` makes it paged: it fires while the
-/// viewer is within the buffer of the end, so a caller can load the next page. A paged grid also draws a blank card of the same size for
-/// titles outside the buffer. What is visible comes from the grid's own geometry against its scroll view, not from its cells.
-/// `usesBetterPosters` makes the posters of a poster grid take their pictures from the BetterPosters addon (see `MediaCard`).
-/// `fillsWidth` makes a Mac grid's columns span its whole width, edge to edge between the page margins (see `GridFill`).
+/// A lazy grid whose cards load only while visible. The last visible card requests the next page.
+/// `fillsWidth` makes Mac columns span the available width.
 struct MediaGrid: View {
     let items: [MetaPreview]
     let aspect: CardAspect
@@ -165,14 +165,8 @@ struct MediaGrid: View {
     let usesBetterPosters: Bool
     let fillsWidth: Bool
     @State private var zoomScope = UUID().uuidString
-    /// The titles whose rows are on screen; nil before the first reading.
-    @State private var visible: ClosedRange<Int>?
-    @State private var prefetcher = ArtworkPrefetcher()
-    /// The chosen level; reading it here makes the grid follow the slider while it is alive.
-    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
-    @Environment(\.displayScale) private var displayScale
 
     init(items: [MetaPreview], aspect: CardAspect = .poster, showsRating: Bool = true, onLastAppear: (() -> Void)? = nil,
          usesBetterPosters: Bool = false, fillsWidth: Bool = false) {
@@ -184,53 +178,20 @@ struct MediaGrid: View {
         self.fillsWidth = fillsWidth
     }
 
-    /// Titles kept ready on each side of the visible ones.
-    private var buffer: Int { LazyLoadLookahead.titles(atLevel: lookaheadLevel) }
-
-    /// The indices that stay loaded: the visible ones and `buffer` titles each way. Nil before the first reading.
-    private var bufferRange: ClosedRange<Int>? {
-        visible.flatMap { LazyLoadLookahead.bufferRange(visible: $0, count: items.count, titles: buffer) }
-    }
-
     var body: some View {
-        // Only a paged grid blanks cards; before the first reading nothing is blanked.
-        let kept = onLastAppear == nil ? nil : bufferRange
-        // A poster in landscape is drawn as a wide card without a caption (see `MediaCard`), so its blank card has that shape.
-        let landscapePoster = isLandscape && aspect == .poster
-        let spacing = metrics.cardSpacing
-        let columns = filled(metrics.gridColumns(for: aspect, inLandscape: isLandscape))
-        let count = items.count
-        LazyVGrid(columns: columns, alignment: .leading, spacing: spacing) {
-            ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in
-                Group {
-                    if let kept, !kept.contains(index) {
-                        UnloadedCard(artwork: landscapePoster ? .wide : aspect, showsCaption: aspect.showsCaptionByDefault)
-                    } else {
-                        MediaCardLink(item: item, aspect: aspect, showsRating: showsRating, usesBetterPosters: usesBetterPosters)
-                            .stretched()
+        LazyVGrid(columns: filled(metrics.gridColumns(for: aspect, inLandscape: isLandscape)),
+                  alignment: .leading, spacing: metrics.cardSpacing) {
+            ForEach(items, id: \.identity) { item in
+                MediaCardLink(item: item, aspect: aspect, showsRating: showsRating, usesBetterPosters: usesBetterPosters)
+                    .stretched()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onScrollVisibilityChange(threshold: 0.01) { visible in
+                        if visible, item.identity == items.last?.identity { onLastAppear?() }
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        // The reading is the range of titles whose rows meet the scroll view's viewport. It changes only when a row enters or leaves.
-        .onGeometryChange(for: ClosedRange<Int>?.self) { proxy in
-            guard let viewport = proxy.bounds(of: .scrollView) else { return count > 0 ? 0...(count - 1) : nil }
-            return LazyLoadLookahead.visibleItems(
-                viewportMinY: viewport.minY, viewportMaxY: viewport.maxY, gridHeight: proxy.size.height, rowSpacing: spacing,
-                columns: Self.columnCount(of: columns, width: proxy.size.width, spacing: spacing), count: count)
-        } action: { visible = $0 }
         .padding(.horizontal, metrics.pageMargin)
         .environment(\.zoomScope, zoomScope)
-        .onChange(of: visible) { loadNextPageIfNear() }
-        .onChange(of: items.count) { loadNextPageIfNear() }
-        .onChange(of: bufferRange) { refreshPrefetch() }
-        .onChange(of: items.count) { refreshPrefetch() }
-        .onChange(of: items.first?.identity) { refreshPrefetch() }
-        .onChange(of: lookaheadLevel) { refreshPrefetch() }
-        .onChange(of: isLandscape) { refreshPrefetch() }
-        .onChange(of: metrics.isRegular) { refreshPrefetch() }
-        .onDisappear { prefetcher.cancelAll() }
     }
 
     /// Mac, for a grid that fills its width: an adaptive column stops at its maximum width and so can leave a gutter on the right, so its
@@ -244,35 +205,7 @@ struct MediaGrid: View {
         #endif
     }
 
-    /// How many columns SwiftUI lays `columns` out in at `width`: one per fixed or flexible item, and for an adaptive item as many
-    /// minimum-width columns (plus spacing) as fit, at least one.
-    private static func columnCount(of columns: [GridItem], width: CGFloat, spacing: CGFloat) -> Int {
-        columns.reduce(0) { total, column in
-            switch column.size {
-            case .adaptive(let minimum, _): total + GridFill.columnCount(width: width, minimum: minimum, spacing: spacing)
-            default: total + 1
-            }
-        }
-    }
 
-    /// Asks for the next page while the viewer is within the buffer of the end.
-    private func loadNextPageIfNear() {
-        guard let onLastAppear, let visible else { return }
-        if visible.upperBound >= LazyLoadLookahead.triggerIndex(count: items.count, titles: buffer) { onLastAppear() }
-    }
-
-    private func requests(_ range: ClosedRange<Int>, skipping skipped: ClosedRange<Int>? = nil) -> [ArtworkPrefetcher.Request] {
-        range.filter { !(skipped?.contains($0) ?? false) && items.indices.contains($0) }.flatMap {
-            MediaCard.artworkRequests(for: items[$0], aspect: aspect, metrics: metrics, isLandscape: isLandscape, displayScale: displayScale,
-                                      usesBetterPosters: usesBetterPosters)
-        }
-    }
-
-    /// Tells the prefetcher to load the posters of the buffer's titles that are not on screen themselves (those load as cards).
-    private func refreshPrefetch() {
-        guard let visible, let range = bufferRange else { return }
-        prefetcher.update(wanted: requests(range, skipping: visible))
-    }
 }
 
 /// What a `MediaGrid` shows before its first titles arrive: blank cards in the grid's own columns, card shape, spacing and margins, so each

@@ -31,7 +31,7 @@ struct LayoutMetrics: Equatable, Sendable {
     var squareWidth: CGFloat
     /// Width of a 16:9 category tile in a shelf.
     var tileWidth: CGFloat
-    /// Width of an episode lockup (16:9 still with its texts underneath).
+    /// Shared fixed width of episode cards and folded TMDb reviews in either orientation.
     var episodeWidth: CGFloat
     /// Diameter of a cast and crew avatar.
     var avatarSize: CGFloat
@@ -44,13 +44,13 @@ struct LayoutMetrics: Equatable, Sendable {
 
     static let compact = LayoutMetrics(
         isRegular: false, pageMargin: Theme.Spacing.l, shelfSpacing: 28, headerSpacing: 10, cardSpacing: 12,
-        posterWidth: 128, wideCardWidth: 260, squareWidth: 124, tileWidth: 200, episodeWidth: 250, avatarSize: 72,
+        posterWidth: 128, wideCardWidth: 260, squareWidth: 124, tileWidth: 200, episodeWidth: 200, avatarSize: 72,
         readableWidth: .infinity, heroHeightFraction: 0.66, heroMaxHeight: 640
     )
 
     static let regular = LayoutMetrics(
         isRegular: true, pageMargin: Theme.Spacing.l, shelfSpacing: 36, headerSpacing: 12, cardSpacing: 16,
-        posterWidth: 180, wideCardWidth: 300, squareWidth: 176, tileWidth: 260, episodeWidth: 280, avatarSize: 88,
+        posterWidth: 180, wideCardWidth: 300, squareWidth: 176, tileWidth: 260, episodeWidth: 240, avatarSize: 88,
         readableWidth: 640, heroHeightFraction: 0.58, heroMaxHeight: 620
     )
 
@@ -157,6 +157,8 @@ extension EnvironmentValues {
     /// Home supplies its width too, so the portrait spotlight is the same height as the title page's picture.
     @Entry var heroContainerWidth: CGFloat = 390
     @Entry var isHomeScrolling = false
+    /// An offscreen Home section must not activate cards inside its horizontal scroll view.
+    @Entry var loadsVisibleArtwork = true
     /// The safe-area insets of the window this view is in, as its root measured them. A screen that runs under the bars or the notch reads
     /// these when its own geometry cannot report them.
     @Entry var windowSafeArea = EdgeInsets()

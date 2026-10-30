@@ -46,6 +46,8 @@ public final class HomeViewModel {
 
     private let services: AppServices
     private var generation = 0
+    public private(set) var loadRevision = 0
+    @ObservationIgnored private var requestedSections: Set<String> = []
     private var traktPlayback: [TraktPlaybackItem] = []
     private var refreshingPlayback = false
     private var lastPlaybackRefresh = Date.distantPast
@@ -62,7 +64,7 @@ public final class HomeViewModel {
         return phase == .ready && !rows.isEmpty && errors.count == rows.count && Connectivity.isOffline(errors)
     }
 
-    /// Rebuilds the sections from the saved widgets (or `DefaultWidgets.make(for:)`) and starts rows in layout order.
+    /// Rebuilds the sections from the saved widgets (or `DefaultWidgets.make(for:)`) and leaves row loading to viewport visibility.
     public func load() async {
         generation += 1
         let current = generation
@@ -93,21 +95,35 @@ public final class HomeViewModel {
         let laidOut = saved ?? DefaultWidgets.make(for: addons)
         layoutWidgets = Dictionary(laidOut.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let widgets = await shuffled(laidOut, addons: addons)
-        // Only the first rows' saved items are read before Home shows, so a long layout does not wait for every row's file; the rest
-        // fill in afterwards, top to bottom.
-        let rows = HomeViewModel.loadingRows(of: widgets)
-        let leading = Array(rows.prefix(HomeViewModel.rowsReadBeforeShowing))
-        let known = await lastKnownItems(for: leading)
         guard current == generation, !Task.isCancelled else { return }
         let previous = sections
-        sections = widgets.map { HomeViewModel.startingSection(for: $0, previous: previous, known: known) }
+        sections = widgets.map { HomeViewModel.startingSection(for: $0, previous: previous, known: [:]) }
+        requestedSections = []
+        loadRevision += 1
         phase = (saved == nil && widgets.isEmpty) ? .noCatalogs : .ready
-        let missingPhotos = await showKnownTilePhotos(for: widgets, generation: current)
-        await showLastKnownItems(for: Array(rows.dropFirst(leading.count)), generation: current)
-        await loadRows(generation: current)
-        guard current == generation, !Task.isCancelled else { return }
-        HomeStartup.shared.markSettled()
-        await loadTilePhotos(missingPhotos, widgets: widgets, generation: current)
+        if widgets.isEmpty { HomeStartup.shared.markSettled() }
+    }
+
+    /// Fetch only sections that enter the viewport. Completed sections keep their metadata when scrolled away.
+    public func loadVisibleSection(_ id: String) async {
+        guard !Task.isCancelled, !requestedSections.contains(id),
+              let section = sections.first(where: { $0.id == id }) else { return }
+        let current = generation
+        if let row = loadingConfiguration(section.widget.content) {
+            await showLastKnownItems(for: [(id, row)], generation: current)
+            guard current == generation, !Task.isCancelled else { return }
+            let result = await HomeViewModel.fetch(id: id, row: row, from: services.widgetContent, seed: itemSeeds[id])
+            guard current == generation, !Task.isCancelled else { return }
+            requestedSections.insert(id)
+            apply(result)
+            HomeStartup.shared.markSettled()
+        } else if case .collection = section.widget.content {
+            let widgets = [section.widget]
+            let missing = await showKnownTilePhotos(for: widgets, generation: current)
+            await loadTilePhotos(missing, widgets: widgets, generation: current)
+            guard current == generation, !Task.isCancelled else { return }
+            requestedSections.insert(id)
+        }
     }
 
     /// Forgets every cached page, then loads again. The rows keep what they show until the new items arrive.
@@ -201,20 +217,8 @@ public final class HomeViewModel {
         let copy = list[index + 1]
         sections.insert(Section(widget: copy, state: original.state, issue: original.issue, isRefreshing: original.isRefreshing),
                         at: shown + 1)
-        // A row still loading, or showing items from before, fetches for the copy too: its own load would not reach a row added since.
-        switch original.state {
-        case .idle, .loading:
-            await retry(sectionID: copy.id)
-        default:
-            // Items from before stay on the copy until its fresh ones arrive, as on the original.
-            guard original.isRefreshing, let row = loadingConfiguration(copy.content) else { return }
-            let current = generation
-            // The copy takes the original's order until Home next opens.
-            itemSeeds[copy.id] = itemSeeds[sectionID]
-            let result = await HomeViewModel.fetch(id: copy.id, row: row, from: services.widgetContent, seed: itemSeeds[copy.id])
-            guard current == generation, !Task.isCancelled else { return }
-            apply(result)
-        }
+        // The copy keeps the same order; its viewport task loads it when needed.
+        itemSeeds[copy.id] = itemSeeds[sectionID]
     }
 
     /// Cheap refresh for when Home reappears after something was watched: only Continue Watching changes.
@@ -304,85 +308,13 @@ public final class HomeViewModel {
             guard !Task.isCancelled else { break }
             let newSignature = addons.map { "\($0.id.uuidString):\($0.isEnabled)" }
             // Returning from details keeps completed shelves intact. Interrupted loads still resume.
-            guard newSignature != addonSignature || phase == .loading
-                    || sections.contains(where: { $0.state.isLoading || $0.isRefreshing }) else { continue }
+            guard newSignature != addonSignature || phase == .loading else { continue }
             await load()
             if !Task.isCancelled { addonSignature = newSignature }
         }
     }
 
     // MARK: Loading
-
-    /// The heroes and rows read before Home first shows: about a screenful.
-    static let rowsReadBeforeShowing = 4
-    /// How long a row's load has to itself before the next row starts beside it.
-    static let rowHeadStart: Duration = .seconds(1)
-    /// The most rows loading at once, when each takes longer than its head start.
-    static let rowsLoadingAtOnce = 3
-
-    /// The widgets that load items, in layout order.
-    private static func loadingRows(of widgets: [HomeWidget]) -> [(id: String, row: RowConfiguration)] {
-        widgets.compactMap { widget in loadingConfiguration(widget.content).map { (widget.id, $0) } }
-    }
-
-    /// One row at a time, from the top, so a long layout fills in top to bottom and the first posters are not held up by rows far below.
-    /// A row that takes longer than `rowHeadStart` lets the next one start beside it (a slow addon does not hold up the rest), up to
-    /// `rowsLoadingAtOnce` at once.
-    private func loadRows(generation current: Int) async {
-        let content = services.widgetContent
-        let seeds = itemSeeds
-        let rows = HomeViewModel.loadingRows(of: sections.map(\.widget))
-        guard !rows.isEmpty else { return }
-        let headStart = HomeViewModel.rowHeadStart
-        // nil is the head-start timer going off.
-        await withTaskGroup(of: RowResult?.self) { group in
-            var next = 0
-            var loading = 0
-            var timerRunning = false
-            func startNext() {
-                guard next < rows.count else { return }
-                let (id, row) = rows[next]
-                next += 1
-                loading += 1
-                group.addTask { await HomeViewModel.fetch(id: id, row: row, from: content, seed: seeds[id]) }
-            }
-            func startTimer() {
-                guard next < rows.count, !timerRunning else { return }
-                timerRunning = true
-                group.addTask {
-                    try? await Task.sleep(for: headStart)
-                    return nil
-                }
-            }
-            startNext()
-            startTimer()
-            for await result in group {
-                guard current == generation, !Task.isCancelled else { group.cancelAll(); return }
-                if let result {
-                    apply(result)
-                    loading -= 1
-                    if loading == 0 { startNext() }
-                } else {
-                    timerRunning = false
-                    if loading < HomeViewModel.rowsLoadingAtOnce { startNext() }
-                }
-                startTimer()
-                // Every row has answered: the timer's wait is cut short, so Home settles at once.
-                if next == rows.count, loading == 0 { group.cancelAll() }
-            }
-        }
-    }
-
-    /// The last items of `rows`, read one at a time in order. Rows with nothing known are left out.
-    private func lastKnownItems(for rows: [(id: String, row: RowConfiguration)]) async -> [String: [MetaPreview]] {
-        let content = services.widgetContent
-        var known: [String: [MetaPreview]] = [:]
-        for (id, row) in rows {
-            guard !Task.isCancelled else { break }
-            if let items = await HomeViewModel.knownItems(for: row, from: content, seed: itemSeeds[id]), !items.isEmpty { known[id] = items }
-        }
-        return known
-    }
 
     /// Fills the rows still waiting for their first items with their last-known ones, one row at a time from the top, each as soon as it
     /// is read. A row that already shows items keeps them.

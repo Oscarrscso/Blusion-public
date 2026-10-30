@@ -41,6 +41,7 @@ struct GlassSlider: View {
                         let raw = min(max((drag.location.x - thumb / 2) / travel, 0), 1)
                         dragFraction = raw
                         let stop = Int((raw * CGFloat(stops - 1)).rounded()) + 1
+                        // One tick per stop crossed, not one per pixel: a drag over three stops ticks three times.
                         if stop != value { Haptics.selection(); value = stop }
                     }
                     .onEnded { _ in

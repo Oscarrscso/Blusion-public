@@ -149,6 +149,8 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .contextMenu {
             Button("Open title", systemImage: "info.circle") {
+                // No card tap fires here: a context menu action is not a tap on the card, so the click stands in for it, and
+                // the screen changes under it.
                 Haptics.scrollSnap()
                 router.open(.home)
                 router.homePath.append(TitleDestination(preview: preview, sourceID: sourceID))

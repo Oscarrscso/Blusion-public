@@ -38,6 +38,9 @@ public final class DetailViewModel {
     private var savedProgress: [String: WatchProgress] = [:]
     /// Recomputed when details or progress change, rather than sorting every episode during SwiftUI redraws.
     public private(set) var nextUp: Video?
+    /// An untouched next episode is still a continuation once earlier episodes are watched.
+    /// Cached with progress so the Play button does not scan the episode list on every redraw.
+    public private(set) var continuesSeries = false
     /// A show's watched button must not reparse every episode's air date on each view update.
     public private(set) var isSeriesWatched = false
 
@@ -199,17 +202,6 @@ public final class DetailViewModel {
     public func refresh() async {
         await services.posterRatings.refresh()
         await load()
-    }
-
-    /// Only what Play needs: the details and what has been watched, for a poster held to play (see `PosterPlayLauncher`). No hero, reviews,
-    /// credits or trailers are asked for; the title's Play colour is read as for any page.
-    public func loadForPlayback() async {
-        let result = await services.browse.detail(for: preview)
-        guard !Task.isCancelled else { return }
-        detail = result.detail
-        isFallback = result.isFallback
-        isLoading = false
-        await refreshUserState()
     }
 
     private func loadArtwork() async {
@@ -461,6 +453,12 @@ public final class DetailViewModel {
         savedProgress = saved
         progressFractions = fractions
         nextUp = findNextUp()
+        if let nextUp {
+            continuesSeries = watchingOrder.prefix(while: { $0.id != nextUp.id })
+                .contains { watched.contains(episodeIdentity($0)) }
+        } else {
+            continuesSeries = false
+        }
         let airedEpisodes = detail.episodesCountingAsWatched()
         isSeriesWatched = !airedEpisodes.isEmpty && airedEpisodes.allSatisfy { watched.contains(episodeIdentity($0)) }
     }
@@ -730,13 +728,13 @@ public final class DetailViewModel {
         return ordered.first(where: { !watchedIdentities.contains(episodeIdentity($0)) }) ?? ordered.first
     }
 
-    /// "Play", "Resume", "Play S1 · E1", "Resume S2 · E5". "Resume" only when playback starts from saved progress. A next episode that has
-    /// not aired yet gives its air date instead (see `unairedAirLabel`).
+    /// "Resume" also means continuing a series at its next unstarted episode after earlier episodes were watched.
+    /// An unaired next episode gives its air date instead (see `unairedAirLabel`).
     public var primaryActionTitle: String {
         guard isSeries else { return progressFractions[movieIdentity] == nil ? "Play" : "Resume" }
         guard let next = nextUp else { return "Play" }
         if let airs = unairedAirLabel { return airs }
-        let verb = progressFractions[episodeIdentity(next)] == nil ? "Play" : "Resume"
+        let verb = progressFractions[episodeIdentity(next)] != nil || continuesSeries ? "Resume" : "Play"
         guard let season = next.season, let episode = next.episode else { return verb }
         return "\(verb) S\(season) · E\(episode)"
     }

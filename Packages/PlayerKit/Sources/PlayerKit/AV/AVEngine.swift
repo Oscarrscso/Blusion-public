@@ -108,7 +108,9 @@ public final class AVEngine: PlaybackEngine {
 
     public func setRate(_ rate: Float) {
         player.defaultRate = rate
-        if player.timeControlStatus == .playing { player.rate = rate }
+        // A rate set while the player waits for data is the one it resumes at, so it is set whenever playback is wanted, not only
+        // while it is running. Paused, it stays paused.
+        if wantsPlay || player.timeControlStatus == .playing { player.rate = rate }
         update { $0.rate = rate }
     }
 
@@ -137,6 +139,9 @@ public final class AVEngine: PlaybackEngine {
     }
 
     // MARK: Extras
+
+    /// AVPlayer reports whether the loaded item supports rates above 2×. Keep the temporary gesture capped at 4×.
+    public var maximumRate: Float { playerItem?.canPlayFastForward == true ? 4 : 2 }
 
     /// The aspect override and the crop are applied by the video surface (`VideoGeometry`).
     public var capabilities: EngineCapabilities { [.subtitleStyling, .aspectOverride] }
@@ -353,6 +358,8 @@ public final class AVEngine: PlaybackEngine {
         update {
             $0.position = max(0, position)
             if buffered.isFinite { $0.bufferedUntil = buffered }
+            // AVPlayer can refuse a rate its item cannot play: report the rate it is running at, not only the one asked for.
+            if player.timeControlStatus == .playing, player.rate > 0 { $0.rate = player.rate }
         }
     }
 

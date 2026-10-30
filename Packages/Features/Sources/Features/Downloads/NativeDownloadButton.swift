@@ -80,6 +80,7 @@ struct NativeDownloadButton: View {
         }
         .frame(width: size, height: size)
         .highPriorityGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+            // The same tap as the button itself: a long press opens the Downloads screen, it does not do anything heavier.
             Haptics.tap()
             router?.opensDownloads = true
             router?.open(.library)

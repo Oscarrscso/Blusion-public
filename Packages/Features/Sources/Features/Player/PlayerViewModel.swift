@@ -179,7 +179,11 @@ public final class PlayerViewModel {
         let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: pictureLayout,
                                               processing: pendingResume?.processing ?? player.processing,
                                               subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
-        coordinator.onEnded = { [weak self] in self?.hasFinished = true }
+        coordinator.onEnded = { [weak self] in
+            self?.hasFinished = true
+            // The film ended mid-hold: it must not carry on at the held speed into whatever plays next.
+            self?.endHeldSpeed()
+        }
         coordinator.onCandidateChange = { [weak self] candidate in
             self?.lookUpSubtitles(for: candidate)
         }
@@ -212,6 +216,8 @@ public final class PlayerViewModel {
 
     public func close() async {
         isClosed = true
+        // Closing ends any hold without a further engine call: the engine is being stopped.
+        heldSpeed = nil
         cancelScrub()
         subtitleTask?.cancel()
         lookupTasks.forEach { $0.cancel() }
@@ -412,6 +418,7 @@ public final class PlayerViewModel {
     // MARK: Transport
 
     public func togglePlayPause() {
+        endHeldSpeed()
         // The button's glyph decides: during a stall it shows Pause, so a tap pauses.
         if wantsPlayback { coordinator?.pause() } else { coordinator?.play() }
         showControls()
@@ -431,35 +438,69 @@ public final class PlayerViewModel {
     }
 
     public func nextStream() async {
+        endHeldSpeed()
         showControls()
         await coordinator?.advance()
     }
 
     /// Selection is explicit: opening the stream menu itself never switches or plays media.
     public func selectStream(at index: Int) async {
+        endHeldSpeed()
         showControls()
         await coordinator?.selectCandidate(at: index)
     }
 
     public func setRate(_ rate: Float) {
-        coordinator?.setRate(rate)
+        if let held = heldSpeed {
+            // A speed chosen during a hold is the one the hold returns to; the speed held now stays as it is.
+            heldSpeed = HeldSpeed(restoreRate: rate, rate: held.rate)
+        } else {
+            coordinator?.setRate(rate)
+        }
         showControls()
     }
 
-    /// The speed to go back to when a hold at double speed ends; nil while no hold is on.
-    public private(set) var heldRate: Float?
+    /// The press-and-hold speed-up while a finger holds the picture: the speed it plays at now, and the speed the film was at before,
+    /// which comes back exactly on release.
+    public struct HeldSpeed: Equatable, Sendable {
+        public let restoreRate: Float
+        /// Never above `heldSpeedMaximum`: the speed the engine is asked for, which is also what the badge shows.
+        public let rate: Float
+    }
 
-    /// Pressing and holding the picture plays at double speed until the finger lifts, then at the speed before. The controls stay
-    /// as they are. A paused film is not started.
-    public func holdDoubleSpeed(_ holding: Bool) {
-        if holding {
-            guard heldRate == nil, isPlaying, let coordinator else { return }
-            heldRate = coordinator.rate
-            coordinator.setRate(2)
-        } else if let rate = heldRate {
-            heldRate = nil
-            coordinator?.setRate(rate)
-        }
+    /// Set from `beginHeldSpeed` until `endHeldSpeed`; nil otherwise.
+    public private(set) var heldSpeed: HeldSpeed?
+
+    /// The fastest a hold goes on the engine playing: `SpeedHoldRules.ceilingRate`, or lower where that engine cannot play faster.
+    var heldSpeedMaximum: Float { min(SpeedHoldRules.ceilingRate, coordinator?.maximumRate ?? 1) }
+
+    /// Starts a hold at `SpeedHoldRules.startRate`, keeping the speed the film was at for release. A paused film, or one not yet
+    /// playing, takes no hold (returns false), so the press keeps its ordinary handling. The controls stay as they are.
+    @discardableResult
+    public func beginHeldSpeed() -> Bool {
+        guard heldSpeed == nil, isPlaying, let coordinator else { return false }
+        let rate = min(SpeedHoldRules.startRate, heldSpeedMaximum)
+        heldSpeed = HeldSpeed(restoreRate: coordinator.rate, rate: rate)
+        coordinator.setRate(rate)
+        return true
+    }
+
+    /// Moves the held speed to a step. Only a change of step reaches the engine: a finger moving within one step makes no call.
+    public func setHeldSpeed(_ rate: Float) {
+        guard let held = heldSpeed, let coordinator else { return }
+        guard rate.isFinite else { return }
+        let target = min(max(SpeedHoldRules.startRate, rate), heldSpeedMaximum)
+        guard target != held.rate else { return }
+        heldSpeed = HeldSpeed(restoreRate: held.restoreRate, rate: target)
+        coordinator.setRate(target)
+    }
+
+    /// Ends the hold and returns to the speed it began at. Idempotent: a lift, a cancelled touch, leaving the app, the end of the film
+    /// and closing the player may all call it, and only the first has anything to undo.
+    public func endHeldSpeed() {
+        guard let held = heldSpeed else { return }
+        heldSpeed = nil
+        coordinator?.setRate(held.restoreRate)
     }
 
     /// The Mac's ↑ and ↓ keys, in tenths of the full level.
@@ -971,6 +1012,8 @@ public final class PlayerViewModel {
 
     /// Move external subtitles between engine-drawn and overlay-drawn paths as capabilities change across engines.
     private func engineChanged() {
+        // A replacement engine ends the old picture's hold, including an automatic fallback or reconnect.
+        endHeldSpeed()
         guard case .external(let id) = subtitleChoice else { return }
         let engineDraws = capabilities.contains(.engineSubtitles)
         if (engineDrawnOptionID != nil) != engineDraws {

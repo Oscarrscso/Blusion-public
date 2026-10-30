@@ -67,6 +67,7 @@ public final class AetherBackend: FallbackBackend {
     public func setPaused(_ paused: Bool) { session.setPaused(paused) }
     public func seek(to position: TimeInterval) async { await session.seek(to: position) }
     public func setRate(_ rate: Float) { session.setRate(rate) }
+    public var maximumRate: Float { session.maximumRate }
     public func setVolume(_ volume: Float) { session.setVolume(volume) }
     public func setMuted(_ muted: Bool) { session.setMuted(muted) }
     public func selectAudio(id: String?) { session.selectAudio(id: id.flatMap { Int($0.dropFirst()) }) }

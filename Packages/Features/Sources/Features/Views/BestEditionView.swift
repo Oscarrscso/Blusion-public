@@ -31,12 +31,7 @@ struct BestEditionView: View {
                             .font(.caption)
                             .foregroundStyle(summaryColor)
                             .lineLimit(1)
-                        #if targetEnvironment(macCatalyst)
-                        // Folded on a Mac, the row is as wide as its text; open, it runs the column's width.
-                        if isExpanded { Spacer(minLength: Theme.Spacing.s) }
-                        #else
                         Spacer(minLength: Theme.Spacing.s)
-                        #endif
                     }
                     .padding(.horizontal, Theme.Spacing.m)
                     .padding(.vertical, Theme.Spacing.s + 2)
@@ -64,10 +59,6 @@ struct BestEditionView: View {
                 }
             }
             .glassCardSurface(cornerRadius: panelRadius)
-            #if targetEnvironment(macCatalyst)
-            // Folded, the row hugs its text and still cuts a long release name short at the column's edge.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            #endif
         }
     }
 

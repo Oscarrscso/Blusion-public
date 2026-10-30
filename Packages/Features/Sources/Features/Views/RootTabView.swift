@@ -282,12 +282,18 @@ private struct LandscapeTabScrollModifier: ViewModifier {
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
 
     func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        // Mac has no collapsing phone tab bar, so it needs no per-scroll tracking.
+        content
+        #else
         content.onScrollGeometryChange(for: CGFloat.self) {
-            max(0, $0.contentOffset.y + $0.contentInsets.top)
+            guard isPhoneLandscape, UIDevice.current.userInterfaceIdiom == .phone else { return 0 }
+            return max(0, $0.contentOffset.y + $0.contentInsets.top)
         } action: { _, offset in
             guard isPhoneLandscape, UIDevice.current.userInterfaceIdiom == .phone else { return }
             landscapeTabs?.update(offset: offset)
         }
+        #endif
     }
 }
 
@@ -427,6 +433,7 @@ private struct LandscapeTabControls: View {
                 default: tab = .settings
                 }
                 guard tab != router.tab else { return }
+                // A tick as the drag crosses into another tab, so the finger learns the tab changed before it lifts.
                 Haptics.selection()
                 if tab == .home { router.tapTab(.home) } else { router.tapTab(tab) }
             }
@@ -469,8 +476,6 @@ public struct RootTabView: View {
     @State private var resume: ContinueWatchingModel
     @State private var titleActions: TitleActions
     @State private var failedHandoff: PlaybackHandoffReceipt?
-    /// A poster held for a second plays: its streams load in `posterStarter`, which draws nothing.
-    @State private var posterPlay: PosterPlayLauncher
     @State private var isLandscape = false
     @State private var windowSafeArea = EdgeInsets()
     @State private var windowWidth: CGFloat = 0
@@ -522,22 +527,6 @@ public struct RootTabView: View {
         _router = State(initialValue: AppRouter(route: route))
         _resume = State(initialValue: ContinueWatchingModel(services: services))
         _titleActions = State(initialValue: TitleActions(services: services))
-        _posterPlay = State(initialValue: PosterPlayLauncher(services: services, failed: {
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-        }))
-    }
-
-    /// A held poster's streams load here, in a picker that draws nothing and starts the stream Play would, in Infuse or here, whatever
-    /// Auto Pick's switch says. It stays once a stream has started, since the player it opened belongs to it.
-    @ViewBuilder
-    private var posterStarter: some View {
-        if let launch = posterPlay.launch {
-            StreamPickerView(request: launch.request, services: services, isEmbedded: true, isRevealed: false, isHeadless: true,
-                             forcesAutomaticStart: true, onAutomaticStart: { started in posterPlay.finish(launch.id, started: started) })
-                .id(launch.id)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
-        }
     }
 
     public var body: some View {
@@ -751,12 +740,10 @@ public struct RootTabView: View {
             addonLink = nil
         }
         .fullScreenCover(item: $router.demoPlan) { PlayerScreen(plan: $0, services: services) }
-        .background { posterStarter }
         .task {
             await Task.yield()
             guard !Task.isCancelled else { return }
             router.presentLaunchRoute(includeHomeDestinations: false)
-            await reopenPreviousSession()
             #if canImport(UIKit)
             // The reviews page's rules and WebKit's process start now, after the first frame, so the first reviews page waits for neither.
             ReviewPageRules.prewarm()
@@ -768,7 +755,6 @@ public struct RootTabView: View {
         .environment(services.posterRatings)
         .environment(services.heroMeta)
         .environment(titleActions)
-        .environment(posterPlay)
         .environment(\.isLandscape, isLandscape)
         .environment(\.isPhoneLandscape, isPhoneLandscape)
         .environment(\.windowSafeArea, windowSafeArea)
@@ -795,29 +781,6 @@ public struct RootTabView: View {
             }
         }
         .environment(\.symbolVariants, .none)
-    }
-
-    /// The app was killed with a stream playing: opening it again walks back into that stream, at its position and choices. The picker
-    /// resolves the same file from a fresh listing; when it cannot, it shows the list and the position stays in progress. A launch route
-    /// (a deep link, a title, the gallery) is what the person asked for, so it is never displaced.
-    private func reopenPreviousSession() async {
-        #if DEBUG
-        // UI tests drive their own launches and must not inherit the device's saved session.
-        if ProcessInfo.processInfo.environment["BLUSION_UITEST"] == "1" { return }
-        #endif
-        guard initialRoute == .home, let snapshot = await PlaybackSession.load() else { return }
-        guard !snapshot.isEffectivelyFinished() else {
-            await PlaybackSession.clear()
-            return
-        }
-        if let downloadID = snapshot.downloadID {
-            await services.downloads?.start()
-            if let plan = await services.downloads?.plan(for: downloadID) { router.demoPlan = plan }
-            else { await PlaybackSession.clear() }
-            return
-        }
-        router.tab = .home
-        router.homePath.append(PlayerRecovery(request: snapshot.request, resumesSession: true))
     }
 
     private func refreshUserState() async {

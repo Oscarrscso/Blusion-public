@@ -310,6 +310,7 @@ struct DetailReviews: View {
     /// as it opened: one animation for the state, the card's width and the text. While it moves, a light tick comes for each line of
     /// text that is revealed or put away.
     private func toggleReview(_ id: String) {
+        Haptics.tap()
         tickLines(ofReview: id)
         let opening = expandedReviewID != id
         // Set in the same step as the open, so a layout pass that reads the card's new width already finds it settling.
@@ -320,7 +321,7 @@ struct DetailReviews: View {
     }
 
     /// How long a review takes to open or fold, in seconds. Its run of ticks lasts as long.
-    private static let foldDuration = 0.35
+    static let foldDuration = 0.35
 
     /// A swipe that leaves the open review less than half on the shelf folds it, as a tap on it would. Nothing folds while the review is
     /// still opening or being centred, since both move it.
@@ -345,7 +346,7 @@ struct DetailReviews: View {
         let textWidth = max(0, width - contentMargin * 2) - ReviewCard.padding * 2
         // A character of the review's text is about seven points wide on average.
         let perLine = max(20, Int(textWidth / 7))
-        let lines = review.content.split(whereSeparator: \.isNewline).reduce(0) { total, paragraph in
+        let lines = ReviewTextMarkup.markdown(review.content).split(whereSeparator: \.isNewline).reduce(0) { total, paragraph in
             total + max(1, (paragraph.count + perLine - 1) / perLine)
         }
         return max(0, lines - ReviewCard.foldedLines)
@@ -384,6 +385,67 @@ private struct FoldingWidth: ViewModifier, Animatable {
     }
 }
 
+/// TMDb reviews can mix Markdown with inline HTML. Convert the supported HTML
+/// formatting to Markdown so JustifiedText keeps native typography, links and sizing.
+private enum ReviewTextMarkup {
+    static func markdown(_ raw: String) -> String {
+        guard raw.contains("<") || raw.contains("&") else { return raw }
+        var text = raw
+
+        // Preserve safe HTML links using the Markdown links JustifiedText already handles.
+        let links = try! NSRegularExpression(
+            pattern: #"<a\b[^>]*\bhref\s*=\s*["'](https?://[^"']+)["'][^>]*>(.*?)</a\s*>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        text = links.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text),
+                                              withTemplate: "[$2]($1)")
+
+        let tags: [(String, String)] = [
+            (#"(?i)<\s*br\s*/?\s*>"#, "\n"),
+            (#"(?i)</\s*(?:p|div|blockquote)\s*>"#, "\n\n"),
+            (#"(?i)<\s*(?:p|div|blockquote)\b[^>]*>"#, ""),
+            (#"(?i)</\s*li\s*>"#, "\n"),
+            (#"(?i)<\s*li\b[^>]*>"#, "• "),
+            (#"(?i)<\s*(?:em|i)\b[^>]*>"#, "*"),
+            (#"(?i)</\s*(?:em|i)\s*>"#, "*"),
+            (#"(?i)<\s*(?:strong|b)\b[^>]*>"#, "**"),
+            (#"(?i)</\s*(?:strong|b)\s*>"#, "**"),
+            (#"(?i)<\s*(?:s|strike|del)\b[^>]*>"#, "~~"),
+            (#"(?i)</\s*(?:s|strike|del)\s*>"#, "~~"),
+            (#"(?i)</?\s*(?:a|span|font|u|small|ul|ol)\b[^>]*>"#, "")
+        ]
+        for (pattern, replacement) in tags {
+            text = text.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+        }
+
+        // Decode entities after replacing tags: escaped literal markup stays literal.
+        let names: [String: String] = [
+            "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": " ",
+            "hellip": "…", "mdash": "—", "ndash": "–", "lsquo": "‘", "rsquo": "’",
+            "ldquo": "“", "rdquo": "”", "bull": "•", "copy": "©"
+        ]
+        let entities = try! NSRegularExpression(pattern: #"&(#(?:[xX][0-9a-fA-F]+|[0-9]+)|[A-Za-z]+);"#)
+        let original = text as NSString
+        for match in entities.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            let entity = original.substring(with: match.range(at: 1))
+            let replacement: String?
+            if entity.hasPrefix("#") {
+                let hexadecimal = entity.lowercased().hasPrefix("#x")
+                let digits = String(entity.dropFirst(hexadecimal ? 2 : 1))
+                replacement = Int(digits, radix: hexadecimal ? 16 : 10)
+                    .flatMap { Unicode.Scalar($0) }
+                    .map(String.init)
+            } else {
+                replacement = names[entity.lowercased()]
+            }
+            if let replacement {
+                text = (text as NSString).replacingCharacters(in: match.range, with: replacement)
+            }
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// One TMDb review. Folded, every card is the same height: the text keeps six lines whether or not it fills them. A tap opens or
 /// folds it, and only a review that runs past those lines folds. Links in the text are drawn as links in both states, and a tap on one
 /// opens it only once the card is expanded; folded, the tap expands the card as any other tap on the text does.
@@ -400,6 +462,7 @@ private struct ReviewCard: View {
     private var folds: Bool { isExpanded || isTruncated }
 
     var body: some View {
+        let displayedText = ReviewTextMarkup.markdown(review.content)
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -433,12 +496,12 @@ private struct ReviewCard: View {
                 // The text takes its own taps (see `tapText`), so the card's tap does not reach it.
                 ZStack(alignment: .topLeading) {
                     if isExpanded {
-                        JustifiedText(text: review.content, textStyle: .subheadline, isMarkdown: true, lineLimit: 0,
+                        JustifiedText(text: displayedText, textStyle: .subheadline, isMarkdown: true, lineLimit: 0,
                                       showsLinks: true, linksAreTappable: true, onTap: tapText)
                             .frame(width: max(0, expandedWidth - Self.padding * 2), alignment: .leading)
                             .transition(.opacity)
                     } else {
-                        JustifiedText(text: review.content, textStyle: .subheadline, isMarkdown: true, lineLimit: Self.foldedLines,
+                        JustifiedText(text: displayedText, textStyle: .subheadline, isMarkdown: true, lineLimit: Self.foldedLines,
                                       reservesSpace: true, isTruncated: $isTruncated, showsLinks: true, onTap: tapText)
                             .frame(width: max(0, foldedWidth - Self.padding * 2), alignment: .leading)
                             .transition(.opacity)

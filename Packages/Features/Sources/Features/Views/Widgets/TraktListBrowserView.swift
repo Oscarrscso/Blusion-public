@@ -105,7 +105,7 @@ struct TraktListBrowserView: View {
         // Solid, up under the navigation bar: the rows scroll out of sight beneath the controls. With nothing behind them the rows showed
         // through and between the glass buttons.
         .background { Theme.background.ignoresSafeArea(edges: .top) }
-        .sensoryFeedback(.selection, trigger: sort)
+        .onChange(of: sort) { _, _ in Haptics.selection() }
     }
 
     private var titleField: some View {

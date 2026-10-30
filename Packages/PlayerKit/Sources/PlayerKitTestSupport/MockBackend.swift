@@ -29,6 +29,7 @@ public final class MockBackend: FallbackBackend {
     /// What the start waits for, and how much this backend says it holds (`FallbackBackend.startCushion`).
     public var startCushion: StartCushion?
     public var bufferedAhead: TimeInterval?
+    public var maximumRate: Float = 2
 
     private var continuation: AsyncStream<FallbackEvent>.Continuation?
     private let stream: AsyncStream<FallbackEvent>

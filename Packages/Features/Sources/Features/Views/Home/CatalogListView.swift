@@ -158,7 +158,7 @@ struct CatalogListView: View {
             }
             .accessibilityIdentifier("catalogList.filter.rating")
         }
-        .sensoryFeedback(.selection, trigger: model.filter)
+        .onChange(of: model.filter) { _, _ in Haptics.selection() }
         .task(id: model.filter) { await model.fillForFilter() }
         .accessibilityIdentifier("catalogList.filters")
     }

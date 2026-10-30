@@ -452,6 +452,9 @@ public final class MPVBackend: FallbackBackend {
 
     public func setRate(_ rate: Float) { set("speed", String(rate)) }
 
+    /// The hold's ceiling. mpv's `speed` property accepts well above it; the pitch-corrected audio at 4× is not yet checked on a device.
+    public var maximumRate: Float { 4 }
+
     /// mpv's volume runs 0 to 100.
     public func setVolume(_ volume: Float) { set("volume", String(volume * 100)) }
 

@@ -34,6 +34,7 @@ struct PlayerMenuBar: UIViewRepresentable {
         // Assigning the same index during tracking can interrupt UIKit's slide.
         if control.selectedSegmentIndex != index { control.selectedSegmentIndex = index }
         control.onReselect = { [selection = $selection] in
+            // Re-tapping the tab already showing closes the panel, which is a change of screen rather than a tab change.
             Haptics.tap()
             selection.wrappedValue = nil
         }

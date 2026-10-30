@@ -6,6 +6,10 @@ import UIKit
 /// The title page, drawn the way Apple's TV app draws one: artwork under the navigation bar with the logo low on it, one quiet
 /// metadata line, the main action, round secondary actions, the synopsis, then for a series its seasons and episodes, and last
 /// the credits.
+private enum PlayOpeningMode: Equatable {
+    case normal, streamSelector, infuse
+}
+
 struct DetailView: View {
     @State private var model: DetailViewModel
     @State private var isDescriptionExpanded = false
@@ -15,6 +19,8 @@ struct DetailView: View {
     @State private var isHoldingEpisode = false
     /// The streams the page shows in place of its details after Play, what asked for them, and whether Auto Pick started one of them.
     @State private var streams = TitleStreams()
+    @State private var playOpeningMode: PlayOpeningMode = .normal
+    @State private var showsMissingInfuse = false
     /// Empty results apply to this visit and this movie or episode only.
     @State private var unavailableStreams: Set<String> = []
     /// The item a Continue Watching card opens the page with. It is picked once the hero has settled (see the lookup task below), so the
@@ -49,6 +55,7 @@ struct DetailView: View {
     @Environment(\.isLandscape) private var isLandscape
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(AppRouter.self) private var router
+    @Environment(\.openURL) private var openURL
     @Environment(\.windowSafeArea) private var windowSafeArea
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     /// True while a trailer that started on a phone turned sideways is shown full screen. The cover belongs to the page, so it lives as
@@ -124,7 +131,9 @@ struct DetailView: View {
                                           showsActions: !showsStreams, isLoadingStreams: loadingTrigger == .play,
                                           hasNoStreams: unavailableStreams.contains(model.primaryRequest?.identity ?? ""),
                                           blocksPlay: loadingTrigger != nil && loadingTrigger != .play,
-                                          showsMetaLine: false, play: { showStreams($0, from: .play) })
+                                          showsMetaLine: false, play: { showStreams($0, from: .play) },
+                                           showStreamSelector: { showStreams($0, from: .play, mode: .streamSelector) },
+                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) })
                         } trailer: { width in
                             DetailTrailerPanel(model: model, width: width, playerIsCovered: playerIsCovered)
                         } synopsis: {
@@ -143,7 +152,9 @@ struct DetailView: View {
                                           showsActions: !showsStreams, isLoadingStreams: loadingTrigger == .play,
                                           hasNoStreams: unavailableStreams.contains(model.primaryRequest?.identity ?? ""),
                                           blocksPlay: loadingTrigger != nil && loadingTrigger != .play,
-                                          play: { showStreams($0, from: .play) })
+                                          play: { showStreams($0, from: .play) },
+                                           showStreamSelector: { showStreams($0, from: .play, mode: .streamSelector) },
+                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) })
                         } trailer: {
                             DetailTrailerPanel(model: model, width: trailerWidth(in: geometry.size), playerIsCovered: playerIsCovered)
                         } synopsis: {
@@ -164,8 +175,11 @@ struct DetailView: View {
                                              scrollToRow: { proxy.scrollTo($0, anchor: .center) },
                                              episodeScore: model.episodeScore(for: request),
                                              episodeSwitcher: episodeSwitcher(for: request),
+                                             forcesAutomaticStart: playOpeningMode == .infuse,
                                              onAutomaticStart: { started in if started { streams.startedAutomatically() } },
-                                             playColourHex: model.playColourHex)
+                                             playColourHex: model.playColourHex,
+                                             allowsAutomaticStart: playOpeningMode != .streamSelector,
+                                             preferredAutomaticPlayer: playOpeningMode == .infuse ? .infuse : nil)
                                 .id(streams.pickerID)
                                 #if targetEnvironment(macCatalyst)
                                 // The picker's rows are inset by its own margin, so the picker starts that much short of the page's margin.
@@ -374,6 +388,12 @@ struct DetailView: View {
             }
         }
         .accessibilityIdentifier("detail.scroll")
+        .alert("Infuse isn't installed", isPresented: $showsMissingInfuse) {
+            if let url = ExternalPlayer.infuse.appStoreURL {
+                Button("Get Infuse") { openURL(url) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .youTubeTrailer(Bindable(model.trailer).youTubeHandoff)
         // A trailer that starts on a phone held sideways plays full screen, decided when it starts, so turning the phone later does not
         // move it. A YouTube trailer that ends or fails closes its cover. AVKit's player keeps its own end state until the cover is closed.
@@ -447,12 +467,26 @@ struct DetailView: View {
     /// spinner in Play, until the streams are ready (`revealStreams`); a second tap while it spins calls the streams off. With Auto Pick
     /// on, the stream it chooses starts instead and the list never shows; the next tap picks again. The page does not scroll, and back
     /// still leaves the page, by the button or the swipe: the streams are part of the title's page, not a screen of their own.
-    private func showStreams(_ request: StreamRequest, from trigger: StreamTrigger) {
+    private func showStreams(_ request: StreamRequest, from trigger: StreamTrigger, mode: PlayOpeningMode = .normal) {
         guard !unavailableStreams.contains(request.identity) else { return }
+        if mode == .infuse {
+            guard let scheme = URL(string: "infuse://"), UIApplication.shared.canOpenURL(scheme) else {
+                showsMissingInfuse = true
+                return
+            }
+        }
         model.trailer.cancel()
-        // Play is the user's own choice, so it replaces a Continue Watching item still waiting for the hero to settle.
         pendingStreams = nil
-        streams.show(request, from: trigger)
+        if mode == .normal {
+            let wasSpecial = playOpeningMode != .normal && streams.request != nil
+            playOpeningMode = .normal
+            if wasSpecial { streams.open(request) }
+            else { streams.show(request, from: trigger) }
+        } else {
+            // Explicit choices replace any existing picker and never change the saved player preference.
+            playOpeningMode = mode
+            streams.open(request)
+        }
     }
 
     /// A series' episodes either side of the picker's, for its switcher. A step loads that episode's streams in place, as its card would,

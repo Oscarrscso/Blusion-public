@@ -20,7 +20,7 @@ struct QualitySelector: View {
         .labelsHidden()
         .frame(width: showsTitles ? nil : CGFloat(titles.count * 44))
         .accessibilityIdentifier(accessibilityID)
-        .sensoryFeedback(.selection, trigger: selection)
+        .onChange(of: selection) { _, _ in Haptics.selection() }
     }
 
     @ViewBuilder private func segment(_ index: Int) -> some View {

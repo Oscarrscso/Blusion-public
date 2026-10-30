@@ -87,6 +87,13 @@ struct SettingsView: View {
                         SettingsRow(title: "Lazy load", summary: lazyLoadLabel(lookaheadLevel), systemImage: "arrow.down.to.line")
                     }
                     .accessibilityIdentifier("settings.section.lazyLoad")
+                    // A Mac has no haptic hardware, so the page would be sliders it cannot demonstrate.
+                    #if !targetEnvironment(macCatalyst)
+                    NavigationLink { HapticsSettingsPage(model: model) } label: {
+                        SettingsRow(title: "Haptics", summary: hapticsSummary, systemImage: "hand.tap")
+                    }
+                    .accessibilityIdentifier("settings.section.haptics")
+                    #endif
                 }
                 Section("Ratings") {
                     NavigationLink { ReviewServicesPage(model: model, services: services) } label: {
@@ -185,6 +192,7 @@ struct SettingsView: View {
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     private func setGhost(_ isOn: Bool) {
+        // The tap, not a selection tick: Ghost mode changes what every screen shows, so it lands like a change of screen.
         Haptics.tap()
         withAnimation(.snappy(duration: 0.3)) { ghostIsOn = isOn }
     }
@@ -228,6 +236,14 @@ struct SettingsView: View {
         if model.settings.showsPosterRatings { on.append("Ratings on posters") }
         if model.settings.showsColouredRatingLogos { on.append("Coloured logos") }
         return on.isEmpty ? "Rating options off" : on.joined(separator: ", ")
+    }
+
+    /// The Haptics row shows the tap strength.
+    private var hapticsSummary: String {
+        let haptics = model.settings.haptics
+        guard haptics.isOn else { return "Off" }
+        let tap = Int((haptics.tapStrength * 100).rounded())
+        return "Tap \(tap)%"
     }
 
     private var reviewServicesSummary: String {

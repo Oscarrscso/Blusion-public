@@ -73,28 +73,12 @@ struct StreamRow: View {
                         .minimumScaleFactor(0.7)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                #if targetEnvironment(macCatalyst)
-                // On a Mac the technical details open from a small chevron at the end of this line, set there by the picker (see
-                // `StreamDetailsSlotKey`), instead of a row of their own across the card's foot.
-                HStack(alignment: .center, spacing: Theme.Spacing.xs) {
-                    if !facts.isEmpty {
-                        Text(facts)
-                            .font(Theme.Typography.metaLine)
-                            .foregroundStyle(Theme.metaText)
-                            .lineLimit(1)
-                    }
-                    Color.clear
-                        .frame(width: StreamCardMetrics.disclosureSize, height: StreamCardMetrics.disclosureSize)
-                        .anchorPreference(key: StreamDetailsSlotKey.self, value: .bounds) { $0 }
-                }
-                #else
                 if !facts.isEmpty {
                     Text(facts)
                         .font(Theme.Typography.metaLine)
                         .foregroundStyle(Theme.metaText)
                         .lineLimit(1)
                 }
-                #endif
                 if let routeNote {
                     Label(routeNote.text, systemImage: routeNote.symbol)
                         .font(.footnote.weight(.medium))
@@ -264,27 +248,8 @@ struct StreamRow: View {
     }
 }
 
-/// The proportions of a stream card. A Mac's are a desktop's: a pointer needs less room than a finger, so the padding, the corners, the
-/// round mark and the service's box are smaller there, in step with the Mac's smaller text.
+/// Shared stream-card proportions on iPhone and Mac.
 enum StreamCardMetrics {
-    #if targetEnvironment(macCatalyst)
-    static let padding: CGFloat = Theme.Spacing.m
-    static let cornerRadius: CGFloat = 14
-    /// The width and height of the round mark, and of the bookmark under it.
-    static let markSize: CGFloat = 28
-    /// The play button of a stream Blusion plays, its card's one control.
-    static let playButtonSize: CGFloat = 34
-    /// The service's or the disc's box, its corners, and how much smaller than the box the logo is fitted.
-    static let providerBox = CGSize(width: 40, height: 28)
-    static let providerBoxRadius: CGFloat = 8
-    static let logoInset = CGSize(width: 9, height: 11)
-    /// The chevron at the end of the facts line that opens the technical details.
-    static let disclosureSize: CGFloat = 18
-    /// A grey stand-in's height while the streams load: about a card's.
-    static let skeletonHeight: CGFloat = 104
-    /// Whether a card has the system's hover highlight as well as its own; a Mac card has its own only.
-    static let addsSystemHighlight = false
-    #else
     static let padding: CGFloat = Theme.Spacing.l
     static let cornerRadius: CGFloat = Theme.Radius.surface
     static let markSize: CGFloat = 36
@@ -294,43 +259,12 @@ enum StreamCardMetrics {
     static let logoInset = CGSize(width: 12, height: 14)
     /// Includes the collapsed technical-details row below the stream information.
     static let skeletonHeight: CGFloat = 168
+    #if targetEnvironment(macCatalyst)
+    static let addsSystemHighlight = false
+    #else
     static let addsSystemHighlight = true
     #endif
 }
-
-#if targetEnvironment(macCatalyst)
-/// Where a Mac stream card keeps the room for the chevron that opens its technical details, at the end of its facts line, so the picker
-/// can set the chevron there outside the card's button, as it does the save bookmark.
-struct StreamDetailsSlotKey: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>? { nil }
-
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = value ?? nextValue()
-    }
-}
-
-/// A Mac card's chevron for its technical details, at the end of its facts line: it turns as they open and fold.
-struct StreamDetailsDisclosure: View {
-    let isExpanded: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "chevron.down")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.tertiary)
-                .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                .frame(width: StreamCardMetrics.disclosureSize, height: StreamCardMetrics.disclosureSize)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .pointerFeedback()
-        .help(isExpanded ? "Hide technical details" : "Technical details")
-        .accessibilityLabel("Technical details")
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-    }
-}
-#endif
 
 /// Where a stream card keeps the room for its save bookmark, so the picker can set the bookmark there outside the card's button: a button
 /// inside another button's label does not take its own taps.
@@ -393,21 +327,11 @@ struct StreamSaveButton: View {
 /// see `StreamFacts`), then the addon's description. Folded away until asked for, so the list stays about choosing.
 struct StreamTechnicalDetails: View {
     let item: RankedStream
-    /// Set on a Mac, where the chevron at the end of the card's facts line opens and folds them: only the details themselves are drawn
-    /// here, with no row of their own. Nil keeps the row, which opens and folds them itself.
-    var openedOutside: Bool?
     @State private var isExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if let openedOutside {
-            if openedOutside, !facts.isEmpty || description != nil {
-                details
-                    .padding(.top, Theme.Spacing.xs)
-            }
-        } else {
-            foldingRow
-        }
+        foldingRow
     }
 
     /// The row across the card's foot that opens and folds the details, then the details when open.

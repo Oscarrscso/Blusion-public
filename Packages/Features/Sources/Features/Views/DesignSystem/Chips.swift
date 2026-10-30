@@ -38,7 +38,8 @@ struct GlassChip: View {
         .pointerFeedback()
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("chip.\(title)")
-        .sensoryFeedback(.selection, trigger: isSelected)
+        // The app's own selection tick rather than SwiftUI's, so the Haptics page's switch reaches filter chips too.
+        .onChange(of: isSelected) { _, _ in Haptics.selection() }
     }
 
     private var button: some View {

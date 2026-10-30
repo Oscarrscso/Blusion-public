@@ -188,6 +188,9 @@ public final class AetherSession {
 
     public func setRate(_ rate: Float) { engine.setRate(rate) }
 
+    /// AetherEngine's own ceiling for the route playing: 2× for video, 3× for audio-only. It clamps anything above.
+    public var maximumRate: Float { engine.maxSupportedRate }
+
     public func setVolume(_ volume: Float) {
         self.volume = volume
         engine.volume = isMuted ? 0 : volume

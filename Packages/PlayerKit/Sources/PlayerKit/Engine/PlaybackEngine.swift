@@ -235,6 +235,8 @@ public protocol PlaybackEngine: AnyObject {
 
     // The rest have defaults that do nothing, so an engine implements only what its `capabilities` claim.
     var capabilities: EngineCapabilities { get }
+    /// The fastest `setRate` this engine plays cleanly. Anything above it is clamped or unreliable, so a hold never asks for it.
+    var maximumRate: Float { get }
     /// Positive delays the subtitles the engine draws.
     func setSubtitleDelay(_ seconds: TimeInterval)
     /// Positive delays the audio.
@@ -251,6 +253,8 @@ public protocol PlaybackEngine: AnyObject {
 
 public extension PlaybackEngine {
     var capabilities: EngineCapabilities { [] }
+    /// 2×, the speed Settings offers: an engine claims more only after it has shown it plays cleanly.
+    var maximumRate: Float { 2 }
     func setSubtitleDelay(_ seconds: TimeInterval) {}
     func setAudioDelay(_ seconds: TimeInterval) {}
     func addExternalSubtitle(_ subtitle: ExternalSubtitle) {}

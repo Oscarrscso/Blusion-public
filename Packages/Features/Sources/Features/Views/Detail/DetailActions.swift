@@ -20,6 +20,8 @@ struct DetailActions: View {
     var showsMetaLine = true
     /// The main action's tap: the page shows this title's streams.
     let play: (StreamRequest) -> Void
+    let showStreamSelector: (StreamRequest) -> Void
+    let playWithInfuse: (StreamRequest) -> Void
     @Environment(\.isLandscape) private var isLandscape
     @Environment(TitleActions.self) private var titleActions
     /// Play was tapped while a series' episodes were still arriving: its spinner shows, and it plays once they are in.
@@ -92,12 +94,21 @@ struct DetailActions: View {
                     Image(systemName: "play.fill")
                     if !hasNoStreams, model.isSeries, title.hasPrefix("Resume"),
                        let next = model.nextUp, let season = next.season, let episode = next.episode {
+                        #if targetEnvironment(macCatalyst)
+                        HStack(spacing: Theme.Spacing.s) {
+                            Text("Resume").foregroundStyle(.white)
+                            Text("S\(season)E\(episode)")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                        #else
                         VStack(alignment: .leading, spacing: 1) {
                             Text("Resume").foregroundStyle(.white)
                             Text("S\(season)E\(episode)")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.6))
                         }
+                        #endif
                     } else {
                         Text(!hasNoStreams && title.hasPrefix("Play") ? "Play" : title)
                     }
@@ -113,10 +124,21 @@ struct DetailActions: View {
                     .animation(.smooth(duration: 0.25), value: isLoadingStreams)
             }
             .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
+            .contextMenu {
+                Button("Stream Selector", systemImage: "arrow.up.right.square") {
+                    Haptics.selection()
+                    showStreamSelector(request)
+                }
+                Button("Play with Infuse", systemImage: "play.rectangle.on.rectangle") {
+                    Haptics.selection()
+                    playWithInfuse(request)
+                }
+            }
             .disabled(hasNoStreams)
             .allowsHitTesting(!blocksPlay)
             .accessibilityLabel(isLoadingStreams ? "\(title), loading" : title)
             .accessibilityIdentifier("detail.playButton")
+            .accessibilityHint("Press and hold for stream options")
         } else if let airs = model.unairedAirLabel {
             // The series' next episode is not out yet: the button is dimmed and shows when it airs, and nothing starts.
             Button {} label: {

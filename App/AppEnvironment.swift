@@ -27,12 +27,14 @@ final class AppEnvironment {
         self.seeder = seeder
     }
 
-    /// Installs the default metadata addon on first launch. Waits at most `limit` so the first screen usually opens with content;
-    /// a slower install finishes in the background and Home fills in when the registry publishes the addon.
+    /// Installs the default metadata addon on first launch. Waits at most `limit` so the first screen
+    /// usually opens with content; a slower install finishes in the background and Home fills in when the registry publishes the addon.
     func seedDefaultAddons(waitingAtMost limit: Duration = .seconds(3)) async {
         guard let seeder else { return }
         // Not a task group: a group waits for all its children, and the install cannot be cancelled, so the screen would wait for it anyway.
-        let install = Task { await seeder.seedIfNeeded() }
+        let install = Task {
+            await seeder.seedIfNeeded()
+        }
         let (finished, signal) = AsyncStream<Void>.makeStream()
         Task {
             _ = await install.value
@@ -104,6 +106,8 @@ final class AppEnvironment {
             }
         }
         let settings = DefaultsSettingsStore(defaults: settingsDefaults, secrets: secrets, logger: logger)
+        // Before any view exists: the haptics are the listener's own, and the first gesture of the session must already obey them.
+        Haptics.apply(HapticPreferences.saved(in: settingsDefaults))
         let registry = AddonRegistry(store: store, secrets: secrets, client: client, logger: logger)
         // AVPlayer for MP4/MOV/M4V/HLS. MKV, AVI, DTS, AV1 and friends go to the fallback engine on iPhone and Mac (ADR-006).
         let makeEngine: EngineFactory = { candidate in

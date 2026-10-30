@@ -22,6 +22,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         public static let tmdbReadToken = "settings.tmdbReadToken"
         public static let omdbAPIKey = "settings.omdbAPIKey"
         public static let player = "settings.player"
+        public static let haptics = "settings.haptics"
         public static let openSubtitlesAPIKey = "settings.openSubtitlesAPIKey"
         public static let openSubtitlesUsername = "settings.openSubtitlesUsername"
         public static let openSubtitlesPassword = "settings.openSubtitlesPassword"
@@ -77,7 +78,8 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 autoPickSource: defaults.string(forKey: Keys.autoPickSource).flatMap(StreamSourcePreference.init(rawValue:)) ?? .balanced,
                                 player: player,
                                 openSubtitlesAPIKey: openSubtitlesAPIKey, openSubtitlesUsername: openSubtitlesUsername,
-                                openSubtitlesPassword: openSubtitlesPassword)
+                                openSubtitlesPassword: openSubtitlesPassword,
+                                haptics: HapticPreferences.saved(in: defaults))
         result.downloadsAllowCellular = defaults.bool(forKey: Keys.downloadsAllowCellular)
         result.downloadsDeleteWhenWatched = defaults.bool(forKey: Keys.downloadsDeleteWhenWatched)
         return result
@@ -106,6 +108,8 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         defaults.set(settings.autoPickSource.rawValue, forKey: Keys.autoPickSource)
         defaults.set(settings.continueWatchingRefreshSeconds ?? 300, forKey: Keys.continueWatchingRefreshSeconds)
         if let data = try? JSONEncoder().encode(settings.player) { defaults.set(data, forKey: Keys.player) }
+        // JSON rather than a key each, so a knob added later still loads: every field of `HapticPreferences` is optional.
+        if let data = try? JSONEncoder().encode(settings.haptics) { defaults.set(data, forKey: Keys.haptics) }
         for (value, key) in [(settings.openSubtitlesAPIKey, Keys.openSubtitlesAPIKey), (settings.openSubtitlesUsername, Keys.openSubtitlesUsername),
                              (settings.openSubtitlesPassword, Keys.openSubtitlesPassword)] {
             if let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {

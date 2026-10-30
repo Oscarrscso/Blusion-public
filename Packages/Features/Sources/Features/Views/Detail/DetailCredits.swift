@@ -31,7 +31,7 @@ struct DetailCredits: View {
                     .id(group)
                     .accessibilityIdentifier("detail.castCarousel")
                 }
-                .sensoryFeedback(.selection, trigger: model.creditGroup)
+                .onChange(of: model.creditGroup) { _, _ in Haptics.selection() }
             } else if model.isLoadingCredits {
                 VStack(alignment: .leading, spacing: metrics.headerSpacing) {
                     DetailSkeletonLine(font: .subheadline.weight(.semibold), width: 48)

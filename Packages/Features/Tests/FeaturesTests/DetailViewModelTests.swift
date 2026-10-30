@@ -132,7 +132,20 @@ private struct NoITunesTransport: HTTPTransport {
             await model.setWatched(true, for: model.request(for: video))
         }
         #expect(model.nextUp?.id == "mock:series1:1:3")
-        #expect(model.primaryActionTitle == "Play S1 · E3")
+        #expect(model.primaryActionTitle == "Resume S1 · E3")
+    }
+
+    @Test func markingAllEpisodesThroughOneResumesAtTheNextEpisodeEvenAfterReopening() async throws {
+        let services = try await installedServices()
+        let model = await loadedSeries(services)
+        let selected = try #require(model.detail.videos.first(where: { $0.id == "mock:series1:1:3" }))
+        await model.markEpisodesWatched(through: selected)
+        #expect(model.nextUp?.id == "mock:series1:2:1")
+        #expect(model.primaryActionTitle == "Resume S2 · E1")
+        #expect(model.primaryRequest?.id == "mock:series1:2:1", "Resume launches the next episode, not the marked episode")
+        let reopened = await loadedSeries(services)
+        #expect(reopened.primaryActionTitle == "Resume S2 · E1", "watched history, not transient UI state, drives Resume")
+        #expect(reopened.primaryRequest?.id == "mock:series1:2:1")
     }
 
     @Test func nextUpFallsBackToTheFirstEpisodeWhenEverythingIsWatched() async throws {

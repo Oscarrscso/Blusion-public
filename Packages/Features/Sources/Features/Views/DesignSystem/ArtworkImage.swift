@@ -48,13 +48,16 @@ extension View {
 struct ArtworkImage: View {
     let url: URL?
     let title: String
-    let maxPixelSize: CGFloat
+    /// Nil preserves the provider's complete source resolution, including decoded memory-cache hits.
+    let maxPixelSize: CGFloat?
     let contentMode: ContentMode
     let placeholderURL: URL?
     let placeholderBlur: CGFloat
     /// Tried once, at the same size, when `url` fails to load. Nil, or the same URL as `url`, means no second try.
     let fallbackURL: URL?
     let imageAlignment: Alignment
+    /// Keeps a sharp 16:9 top image and continues its bottom edge into a diffused lower section, using the same decoded image.
+    let extendsArtworkDownward: Bool
     /// True for a stand-in: a picture of `url` that is decoded at another size is shown as it is, so one the user has just seen is there
     /// in the first frame and nothing is loaded for it.
     let acceptsAnyCachedSize: Bool
@@ -67,6 +70,8 @@ struct ArtworkImage: View {
     @Environment(\.showsArtworkLoadingSpinner) private var showsLoadingSpinner
     @Environment(\.artworkPriority) private var artworkPriority
     @Environment(\.artworkOrder) private var artworkOrder
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
+    @State private var isVisible = false
 
     @State private var hasFinishedLoading = false
     @State private var image: UIImage?
@@ -80,9 +85,10 @@ struct ArtworkImage: View {
     /// True while `image` came from `fallbackURL`.
     @State private var showsFallback: Bool
 
-    init(url: URL?, title: String = "", maxPixelSize: CGFloat = 600, contentMode: ContentMode = .fill,
+    init(url: URL?, title: String = "", maxPixelSize: CGFloat? = 600, contentMode: ContentMode = .fill,
          placeholderURL: URL? = nil, placeholderBlur: CGFloat = 1, fallbackURL: URL? = nil, imageAlignment: Alignment = .center,
-         acceptsAnyCachedSize: Bool = false, usesFallback: Binding<Bool>? = nil, keepsPictureOnShow: Bool = false) {
+         acceptsAnyCachedSize: Bool = false, usesFallback: Binding<Bool>? = nil, keepsPictureOnShow: Bool = false,
+         extendsArtworkDownward: Bool = false) {
         self.url = url
         self.title = title
         self.maxPixelSize = maxPixelSize
@@ -91,6 +97,7 @@ struct ArtworkImage: View {
         self.placeholderBlur = placeholderBlur
         self.fallbackURL = fallbackURL
         self.imageAlignment = imageAlignment
+        self.extendsArtworkDownward = extendsArtworkDownward
         self.acceptsAnyCachedSize = acceptsAnyCachedSize
         self.usesFallback = usesFallback
         self.keepsPictureOnShow = keepsPictureOnShow
@@ -106,7 +113,7 @@ struct ArtworkImage: View {
                 fellBack = cached != nil
                 shownURL = cached == nil ? nil : url
             }
-            if cached == nil, keepsPictureOnShow {
+            if cached == nil, keepsPictureOnShow, maxPixelSize != nil {
                 cached = ImagePipeline.shared.cachedImageAtAnySize(for: fallbackURL)
                 fellBack = cached != nil
             }
@@ -114,7 +121,9 @@ struct ArtworkImage: View {
         _image = State(initialValue: cached)
         _imageURL = State(initialValue: shownURL)
         _showsFallback = State(initialValue: fellBack)
-        _placeholderImage = State(initialValue: placeholderURL.flatMap { ImagePipeline.shared.cachedImage(for: $0, maxPixelSize: 600) })
+        _placeholderImage = State(initialValue: placeholderURL.flatMap {
+            ImagePipeline.shared.cachedImage(for: $0, maxPixelSize: maxPixelSize == nil ? nil : 600)
+        })
     }
 
     var body: some View {
@@ -132,16 +141,12 @@ struct ArtworkImage: View {
             }
             .overlay(alignment: imageAlignment) {
                 if let beneath {
-                    Image(uiImage: beneath)
-                        .resizable()
-                        .aspectRatio(contentMode: contentMode)
+                    picture(beneath)
                 }
             }
             .overlay(alignment: imageAlignment) {
                 if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: contentMode)
+                    picture(image)
                         .id(imageURL)
                         .transition(.opacity)
                 }
@@ -150,7 +155,14 @@ struct ArtworkImage: View {
             .loadingCardSpinner(showsLoadingSpinner && url != nil && image == nil && placeholderImage == nil && !hasFinishedLoading)
             .accessibilityHidden(true)
             // Stretching changes only the frame; it must not restart the download, decode or fade.
-            .task(id: [url, fallbackURL]) { await load() }
+            .onGeometryChange(for: Bool.self) { proxy in
+                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
+                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
+            } action: { isVisible = $0 }
+            .task(id: isVisible && sectionIsVisible ? [url, fallbackURL] : []) {
+                guard isVisible && sectionIsVisible else { return }
+                await load()
+            }
             // Promote an existing queued request when its row scrolls on screen, without restarting its download.
             .task(id: "\(url?.absoluteString ?? "-")|\(artworkPriority.rawValue)|\(artworkOrder ?? -1)") {
                 guard let url, artworkOrder != nil else { return }
@@ -161,13 +173,89 @@ struct ArtworkImage: View {
                 }
             }
             .onChange(of: showsFallback, initial: true) { _, fellBack in usesFallback?.wrappedValue = fellBack }
-            .task(id: image == nil ? placeholderURL : nil) {
-                guard image == nil, let placeholderURL else { return }
-                let preview = try? await ImagePipeline.shared.image(for: placeholderURL, maxPixelSize: 600,
+            .task(id: image == nil && isVisible && sectionIsVisible ? placeholderURL : nil) {
+                guard isVisible && sectionIsVisible, image == nil, let placeholderURL else { return }
+                let preview = try? await ImagePipeline.shared.image(for: placeholderURL, maxPixelSize: maxPixelSize == nil ? nil : 600,
                                                                     priority: artworkPriority, order: artworkOrder)
                 guard !Task.isCancelled, image == nil else { return }
                 withAnimation(.easeOut(duration: 0.1)) { placeholderImage = preview }
             }
+    }
+
+    @ViewBuilder
+    private func picture(_ image: UIImage) -> some View {
+        if extendsArtworkDownward {
+            GeometryReader { geometry in
+                let artworkHeight = geometry.size.width / (16.0 / 9.0)
+                // The blur sits under the artwork's lower fifth, so there's never a gap where the artwork fades out.
+                let fadeStart = 0.82
+                let blurStart = artworkHeight * 0.7 / max(1, geometry.size.height)
+                let blurEnd = min(1, artworkHeight * 0.97 / max(1, geometry.size.height))
+                ZStack(alignment: .top) {
+                    if let edge = bottomEdge(of: image) {
+                        Image(uiImage: edge).resizable()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .overlay {
+                                Image(uiImage: edge).resizable()
+                                    .blur(radius: 40, opaque: true)
+                                    .mask {
+                                        LinearGradient(stops: [
+                                            .init(color: .clear, location: 0),
+                                            .init(color: .clear, location: blurStart),
+                                            .init(color: .black.opacity(0.35), location: blurStart + (blurEnd - blurStart) * 0.4),
+                                            .init(color: .black.opacity(0.85), location: blurStart + (blurEnd - blurStart) * 0.75),
+                                            .init(color: .black, location: blurEnd),
+                                            .init(color: .black, location: 1),
+                                        ], startPoint: .top, endPoint: .bottom)
+                                    }
+                            }
+                            .overlay {
+                                BottomFade(length: min(1, (max(0, geometry.size.height - artworkHeight) + 12) / max(1, geometry.size.height)), strength: 0.85)
+                            }
+                    }
+                    Image(uiImage: image).resizable().scaledToFill()
+                        .frame(width: geometry.size.width, height: artworkHeight)
+                        .clipped()
+                        .mask {
+                            LinearGradient(stops: [
+                                .init(color: .black, location: 0),
+                                .init(color: .black, location: fadeStart),
+                                .init(color: .black.opacity(0.6), location: 0.9),
+                                .init(color: .black.opacity(0.2), location: 0.96),
+                                .init(color: .clear, location: 1),
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
+                }
+            }
+        } else {
+            Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
+        }
+    }
+
+    /// One source-pixel row from the visible bottom edge, accounting for the top image's centred crop and orientation.
+    private func bottomEdge(of image: UIImage) -> UIImage? {
+        guard let pixels = image.cgImage else { return nil }
+        let rotated = [.left, .leftMirrored, .right, .rightMirrored].contains(image.imageOrientation)
+        let ratio: CGFloat = rotated ? 9.0 / 16.0 : 16.0 / 9.0
+        let width = CGFloat(pixels.width)
+        let height = CGFloat(pixels.height)
+        let cropWidth = min(width, height * ratio)
+        let cropHeight = min(height, width / ratio)
+        let visible = CGRect(x: (width - cropWidth) / 2, y: (height - cropHeight) / 2,
+                             width: cropWidth, height: cropHeight).integral
+        let row: CGRect
+        switch image.imageOrientation {
+        case .down, .downMirrored:
+            row = CGRect(x: visible.minX, y: visible.minY, width: visible.width, height: 1)
+        case .left, .rightMirrored:
+            row = CGRect(x: visible.minX, y: visible.minY, width: 1, height: visible.height)
+        case .right, .leftMirrored:
+            row = CGRect(x: visible.maxX - 1, y: visible.minY, width: 1, height: visible.height)
+        default:
+            row = CGRect(x: visible.minX, y: visible.maxY - 1, width: visible.width, height: 1)
+        }
+        guard let edge = pixels.cropping(to: row) else { return nil }
+        return UIImage(cgImage: edge, scale: image.scale, orientation: image.imageOrientation)
     }
 
     /// Flat grey like the TV app's loading cards. No gradient: it is drawn once per card and must be cheap.
@@ -229,9 +317,9 @@ struct ArtworkImage: View {
     }
 
     /// The decoded picture of `url` at this view's size, or, for a stand-in, at any size.
-    private static func cachedPicture(_ url: URL, maxPixelSize: CGFloat, anySize: Bool) -> UIImage? {
+    private static func cachedPicture(_ url: URL, maxPixelSize: CGFloat?, anySize: Bool) -> UIImage? {
         if let exact = ImagePipeline.shared.cachedImage(for: url, maxPixelSize: maxPixelSize) { return exact }
-        return anySize ? ImagePipeline.shared.cachedImageAtAnySize(for: url) : nil
+        return maxPixelSize != nil && anySize ? ImagePipeline.shared.cachedImageAtAnySize(for: url) : nil
     }
 
     /// The picture at `url`, or at `fallbackURL` once when `url` fails. A load that was cancelled does not try the fallback.

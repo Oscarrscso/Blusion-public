@@ -132,9 +132,9 @@ struct DiscoverView: View {
                 .accessibilityIdentifier("discover.genreMenu")
             }
         }
-        .sensoryFeedback(.selection, trigger: model.selectedGenre)
-        .sensoryFeedback(.selection, trigger: model.selectedSource)
-        .sensoryFeedback(.selection, trigger: model.minimumYear)
+        .onChange(of: model.selectedGenre) { _, _ in Haptics.selection() }
+        .onChange(of: model.selectedSource) { _, _ in Haptics.selection() }
+        .onChange(of: model.minimumYear) { _, _ in Haptics.selection() }
     }
 
     @ViewBuilder
