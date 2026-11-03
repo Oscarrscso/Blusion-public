@@ -84,8 +84,8 @@ public final class AppRouter {
 
     public func open(_ tab: LaunchRoute.Tab) { self.tab = tab }
 
-    /// A tap on a tab's item. Every tap scrolls that tab's first page to its top (see `tabTapRevisions`), except Widgets, which has no
-    /// scroll to reset and restarts its stack instead. Tapping the tab that is showing
+    /// A tap on a tab's item. Browsing tabs scroll to their top (see `tabTapRevisions`). Settings keeps its scroll position,
+    /// and Widgets restarts its stack instead. Tapping the tab that is showing
     /// also takes it back to its first page; switching to another tab keeps its stack, so a title or a draft on it is still there when
     /// it returns. Widgets is the exception: its stack restarts on each selection, so a draft on it does not survive a return. Search starts afresh on every tap: its browse page, or with its field focused when it was already showing.
     func tapTab(_ tab: LaunchRoute.Tab) {
@@ -298,38 +298,40 @@ private struct LandscapeTabScrollModifier: ViewModifier {
 }
 
 extension View {
+    func macRootNavigation() -> some View {
+        #if targetEnvironment(macCatalyst)
+        toolbar(.hidden, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
+    func macBackNavigation() -> some View {
+        #if targetEnvironment(macCatalyst)
+        modifier(MacBackNavigation())
+        #else
+        self
+        #endif
+    }
+
+    func pageNavigationBar(hidden: Bool) -> some View {
+        #if targetEnvironment(macCatalyst)
+        toolbar(.hidden, for: .navigationBar)
+        #else
+        toolbarVisibility(hidden ? .hidden : .automatic, for: .navigationBar)
+        #endif
+    }
+
     func trackLandscapeTabScroll() -> some View {
         modifier(LandscapeTabScrollModifier())
     }
 }
 
-/// A phone gets the plain tab bar, where Search always stands apart from the other tabs as a button of its own. The sidebar style, which
-/// an iPad and the Mac need, drew Search inside the bar with the rest on a phone whenever the bar was at full size.
+/// Mac uses the shared app-level navigation. iPad keeps its adaptive sidebar.
 private struct TabBarStyle: ViewModifier {
-    let router: AppRouter
-    #if targetEnvironment(macCatalyst)
-    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
-    #endif
-
     func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
-        NavigationSplitView(columnVisibility: $sidebarVisibility) {
-            List(selection: Binding<LaunchRoute.Tab?>(
-                get: { router.tab },
-                set: { if let tab = $0 { router.tapTab(tab) } }
-            )) {
-                Label("Home", systemImage: "house").tag(LaunchRoute.Tab.home)
-                Label("Discover", systemImage: "safari").tag(LaunchRoute.Tab.discover)
-                Label("Library", systemImage: "books.vertical").tag(LaunchRoute.Tab.library)
-                Label("Settings", systemImage: "gearshape").tag(LaunchRoute.Tab.settings)
-                Label("Widgets", systemImage: "rectangle.3.group").tag(LaunchRoute.Tab.widgets)
-                Label("Search", systemImage: "magnifyingglass").tag(LaunchRoute.Tab.search)
-            }
-            .listStyle(.sidebar)
-        } detail: {
-            content.tabViewStyle(.tabBarOnly)
-        }
-        .navigationSplitViewStyle(.balanced)
+        content.tabViewStyle(.tabBarOnly)
         #else
         if UIDevice.current.userInterfaceIdiom == .phone {
             content.tabViewStyle(.tabBarOnly)
@@ -340,11 +342,121 @@ private struct TabBarStyle: ViewModifier {
     }
 }
 
+/// One navigation view for every Mac page, moved with the active page's scroll offset.
+struct MacPageNavigation: View {
+    static let height: CGFloat = 64
+    #if targetEnvironment(macCatalyst)
+    @Environment(AppRouter.self) private var router
+    #endif
+
+    var body: some View {
+        #if targetEnvironment(macCatalyst)
+        Picker("Navigation", selection: Binding(get: { router.tab }, set: { router.tapTab($0) })) {
+            Text("Home").tag(LaunchRoute.Tab.home)
+            Text("Discover").tag(LaunchRoute.Tab.discover)
+            Text("Library").tag(LaunchRoute.Tab.library)
+            Text("Settings").tag(LaunchRoute.Tab.settings)
+            Text("Widgets").tag(LaunchRoute.Tab.widgets)
+            Text("Search").tag(LaunchRoute.Tab.search)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.regular)
+        .font(.body)
+        .frame(maxWidth: 650)
+        .frame(height: 32)
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
+extension View {
+    func macPageScroll() -> some View {
+        #if targetEnvironment(macCatalyst)
+        modifier(MacPageScroll())
+        #else
+        self
+        #endif
+    }
+
+    func pageTabBar(hidden: Bool) -> some View {
+        #if targetEnvironment(macCatalyst)
+        toolbar(.hidden, for: .tabBar)
+            .toolbarBackgroundVisibility(.hidden, for: .tabBar)
+        #else
+        toolbar(hidden ? .hidden : .automatic, for: .tabBar)
+        #endif
+    }
+}
+
+#if targetEnvironment(macCatalyst)
+@MainActor
+@Observable
+final class MacNavigationScrollState {
+    var offset: CGFloat = 0
+}
+
+private struct MacPageNavigationOverlay: View {
+    @Environment(MacNavigationScrollState.self) private var scroll
+
+    var body: some View {
+        MacPageNavigation()
+            .offset(y: -scroll.offset)
+            .frame(height: MacPageNavigation.height, alignment: .top)
+            .clipped()
+            .allowsHitTesting(scroll.offset < MacPageNavigation.height)
+    }
+}
+
+private struct MacBackNavigation: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .topLeading) {
+                Button("Back", systemImage: "chevron.backward") { dismiss() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .padding(16)
+                    .accessibilityIdentifier("mac.back")
+            }
+    }
+}
+
+private struct MacPageScroll: ViewModifier {
+    @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
+    @State private var offset: CGFloat = 0
+    @State private var isVisible = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(.top, MacPageNavigation.height, for: .scrollContent)
+            .onScrollGeometryChange(for: CGFloat.self) {
+                min(MacPageNavigation.height, max(0, $0.contentOffset.y + $0.contentInsets.top))
+            } action: { _, value in
+                offset = value
+                if isVisible { navigation?.offset = value }
+            }
+            .onAppear {
+                isVisible = true
+                navigation?.offset = offset
+            }
+            .onDisappear { isVisible = false }
+    }
+}
+#endif
+
 /// Landscape controls: one glass panel with the page's title on top, a hairline, and Home with the tab icons below. Scrolling down fades
 /// the panel, title and icons away and leaves Home alone in the corner; scrolling up brings them straight back. Home is mounted at one
 /// size and position for the whole scroll, and the panel grows upward from the bottom row, so Home never moves and no native tab-bar
 /// relayout occurs.
-/// Slide selection is iPhone-only because the Mac uses native tab and sidebar navigation instead of this compact bar.
+/// Slide selection is iPhone-only because the Mac uses native tab navigation instead of this compact bar.
 private struct LandscapeTabControls: View {
     let router: AppRouter
     let collapsed: Bool
@@ -352,6 +464,8 @@ private struct LandscapeTabControls: View {
     let hidesPageHeader: Bool
     let onHome: () -> Void
     let onReveal: () -> Void
+    /// The selected tab takes Appearance's accent.
+    @Environment(\.appAppearance) private var appearance
 
     private var currentTab: (symbol: String, title: String) {
         switch router.tab {
@@ -418,12 +532,12 @@ private struct LandscapeTabControls: View {
 
             // This is the same instance in both states: it never moves, scales or changes glass.
             Button {
-                Haptics.tap()
+                Haptics.play(.navigation)
                 if collapsed { onReveal() } else { onHome() }
             } label: {
                 Image(systemName: collapsed ? currentTab.symbol : (router.tab == .home ? "play.house.fill" : "play.house"))
                     .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(router.tab == .home ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
+                    .foregroundStyle(router.tab == .home ? appearance.selectionColour : .white)
                     .frame(width: 44, height: 44)
                     .glassEffect(.regular, in: .circle)
             }
@@ -451,19 +565,19 @@ private struct LandscapeTabControls: View {
                 }
                 guard tab != router.tab else { return }
                 // A tick as the drag crosses into another tab, so the finger learns the tab changed before it lifts.
-                Haptics.selection()
+                Haptics.play(.navigation)
                 if tab == .home { router.tapTab(.home) } else { router.tapTab(tab) }
             }
     }
 
     private func tabButton(_ tab: LaunchRoute.Tab, symbol: String, selectedSymbol: String, title: String) -> some View {
         Button {
-            Haptics.tap()
+            Haptics.play(.navigation)
             router.tapTab(tab)
         } label: {
             Image(systemName: router.tab == tab ? selectedSymbol : symbol)
                 .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(router.tab == tab ? Color(red: 0.50, green: 0.59, blue: 1) : .white)
+                .foregroundStyle(router.tab == tab ? appearance.selectionColour : .white)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
@@ -491,6 +605,11 @@ public struct RootTabView: View {
     @State private var isLandscape = false
     @State private var windowSafeArea = EdgeInsets()
     @State private var windowWidth: CGFloat = 0
+    #if targetEnvironment(macCatalyst)
+    @State private var macNavigation = MacNavigationScrollState()
+    #endif
+    /// Settings → Appearance, read here for the tab bar, which sits outside `appliesAppearance()`.
+    @AppStorage(AppearancePreferences.defaultsKey) private var appearance = AppearancePreferences()
     /// A phone turned sideways. A Mac window is never a phone, so `isPhoneLandscape` never governs its navigation bar, at any window shape.
     private var isPhoneLandscape: Bool { isLandscape && !Self.isMacCatalyst }
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
@@ -515,8 +634,9 @@ public struct RootTabView: View {
         case .settings, .widgets: return false
         }
     }
-    /// Phones show each tab's icon alone (see `tabItem`). The iPad and the Mac keep the titles, as their sidebar rows need them.
-    private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone }
+    /// Phones show each tab's icon alone (see `tabItem`) unless Appearance names them. The iPad and the Mac keep the titles, as their
+    /// sidebar rows need them.
+    private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone || appearance.phoneTabTitles }
 
     private var failedHandoffTitle: String {
         if failedHandoff?.handoff.action == .download { return "Couldn’t start download in Infuse" }
@@ -535,6 +655,9 @@ public struct RootTabView: View {
         self.userStateRevision = userStateRevision
         _addonLink = addonLink
         initialQuery = route.searchQuery
+        // A plain launch opens on Appearance's start tab; a launch that asks for a screen (a test, a link) still opens on that screen.
+        var route = route
+        if route == .home { route.tab = AppearancePreferences.saved().startTab.tab }
         initialRoute = route
         _router = State(initialValue: AppRouter(route: route))
         _resume = State(initialValue: ContinueWatchingModel(services: services))
@@ -544,7 +667,7 @@ public struct RootTabView: View {
     public var body: some View {
         @Bindable var router = router
         TabView(selection: Binding(get: { router.tab }, set: {
-            Haptics.selection()
+            Haptics.play(.navigation)
             router.tapTab($0)
         })) {
             Tab(value: LaunchRoute.Tab.home) {
@@ -630,15 +753,16 @@ public struct RootTabView: View {
                 .zoomTransitions()
             }
         }
-        .modifier(TabBarStyle(router: router))
+        .modifier(TabBarStyle())
         // Choosing Search goes straight to its field, with the keyboard up.
         .tabViewSearchActivation(.searchTabSelection)
         .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
         .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
         .pageTopBar(hidden: isPhoneLandscape)
-        .tabBarMinimizeBehavior(isPhoneInLandscape ? .never : .onScrollDown)
-        .toolbar(isPhoneInLandscape || Self.isMacCatalyst ? .hidden : .automatic, for: .tabBar)
-        .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage, isPhoneLandscape: isPhoneInLandscape))
+        .tabBarMinimizeBehavior(Self.isMacCatalyst || isPhoneInLandscape || !appearance.minimisesTabBar ? .never : .onScrollDown)
+        .pageTabBar(hidden: isPhoneInLandscape)
+        .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage || !appearance.showsContinueBar,
+                                          isPhoneLandscape: isPhoneInLandscape))
         // The native bar stays hidden for *all* landscape scroll states. Replacing it mid-scroll
         // changes safe-area geometry and is what made the old detached Home button jump.
         .overlay(alignment: .bottom) {
@@ -651,7 +775,7 @@ public struct RootTabView: View {
                                          onReveal: { landscapeTabs.reset() })
                     Spacer(minLength: 0)
                     Button {
-                        Haptics.tap()
+                        Haptics.play(.navigation)
                         router.tapTab(.search)
                     } label: {
                         Image(systemName: "magnifyingglass")
@@ -680,7 +804,7 @@ public struct RootTabView: View {
         .overlay(alignment: .topLeading) {
             if showsLandscapeBack {
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.navigation)
                     router.goBackOnTab()
                 } label: {
                     Image(systemName: "chevron.backward")
@@ -761,6 +885,13 @@ public struct RootTabView: View {
             ReviewPageRules.prewarm()
             #endif
         }
+        #if targetEnvironment(macCatalyst)
+        .ignoresSafeArea(.container, edges: .top)
+        .overlay(alignment: .top) {
+            MacPageNavigationOverlay()
+        }
+        .environment(macNavigation)
+        #endif
         .environment(router)
         .environment(livePlayback)
         .environment(landscapeTabs)
@@ -780,6 +911,8 @@ public struct RootTabView: View {
         // Read outside the line above: inside it, the sides are no longer a safe area to report. Screens that run under the notch or the
         // status bar take these from the environment (see `windowSafeArea`).
         .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { windowSafeArea = $0 }
+        // Settings → Appearance: accent, text, font and the preferences every page and card reads, on iPhone and Mac alike.
+        .appliesAppearance()
     }
 
     /// A tab's item. On a phone the tab bar shows the icon alone, and the title stays the item's accessibility label, which the UI tests

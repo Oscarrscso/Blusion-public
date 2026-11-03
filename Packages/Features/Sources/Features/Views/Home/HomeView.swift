@@ -7,7 +7,7 @@ import UIKit
 /// answers, and every state (loading, nothing installed, nothing to browse, an issue, offline) has a look of its own.
 struct HomeView: View {
     @State private var model: HomeViewModel
-    @State private var isScrolling = false
+    @State private var scroll = HomeScrollState()
     /// Keep each spotlight's selection while its lazy section is offscreen.
     @State private var heroPages: [String: String] = [:]
     /// How far Home has been pulled down past its top; the spotlight stretches by this much (see `HeroCarousel`).
@@ -47,7 +47,7 @@ struct HomeView: View {
                 // In landscape the page runs under its side insets, so the spotlight is that much wider than the safe width.
                 .environment(\.heroContainerWidth, geometry.size.width
                     + (isLandscape ? geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing : 0))
-                .environment(\.isHomeScrolling, isScrolling)
+                .environment(\.homeScroll, scroll)
                 .environment(\.layoutMetrics, homeMetrics)
         }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
@@ -59,9 +59,10 @@ struct HomeView: View {
                 $0.size.height + $0.safeAreaInsets.top + $0.safeAreaInsets.bottom
             } action: { screenHeight = $0 }
             .navigationTitle(heroIsFirst || isPhoneInLandscape ? "" : "Home")
+            .macRootNavigation()
             .navigationBarTitleDisplayMode(.inline)
             .pageTopBar(hidden: heroIsFirst || isPhoneLandscape)
-            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+            .pageTabBar(hidden: isPhoneInLandscape)
             .task { await model.observeAddons() }
             // Auto Pick's switch is changed away from Home, so a Continue Watching card reads it again whenever Home shows.
             .task(id: scenePhase) { await launcher.refreshAutoPick() }
@@ -101,16 +102,13 @@ struct HomeView: View {
 
     /// With Auto Pick on, a Continue Watching card's streams load here, in a stream picker that draws nothing and starts the stream Play
     /// would, in Infuse or here. It stays once a stream has started, since the player it opened belongs to it. When it has nothing to
-    /// start, the title's page opens with the streams, where Play leaves them in that case.
+    /// start, the card stops spinning and Home stays in place.
     @ViewBuilder
     private var continueStarter: some View {
         if let launch = launcher.launch {
             StreamPickerView(request: launch.request, services: services, isEmbedded: true, isRevealed: false, isHeadless: true,
                              onAutomaticStart: { started in
-                                 guard launcher.finish(launch.id, started: started) else { return }
-                                 router.open(.home)
-                                 router.homePath.append(TitleDestination(preview: launch.preview, sourceID: launch.sourceID,
-                                                                         streams: launch.request))
+                                 _ = launcher.finish(launch.id, started: started)
                              })
                 .id(launch.id)
                 .frame(width: 0, height: 0)
@@ -177,9 +175,54 @@ struct HomeView: View {
                 .screenBackground()
                 .ignoresSafeArea(.container, edges: sideEdges)
         case .ready:
+            #if targetEnvironment(macCatalyst)
+            macReady
+            #else
             ready
+            #endif
         }
     }
+
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's Home: every section in one UIKit scroll (see `CollectionPage`), so the page scrolls without SwiftUI laying out its rows
+    /// on each frame. Sections load as their cells appear, and the spotlight, the rows and the artwork buffer behave as in `ready`.
+    private var macReady: some View {
+        let hasContinue = model.sections.contains { if case .continueWatching = $0.widget.content { true } else { false } }
+        var blocks: [CollectionBlock] = []
+        if !hasContinue {
+            blocks.append(CollectionBlock(id: "home.continue", kind: .full(AnyView(continueRow)), spacingAfter: metrics.shelfSpacing))
+        }
+        for (index, section) in model.sections.enumerated() {
+            if model.isOffline {
+                guard case .continueWatching = section.widget.content else { continue }
+            } else {
+                guard model.isCustomised || !isEmptyRow(section) else { continue }
+            }
+            let view = hostedSection(section, index: index)
+                .modifier(MacVisibleHomeSection(model: model, sectionID: section.id, revision: model.loadRevision))
+                .prioritizesArtwork(order: index)
+            blocks.append(CollectionBlock(id: section.id, kind: .full(AnyView(view)), spacingAfter: metrics.shelfSpacing))
+        }
+        if model.isOffline {
+            blocks.append(CollectionBlock(id: "home.offline", kind: .full(AnyView(OfflineBanner()))))
+        }
+        return CollectionPage(blocks: blocks, bottomInset: Theme.Spacing.xxl,
+                              scrollToTop: router.tabTapRevisions[.home, default: 0], jumpToTop: router.spotlightRevision,
+                              onScrollingChange: { [scroll] scrolling in
+                                  if scroll.isScrolling != scrolling { scroll.isScrolling = scrolling }
+                              })
+            .accessibilityIdentifier("board.rows")
+            .modifier(BelowScreenArtwork(model: model))
+            .onDisappear { scroll.isScrolling = false }
+            .screenBackground()
+            .ignoresSafeArea(.container, edges: ignoredEdges)
+            .onChange(of: router.spotlightRevision) { _, _ in
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { heroPages.removeAll() }
+            }
+    }
+    #endif
 
     /// The id of Home's content, which its scroll goes back to when a title opened from the spotlight is popped.
     private static let topID = "home.top"
@@ -195,7 +238,7 @@ struct HomeView: View {
                         if model.isOffline {
                             ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
                                 if case .continueWatching = section.widget.content {
-                                    sectionView(section)
+                                    hostedSection(section, index: index)
                                     .modifier(VisibleHomeSection(model: model, sectionID: section.id, revision: model.loadRevision))
                                     .prioritizesArtwork(order: index)
                                 }
@@ -204,7 +247,7 @@ struct HomeView: View {
                         } else {
                             ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
                                 if model.isCustomised || !isEmptyRow(section) {
-                                    sectionView(section)
+                                    hostedSection(section, index: index)
                                     .modifier(VisibleHomeSection(model: model, sectionID: section.id, revision: model.loadRevision))
                                     .prioritizesArtwork(order: index)
                                 }
@@ -222,13 +265,16 @@ struct HomeView: View {
             .scrollIndicators(.visible, axes: .vertical)
             .scrollIndicatorsFlash(onAppear: true)
             .accessibilityIdentifier("board.rows")
+            .modifier(BelowScreenArtwork(model: model))
             .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
                 heroPull = value
             }
             .environment(\.heroPull, heroIsFirst ? heroPull : 0)
             .trackLandscapeTabScroll()
-            .onScrollPhaseChange { _, phase in isScrolling = phase.isScrolling }
-            .onDisappear { isScrolling = false }
+            .onScrollPhaseChange { _, phase in
+                if scroll.isScrolling != phase.isScrolling { scroll.isScrolling = phase.isScrolling }
+            }
+            .onDisappear { scroll.isScrolling = false }
             .contentMargins(.top, 0, for: .scrollContent)
             .screenBackground()
             .scrollEdgeEffectHidden(heroIsFirst || isPhoneLandscape || HeroCarousel.isMacCatalyst, for: .top)
@@ -314,6 +360,16 @@ struct HomeView: View {
         }
     }
 
+    /// A section that rebuilds only when it changes. Home's body runs again whenever any row loads; without this, every row already built
+    /// (and every card in it) was rebuilt with it, since the closures each row is handed cannot be compared.
+    private func hostedSection(_ section: HomeViewModel.Section, index: Int) -> some View {
+        HomeSectionHost(section: section, index: index, metrics: metrics, isLandscape: isLandscape, isCustomised: model.isCustomised,
+                        savedWidget: model.layoutWidgets[section.id]) {
+            sectionView(section)
+        }
+        .equatable()
+    }
+
     private var continueRow: some View {
         ContinueWatchingRow(items: model.continueEntries, state: model.continueState, retry: refreshPlayback, onRemove: removeContinue, onMarkWatched: markContinueWatched,
                             launcher: launcher)
@@ -349,7 +405,7 @@ struct HomeView: View {
     private func duplicateAction(for section: HomeViewModel.Section) -> (() -> Void)? {
         guard WidgetsManagerViewModel.isDuplicable(section.widget) else { return nil }
         return {
-            Haptics.tap()
+            Haptics.play(.buttons)
             Task { await model.duplicateWidget(sectionID: section.id) }
         }
     }
@@ -422,8 +478,88 @@ private struct VisibleHomeSection: ViewModifier {
             .task(id: "\(sectionID)|\(revision)|\(isVisible)") {
                 guard isVisible else { return }
                 await model.loadVisibleSection(sectionID)
+                await model.loadRowsBelow(sectionID)
             }
     }
 }
 
+/// Keeps the posters of the rows queued below the screen loaded (see `HomeViewModel.loadRowsBelow`), so a row's first cards are ready
+/// before it scrolls in. A row on screen loads its own, and both draw from the same cache, so a poster loads once.
+private struct BelowScreenArtwork: ViewModifier {
+    let model: HomeViewModel
+    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+
+    func body(content: Content) -> some View {
+        content.modifier(BufferedArtwork(shelves: shelves))
+    }
+
+    /// The loaded cards of the queued rows, in page order, for as many titles as the Lazy load setting keeps ready.
+    private var shelves: [ArtworkShelf] {
+        var remaining = LazyLoadLookahead.titles(atLevel: lookaheadLevel)
+        var result: [ArtworkShelf] = []
+        for section in model.sections where model.queuedRowIDs.contains(section.id) {
+            guard remaining > 0, case .row(let row) = section.widget.content, case .loaded(let items) = section.state else { continue }
+            let shown = Array(items.prefix(remaining))
+            remaining -= shown.count
+            result.append(ArtworkShelf(items: shown, aspect: row.presentation.aspectRatio.cardAspect,
+                                       size: row.presentation.cardStyle.cardSize, usesBetterPosters: row.presentation.usesBetterPosters,
+                                       heroOverride: row.presentation.usesHeroPosters))
+        }
+        return result
+    }
+}
+
+/// One Home section, compared by what it shows. Unchanged, it keeps its last body when Home's runs again; what it reads from the model
+/// inside (Continue Watching's entries, a row's state) still updates it directly, as SwiftUI tracks those reads here.
+private struct HomeSectionHost<Content: View>: View, Equatable {
+    let section: HomeViewModel.Section
+    let index: Int
+    let metrics: LayoutMetrics
+    let isLandscape: Bool
+    let isCustomised: Bool
+    let savedWidget: HomeWidget?
+    @ViewBuilder let content: () -> Content
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.section == rhs.section && lhs.index == rhs.index && lhs.metrics == rhs.metrics && lhs.isLandscape == rhs.isLandscape
+                && lhs.isCustomised == rhs.isCustomised && lhs.savedWidget == rhs.savedWidget
+        }
+    }
+
+    var body: some View { content() }
+}
+#if targetEnvironment(macCatalyst)
+/// `VisibleHomeSection` for a section in a UIKit cell, which has no SwiftUI scroll view to report its visibility: the section counts as
+/// visible while its cell is in the window, which UIKit keeps to the cells on and just beside the screen.
+///
+/// The load is not tied to the view's own task: refreshing a cell can restart a view's tasks, and a load cancelled that way left its
+/// section loading for good, since the model does not start a second load of a section while the first is still marked as running.
+private struct MacVisibleHomeSection: ViewModifier {
+    let model: HomeViewModel
+    let sectionID: String
+    let revision: Int
+    @State private var isVisible = false
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.loadsVisibleArtwork, isVisible)
+            .onAppear {
+                isVisible = true
+                load()
+            }
+            .onDisappear { isVisible = false }
+            .onChange(of: revision) { _, _ in if isVisible { load() } }
+    }
+
+    private func load() {
+        let model = model
+        let sectionID = sectionID
+        Task {
+            await model.loadVisibleSection(sectionID)
+            await model.loadRowsBelow(sectionID)
+        }
+    }
+}
+#endif
 #endif

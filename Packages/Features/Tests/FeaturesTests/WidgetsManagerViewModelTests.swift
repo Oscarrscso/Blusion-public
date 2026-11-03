@@ -431,7 +431,7 @@ private let tvManifest = Manifest(id: "test.tv", name: "TV Catalogs", version: "
         let row = HomeWidget(title: "Popular", content: .row(RowConfiguration(source: .addonCatalog(popular.reference))))
         #expect(model.summary(of: row) == "Row · Popular Movies · Cinemeta")
         #expect(model.summary(of: WidgetsManagerViewModel.makeHero(choice: popular)) == "Spotlight · Popular Movies · Cinemeta")
-        #expect(model.summary(of: WidgetsManagerViewModel.makeBanner(choice: popular)).hasPrefix("Banner · "))
+        #expect(model.summary(of: WidgetsManagerViewModel.makeBanner(choice: popular)).hasPrefix("Carousel · "))
         let tiles = (0..<12).map { CollectionItem(id: "\($0)", title: "Tile \($0)") }
         #expect(model.summary(of: HomeWidget(title: "Tiles", content: .collection(tiles))) == "Collection · 12 tiles")
         #expect(model.summary(of: HomeWidget(title: "One", content: .collection([tiles[0]]))) == "Collection · 1 tile")

@@ -163,14 +163,15 @@ private struct SkeletonShapes: View {
     let size: CardSize
     let showsTitle: Bool?
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.appAppearance) private var appearance
 
     var body: some View {
         let width = size.width(for: aspect, metrics: metrics)
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            RoundedRectangle(cornerRadius: aspect.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: aspect.cornerRadius * metrics.cornerScale, style: .continuous)
                 .fill(Theme.surface)
                 .frame(width: width, height: width / aspect.ratio)
-            if showsTitle ?? aspect.showsCaptionByDefault {
+            if showsTitle ?? aspect.showsCaption(appearance) {
                 VStack(alignment: .leading, spacing: 2) {
                     line(font: Theme.Typography.cardTitle, width: width * 0.78)
                     line(font: Theme.Typography.cardSubtitle, width: width * 0.46)

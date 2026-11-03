@@ -126,11 +126,11 @@ struct DetailActions: View {
             .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
             .contextMenu {
                 Button("Stream Selector", systemImage: "arrow.up.right.square") {
-                    Haptics.selection()
+                    Haptics.play(.buttons)
                     showStreamSelector(request)
                 }
                 Button("Play with Infuse", systemImage: "play.rectangle.on.rectangle") {
-                    Haptics.selection()
+                    Haptics.play(.buttons)
                     playWithInfuse(request)
                 }
             }

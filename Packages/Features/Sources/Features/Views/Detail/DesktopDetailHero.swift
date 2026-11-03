@@ -10,6 +10,7 @@ import UIKit
 /// keep stays on the page.
 struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Information: View>: View {
     let model: DetailViewModel
+    let scroll: DetailHeroScrollState
     /// The page's own size: the full width of the window's content, and its height.
     let size: CGSize
     let contentMargin: CGFloat
@@ -29,7 +30,7 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     @State private var overviewIsCut = false
 
     /// The hero is extended below its former height so its bottom-aligned title, overview, ratings and actions sit noticeably lower.
-    private var heroHeight: CGFloat { min(max(size.height * 0.62, 440), 620) + 80 }
+    private var heroHeight: CGFloat { TitleHero.macHeight(pageHeight: size.height) }
     /// The widest the title, the actions and the ratings are, over the picture's lower left edge.
     private static var textWidth: CGFloat { 560 }
     /// The widest and tallest the title's logo is on this page.
@@ -67,9 +68,19 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     /// The picture across the window, with the title and the controls over its lower left edge. The title's scores are the linked buttons
     /// under the overview, and nowhere else on the page.
     private var hero: some View {
+        textColumn
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .frame(height: heroHeight)
+            .background { artwork }
+    }
+
+    private var artwork: some View {
         ZStack(alignment: .bottomLeading) {
             HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, alignment: .center, preview: model.preview,
                         standInFromBackdrop: true, usesSystemSpinner: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .modifier(DetailHeroScrollZoom(scroll: scroll))
+                .clipped()
             // Darker on the left, where the text sits, so the title and the buttons read over the picture.
             LinearGradient(stops: [
                 .init(color: .black.opacity(0.85), location: 0),
@@ -79,12 +90,10 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
             .allowsHitTesting(false)
             // The fade starts lower than it did, so more of the picture shows above it before it fades into the page.
             BottomFade(length: 0.42)
-            textColumn
         }
-        // The full width of the page, from the sidebar's edge to the window's.
-        .frame(maxWidth: .infinity)
-        .frame(height: heroHeight)
-        .clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .modifier(DetailHeroScrollPull(scroll: scroll))
+        .allowsHitTesting(false)
     }
 
     /// The title, the metadata line and, once the details show, the overview and the ratings, then the actions: one column over the

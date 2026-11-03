@@ -51,6 +51,7 @@ struct WidgetSourcePicker: View {
                         .scrollIndicators(.visible, axes: .vertical)
                         .scrollIndicatorsFlash(onAppear: true)
                         .navigationTitle(choice.title)
+                        .macBackNavigation()
                         .scrollContentBackground(.hidden)
                         .screenBackground()
                     } label: { label(choice) }
@@ -107,6 +108,7 @@ private struct TraktListLinkForm: View {
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
         .navigationTitle("Trakt List")
+        .macBackNavigation()
         .scrollContentBackground(.hidden)
         .screenBackground()
     }

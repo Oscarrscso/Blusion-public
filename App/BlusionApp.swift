@@ -9,6 +9,20 @@ struct BlusionApp: App {
     @UIApplicationDelegateAdaptor(DownloadAppDelegate.self) private var appDelegate
     @State private var environment = AppEnvironment.make()
 
+    init() {
+        #if targetEnvironment(macCatalyst)
+        // Sheets with Save/Cancel still need their native controls, without a grey background or separator.
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        appearance.shadowColor = .clear
+        let navigationBar = UINavigationBar.appearance()
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+        navigationBar.compactScrollEdgeAppearance = appearance
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(environment: environment)
@@ -164,8 +178,25 @@ private struct MacTitlebar: UIViewRepresentable {
     private final class TitlebarView: UIView {
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            setNeedsLayout()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // SwiftUI can recreate the Catalyst toolbar when a tab's controls change.
             window?.windowScene?.titlebar?.titleVisibility = .hidden
-            window?.windowScene?.titlebar?.toolbar = nil
+            if window?.windowScene?.titlebar?.toolbar != nil {
+                window?.windowScene?.titlebar?.toolbar = nil
+            }
+            hideNativeTabs(in: window?.rootViewController)
+        }
+
+        private func hideNativeTabs(in controller: UIViewController?) {
+            guard let controller else { return }
+            if let tabs = controller as? UITabBarController, !tabs.isTabBarHidden {
+                tabs.setTabBarHidden(true, animated: false)
+            }
+            for child in controller.children { hideNativeTabs(in: child) }
         }
     }
 }

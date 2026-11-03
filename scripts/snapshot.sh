@@ -68,6 +68,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.blusion.player.snapshot
         TARGETED_DEVICE_FAMILY: "$FAMILY"
         CODE_SIGN_IDENTITY: "-"
+        BLUSION_REPO_ROOT: "\$(SRCROOT)/../.."
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: ""
 YAML

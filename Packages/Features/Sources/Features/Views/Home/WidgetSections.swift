@@ -43,6 +43,7 @@ struct WidgetRow: View {
 
     var body: some View {
         rowBody
+            .environment(\.heroPosterOverride, row.presentation.usesHeroPosters)
             .accessibilityIdentifier(identifier)
     }
 
@@ -52,16 +53,15 @@ struct WidgetRow: View {
         let presentation = row.presentation
         if case .loaded(let items) = section.state, !items.isEmpty {
             let shelf = MediaRow(widget.title, hideTitle: widget.hideTitle, onSeeAll: {
-                Haptics.tap()
+                Haptics.play(.titles)
                 router.homePath.append(seeAllRequest)
-            }) {
-                ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in
-                    MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, size: presentation.cardStyle.cardSize,
-                                  showsRating: presentation.showsRatings, usesBetterPosters: presentation.usesBetterPosters)
-                        .overlay(alignment: .topLeading) {
-                            if presentation.showsRank { RankBadge(position: index + 1) }
-                        }
-                }
+            }, items: items, id: \.identity, artworkItems: items, aspect: presentation.aspectRatio.cardAspect,
+                size: presentation.cardStyle.cardSize, usesBetterPosters: presentation.usesBetterPosters) { index, item in
+                MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, size: presentation.cardStyle.cardSize,
+                              showsRating: presentation.showsRatings, usesBetterPosters: presentation.usesBetterPosters)
+                    .overlay(alignment: .topLeading) {
+                        if presentation.showsRank { RankBadge(position: index + 1) }
+                    }
             }
             // Long-pressing a poster row's shelf (its title or the space around the cards) offers the row's posters setting. A card keeps its
             // own hold: on iPhone it plays the card, so the row's menu is kept off the cards there; the Mac's cards have their own menu.
@@ -226,6 +226,8 @@ struct ContinueWatchingRow: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @State private var kind = ContinueKind.all
+    /// Bumped by the title to scroll the rail back to its first card, on the Mac's UIKit rail (see `CollectionShelf`).
+    @State private var scrollToStart = 0
 
     var body: some View {
         let shown = items.filter { kind.includes($0.request) }
@@ -237,6 +239,7 @@ struct ContinueWatchingRow: View {
                             if let first = shown.first {
                                 withAnimation(.snappy(duration: 0.28)) { proxy.scrollTo(first.id, anchor: .leading) }
                             }
+                            scrollToStart += 1
                         } label: {
                             Text(title)
                         }
@@ -272,8 +275,8 @@ struct ContinueWatchingRow: View {
                     .padding(.horizontal, metrics.pageMargin)
                 }
                 if !shown.isEmpty {
-                    MediaRow(title, hideTitle: true) {
-                        ForEach(shown) { item in
+                    MediaRow(title, hideTitle: true, items: shown, id: \.id, aspect: .wide, cardWidth: metrics.continueCardWidth,
+                             scrollToStart: scrollToStart) { _, item in
                             let artworkID = ContentID(item.request.id).baseID
                             ProgressCard(title: item.request.title, subtitle: item.subtitle, episodeName: item.episodeName,
                                          artwork: MetahubArtwork.background(imdbID: artworkID) ?? item.request.poster,
@@ -286,7 +289,6 @@ struct ContinueWatchingRow: View {
                                                   onMarkWatched: { onMarkWatched(item) }, onRemove: { onRemove(item) })
                             .id(item.id)
                             .accessibilityIdentifier("board.continue.\(item.id)")
-                        }
                     }
                 } else if !items.isEmpty {
                     // Hold the rail's height, so switching to an empty kind does not move the page below.

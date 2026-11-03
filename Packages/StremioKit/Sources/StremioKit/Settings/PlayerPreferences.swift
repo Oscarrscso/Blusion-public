@@ -222,14 +222,20 @@ public struct VideoProcessing: Sendable, Equatable, Hashable, Codable {
     /// looks wrong (a green or purple cast, crushed shadows). A profile 5 stream has no such picture and keeps its Dolby Vision.
     /// AetherEngine and mpv apply it; AVPlayer always shows Dolby Vision.
     public var dolbyVision: Bool
+    /// How bright HDR gets, 0…1. 0 leaves the system's own choice (which keeps video highlights well under what the screen can do);
+    /// above it, the picture asks for more of the screen's HDR range, up to all of it at 1. See docs/PLAYER.md.
+    public var hdrBrightness: Double
+
+    public static let hdrBrightnessRange: ClosedRange<Double> = 0...1
 
     public init(deinterlace: DeinterlaceMode = .auto, toneMapping: ToneMappingCurve = .auto, hdrOutput: HDROutputMode = .auto,
-                upscaling: UpscalingMode = .off, dolbyVision: Bool = true) {
+                upscaling: UpscalingMode = .off, dolbyVision: Bool = true, hdrBrightness: Double = 0) {
         self.deinterlace = deinterlace
         self.toneMapping = toneMapping
         self.hdrOutput = hdrOutput
         self.upscaling = upscaling
         self.dolbyVision = dolbyVision
+        self.hdrBrightness = min(max(hdrBrightness, Self.hdrBrightnessRange.lowerBound), Self.hdrBrightnessRange.upperBound)
     }
 
     public init(from decoder: Decoder) throws {
@@ -238,7 +244,8 @@ public struct VideoProcessing: Sendable, Equatable, Hashable, Codable {
                   toneMapping: (try? container.decode(ToneMappingCurve.self, forKey: .toneMapping)) ?? .auto,
                   hdrOutput: (try? container.decode(HDROutputMode.self, forKey: .hdrOutput)) ?? .auto,
                   upscaling: (try? container.decode(UpscalingMode.self, forKey: .upscaling)) ?? .off,
-                  dolbyVision: (try? container.decode(Bool.self, forKey: .dolbyVision)) ?? true)
+                  dolbyVision: (try? container.decode(Bool.self, forKey: .dolbyVision)) ?? true,
+                  hdrBrightness: (try? container.decode(Double.self, forKey: .hdrBrightness)) ?? 0)
     }
 }
 
@@ -364,12 +371,29 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
     public var composesDolbyVisionFEL: Bool
     /// AetherEngine renders TrueHD and DTS:X object audio as spatial audio.
     public var rendersObjectAudio: Bool
+    /// How far Back and Forward jump, in seconds: the transport buttons, a double tap on the picture, the Mac's arrow keys, the lock screen
+    /// and Control Center. One of `skipIntervalOptions`.
+    public var skipBackSeconds: Int
+    public var skipForwardSeconds: Int
+    /// A double tap on the left or right third of the picture skips back or forward. Off, a double tap anywhere plays or pauses.
+    public var doubleTapSkips: Bool
+    /// Idle seconds before the controls hide while playing. Zero keeps them until tapped away. One of `controlsHideOptions`.
+    public var controlsHideSeconds: Int
+    /// The speed every video starts at. One of `playbackSpeedOptions`.
+    public var playbackSpeed: Double
+
+    /// Skip amounts that have a matching `gobackward.N` / `goforward.N` symbol.
+    public static let skipIntervalOptions = [5, 10, 15, 30, 45, 60]
+    public static let controlsHideOptions = [2, 3, 5, 8, 0]
+    public static let playbackSpeedOptions: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
 
     public init(subtitleMode: SubtitleMode = .always, prefersSDH: Bool = false, subtitleStyle: SubtitleStyle = SubtitleStyle(),
                 audioLanguage: String? = nil, videoLayout: VideoLayout = VideoLayout(), zoomMode: VideoZoomMode = .normal,
                 aspectRatios: [String: AspectRatioChoice] = [:], processing: VideoProcessing = VideoProcessing(),
                 showsSkipButtons: Bool = true, skipsIntrosAutomatically: Bool = false, swipeGestures: Bool = true, ambientMode: Bool = false,
-                advancedEngine: AdvancedEngine = .aether, composesDolbyVisionFEL: Bool = false, rendersObjectAudio: Bool = true) {
+                advancedEngine: AdvancedEngine = .aether, composesDolbyVisionFEL: Bool = false, rendersObjectAudio: Bool = true,
+                skipBackSeconds: Int = 10, skipForwardSeconds: Int = 10, doubleTapSkips: Bool = true, controlsHideSeconds: Int = 3,
+                playbackSpeed: Double = 1) {
         self.subtitleMode = subtitleMode
         self.prefersSDH = prefersSDH
         self.subtitleStyle = subtitleStyle
@@ -385,6 +409,11 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
         self.advancedEngine = advancedEngine
         self.composesDolbyVisionFEL = composesDolbyVisionFEL
         self.rendersObjectAudio = rendersObjectAudio
+        self.skipBackSeconds = Self.skipIntervalOptions.contains(skipBackSeconds) ? skipBackSeconds : 10
+        self.skipForwardSeconds = Self.skipIntervalOptions.contains(skipForwardSeconds) ? skipForwardSeconds : 10
+        self.doubleTapSkips = doubleTapSkips
+        self.controlsHideSeconds = Self.controlsHideOptions.contains(controlsHideSeconds) ? controlsHideSeconds : 3
+        self.playbackSpeed = Self.playbackSpeedOptions.contains(playbackSpeed) ? playbackSpeed : 1
     }
 
     public init(from decoder: Decoder) throws {
@@ -405,14 +434,20 @@ public struct PlayerPreferences: Sendable, Equatable, Hashable, Codable {
                   ambientMode: (try? container.decode(Bool.self, forKey: .ambientMode)) ?? defaults.ambientMode,
                   advancedEngine: (try? container.decode(AdvancedEngine.self, forKey: .advancedEngine)) ?? defaults.advancedEngine,
                   composesDolbyVisionFEL: (try? container.decode(Bool.self, forKey: .composesDolbyVisionFEL)) ?? defaults.composesDolbyVisionFEL,
-                  rendersObjectAudio: (try? container.decode(Bool.self, forKey: .rendersObjectAudio)) ?? defaults.rendersObjectAudio)
+                  rendersObjectAudio: (try? container.decode(Bool.self, forKey: .rendersObjectAudio)) ?? defaults.rendersObjectAudio,
+                  skipBackSeconds: (try? container.decode(Int.self, forKey: .skipBackSeconds)) ?? defaults.skipBackSeconds,
+                  skipForwardSeconds: (try? container.decode(Int.self, forKey: .skipForwardSeconds)) ?? defaults.skipForwardSeconds,
+                  doubleTapSkips: (try? container.decode(Bool.self, forKey: .doubleTapSkips)) ?? defaults.doubleTapSkips,
+                  controlsHideSeconds: (try? container.decode(Int.self, forKey: .controlsHideSeconds)) ?? defaults.controlsHideSeconds,
+                  playbackSpeed: (try? container.decode(Double.self, forKey: .playbackSpeed)) ?? defaults.playbackSpeed)
     }
 
     /// The FEL choice is saved under a new name: the old one held the old default (on), which nobody chose, so every saved copy starts
     /// with the new default (off) once.
     private enum CodingKeys: String, CodingKey {
         case subtitleMode, prefersSDH, subtitleStyle, audioLanguage, videoLayout, zoomMode, aspectRatios, processing, showsSkipButtons, skipsIntrosAutomatically,
-             swipeGestures, ambientMode, advancedEngine, rendersObjectAudio
+             swipeGestures, ambientMode, advancedEngine, rendersObjectAudio, skipBackSeconds, skipForwardSeconds, doubleTapSkips,
+             controlsHideSeconds, playbackSpeed
         case composesDolbyVisionFEL = "composesDolbyVisionFEL2"
     }
 }

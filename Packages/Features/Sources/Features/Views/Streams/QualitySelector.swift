@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// The system's segmented control for media types and quality filters.
@@ -20,7 +21,7 @@ struct QualitySelector: View {
         .labelsHidden()
         .frame(width: showsTitles ? nil : CGFloat(titles.count * 44))
         .accessibilityIdentifier(accessibilityID)
-        .onChange(of: selection) { _, _ in Haptics.selection() }
+        .onChange(of: selection) { _, _ in Haptics.play(.choices) }
     }
 
     @ViewBuilder private func segment(_ index: Int) -> some View {

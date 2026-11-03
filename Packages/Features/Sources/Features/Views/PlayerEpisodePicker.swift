@@ -187,7 +187,7 @@ struct PlayerEpisodePicker: View {
 
     private func choose(_ video: Video) {
         guard model.preparingID == nil, let request = model.request(for: video) else { return }
-        Haptics.tap()
+        Haptics.play(.playerControls)
         model.beginPreparing(video)
         prepareTask = Task {
             let plan = await prepare(request)

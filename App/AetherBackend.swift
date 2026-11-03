@@ -90,6 +90,7 @@ public final class AetherBackend: FallbackBackend {
         self.processing = processing
         options.dolbyVision = processing.dolbyVision
         session.setDolbyVision(processing.dolbyVision)
+        session.setHDRBrightness(processing.hdrBrightness)
     }
 
     public func apply(subtitleStyle style: SubtitleStyle) {

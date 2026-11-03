@@ -54,7 +54,8 @@ struct HeroCarousel: View {
     private var isLandscape: Bool { isPhoneLandscape || HeroCarousel.isMacCatalyst }
     @Environment(\.heroContainerHeight) private var containerHeight
     @Environment(\.heroContainerWidth) private var containerWidth
-    @Environment(\.isHomeScrolling) private var isHomeScrolling
+    @Environment(\.homeScroll) private var homeScroll
+    private var isHomeScrolling: Bool { homeScroll?.isScrolling ?? false }
     /// The portrait page's band under the picture, scaled with Dynamic Type so a larger metadata line keeps its room (see `TitleHero.captionBelow`).
     @ScaledMetric(relativeTo: .footnote) private var captionBelow: CGFloat = TitleHero.captionBelow
     @Environment(\.heroPull) private var heroPull
@@ -153,7 +154,7 @@ struct HeroCarousel: View {
                         guard let oldID, let newID, oldID != newID,
                               items.contains(where: { $0.identity == oldID }) else { return }
                         // A whole page of content is replaced, so this is the harder click rather than the standard tap.
-                        Haptics.scrollSnap()
+                        Haptics.play(.banner)
                     }
                     .onAppear {
                         if !items.contains(where: { $0.identity == pageID }) {
@@ -357,7 +358,7 @@ private struct HeroPage: View {
     var body: some View {
         // The title page repeats the picture and logo in the same place, so it replaces Home with no animation.
         let openTitle = {
-            Haptics.tap()
+            Haptics.play(.titles)
             let destination = TitleDestination(preview: item, sourceID: "hero", artwork: heroArtwork, artworkChecked: artworkChecked,
                                                opensInstantly: true, handoff: handoff)
             var transaction = Transaction(animation: nil)

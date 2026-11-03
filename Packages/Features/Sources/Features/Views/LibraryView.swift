@@ -25,37 +25,88 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        Group {
+            #if targetEnvironment(macCatalyst)
+            macPage
+            #else
+            scrollPage
+            #endif
+        }
+        .task(id: router.opensDownloads) {
+            // A long press on a Download button opens Library's Downloads page, from the top of the Library.
+            guard router.opensDownloads, router.tab == .library else { return }
+            router.libraryPath = NavigationPath()
+            model.showsDownloads = true
+            router.opensDownloads = false
+        }
+        .task { model.attachRatings(ratings) }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.refresh()
+                await actions?.refresh()
+                do {
+                    try await Task.sleep(for: .seconds(300))
+                } catch {
+                    return
+                }
+            }
+        }
+        .onChange(of: actions?.savedIdentities) { Task { await model.load() } }
+        .onChange(of: actions?.watchedIdentities) { Task { await model.load() } }
+        .accessibilityIdentifier("library.list")
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's page: the filters and the Saved and Watched grids in one UIKit scroll (see `MacGridPage`), so a long library scrolls smoothly.
+    private var macPage: some View {
+        var parts: [MacGridPage.Part] = [.full(id: "filters", view: AnyView(filters))]
+        if model.showsDownloads {
+            parts.append(.full(id: "downloads", view: AnyView(
+                DownloadsView(services: services, filter: model.downloadFilter, clearFilters: { model.clearFilters() }))))
+        } else if !model.hasLoaded {
+            parts.append(.full(id: "loading", view: AnyView(SkeletonRow())))
+        } else if model.isEmpty || !model.hasMatches {
+            parts.append(.full(id: "empty", view: AnyView(emptyState)))
+        } else {
+            if !model.saved.isEmpty {
+                let saved = model.saved
+                parts.append(.grid(MacTitleGrid(id: "saved", items: saved.map(\.preview), spacingAfter: metrics.shelfSpacing) { index, _ in
+                    AnyView(savedCard(saved[index]))
+                }))
+            }
+            if !model.watched.isEmpty {
+                let watched = model.watched
+                parts.append(.full(id: "watchedHeader", view: AnyView(SectionHeader("Watched").padding(.horizontal, metrics.pageMargin)),
+                                   spacingAfter: metrics.headerSpacing))
+                parts.append(.grid(MacTitleGrid(id: "watched", items: watched.map(\.preview)) { index, _ in
+                    AnyView(watchedCard(watched[index]))
+                }))
+            }
+        }
+        return MacGridPage(parts: parts, scrollToTop: router.tabTapRevisions[.library, default: 0])
+            .screenBackground()
+            .navigationTitle("")
+            .macRootNavigation()
+            .pageTabBar(hidden: isPhoneInLandscape)
+    }
+    #endif
+
+    private var scrollPage: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    pageTitle
                     filters
                     VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
                         if model.showsDownloads {
                             DownloadsView(services: services, filter: model.downloadFilter, clearFilters: { model.clearFilters() })
                         } else if !model.hasLoaded {
                             SkeletonRow()
-                        } else if model.isEmpty {
-                            EmptyStateLayout(title: "Your library is empty", systemImage: "books.vertical",
-                                             message: "Titles you save, and anything you start watching, show up here.") {
-                                Button("Find something to watch", action: onOpenAddons)
-                                    .buttonStyle(.primaryActionCompact)
-                                    .accessibilityIdentifier("library.empty.action")
-                            }
-                            .accessibilityIdentifier("library.empty")
+                        } else if model.isEmpty || !model.hasMatches {
+                            emptyState
                         } else {
-                            if !model.hasMatches {
-                                EmptyStateLayout(title: "No titles match", systemImage: "line.3.horizontal.decrease.circle",
-                                                 message: "Try removing a filter.") {
-                                    Button("Clear Filters") { model.clearFilters() }
-                                        .buttonStyle(.primaryActionCompact)
-                                        .accessibilityIdentifier("library.noMatches.clear")
-                                }
-                                .accessibilityIdentifier("library.noMatches")
-                            } else {
-                                if !model.saved.isEmpty { savedSection }
-                                if !model.watched.isEmpty { watchedSection }
-                            }
+                            if !model.saved.isEmpty { savedSection }
+                            if !model.watched.isEmpty { watchedSection }
                         }
                     }
                 }
@@ -68,52 +119,16 @@ struct LibraryView: View {
             .screenBackground()
             .browsePageTopMargin()
             .navigationTitle("")
-            .task(id: router.opensDownloads) {
-                // A long press on a Download button opens Library's Downloads page, from the top of the Library.
-                guard router.opensDownloads, router.tab == .library else { return }
-                router.libraryPath = NavigationPath()
-                model.showsDownloads = true
-                router.opensDownloads = false
-            }
-            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+            .macRootNavigation()
+            .pageTabBar(hidden: isPhoneInLandscape)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)
             #endif
-            .task { model.attachRatings(ratings) }
-            .task(id: scenePhase) {
-                guard scenePhase == .active else { return }
-                while !Task.isCancelled {
-                    await model.refresh()
-                    await actions?.refresh()
-                    do {
-                        try await Task.sleep(for: .seconds(300))
-                    } catch {
-                        return
-                    }
-                }
-            }
-            .onChange(of: actions?.savedIdentities) { Task { await model.load() } }
-            .onChange(of: actions?.watchedIdentities) { Task { await model.load() } }
-            .accessibilityIdentifier("library.list")
             // A tap on Library's tab item goes back to its first page, and scrolls it to the top.
             .onChange(of: router.tabTapRevisions[.library, default: 0]) { _, _ in
                 withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo(Self.topID, anchor: .top) }
             }
-        }
-    }
-
-    /// The page's title, drawn in the content so the navigation bar stays free of text. A phone in landscape has no room for a title
-    /// above the grid, so it is left out there; the tab bar still names the page.
-    @ViewBuilder
-    private var pageTitle: some View {
-        if !isPhoneInLandscape {
-            Text("Library")
-                .font(Theme.Typography.largeTitle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, metrics.pageMargin)
-                .padding(.bottom, metrics.headerSpacing)
-                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -189,8 +204,8 @@ struct LibraryView: View {
                 .accessibilityIdentifier("library.sort")
             }
         }
-        .onChange(of: model.filter) { _, _ in Haptics.selection() }
-        .onChange(of: model.downloadFilter) { _, _ in Haptics.selection() }
+        .onChange(of: model.filter) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.downloadFilter) { _, _ in Haptics.play(.choices) }
         .accessibilityIdentifier("library.filters")
     }
 
@@ -206,40 +221,66 @@ struct LibraryView: View {
         FilterMenuLabel(title, systemImage: systemImage, tint: tint, isActive: isActive, minHeight: BrowseFilterBar<EmptyView>.menuHeight)
     }
 
+    /// An empty library, or one whose filters match nothing.
+    @ViewBuilder
+    private var emptyState: some View {
+        if model.isEmpty {
+            EmptyStateLayout(title: "Your library is empty", systemImage: "books.vertical",
+                             message: "Titles you save, and anything you start watching, show up here.") {
+                Button("Find something to watch", action: onOpenAddons)
+                    .buttonStyle(.primaryActionCompact)
+                    .accessibilityIdentifier("library.empty.action")
+            }
+            .accessibilityIdentifier("library.empty")
+        } else {
+            EmptyStateLayout(title: "No titles match", systemImage: "line.3.horizontal.decrease.circle",
+                             message: "Try removing a filter.") {
+                Button("Clear Filters") { model.clearFilters() }
+                    .buttonStyle(.primaryActionCompact)
+                    .accessibilityIdentifier("library.noMatches.clear")
+            }
+            .accessibilityIdentifier("library.noMatches")
+        }
+    }
+
     private var savedSection: some View {
         LazyVGrid(columns: metrics.gridColumns(for: .poster, inLandscape: isLandscape), spacing: metrics.cardSpacing) {
-            ForEach(model.saved) { item in
-                MediaCardLink(item: item.preview).stretched()
-                    .accessibilityIdentifier("library.saved.\(item.id)")
-            }
+            ForEach(model.saved) { savedCard($0) }
         }
         .padding(.horizontal, metrics.pageMargin)
+    }
+
+    private func savedCard(_ item: StremioKit.LibraryItem) -> some View {
+        MediaCardLink(item: item.preview).stretched()
+            .accessibilityIdentifier("library.saved.\(item.id)")
     }
 
     private var watchedSection: some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             SectionHeader("Watched").padding(.horizontal, metrics.pageMargin)
             LazyVGrid(columns: metrics.gridColumns(for: .poster, inLandscape: isLandscape), spacing: metrics.cardSpacing) {
-                ForEach(model.watched) { card in
-                    // A show's card names its latest episode and counts the episodes watched; a movie's card is just the movie, as it was.
-                    MediaCardLink(item: card.preview, showsTitle: card.isShow ? true : nil, subtitle: card.episodeLine).stretched()
-                        .overlay(alignment: .topTrailing) {
-                            Badge(card.isShow ? "\(card.watchedCount) watched" : "Watched", systemImage: "checkmark").padding(6)
-                        }
-                        .accessibilityIdentifier("library.watched.\(card.id)")
-                        // On iPhone a held poster plays (see `MediaCardLink`); the title's page clears its watched mark. The Mac keeps
-                        // the menu, which a right click opens.
-                        #if targetEnvironment(macCatalyst)
-                        .contextMenu {
-                            Button(card.isShow ? "Mark Watched Episodes as Unwatched" : "Mark as Unwatched") {
-                                Task { await model.markUnwatched(card); await actions?.refresh() }
-                            }
-                        }
-                        #endif
-                }
+                ForEach(model.watched) { watchedCard($0) }
             }
             .padding(.horizontal, metrics.pageMargin)
         }
+    }
+
+    /// A show's card names its latest episode and counts the episodes watched; a movie's card is just the movie, as it was.
+    private func watchedCard(_ card: WatchedCard) -> some View {
+        MediaCardLink(item: card.preview, showsTitle: card.isShow ? true : nil, subtitle: card.episodeLine).stretched()
+            .overlay(alignment: .topTrailing) {
+                Badge(card.isShow ? "\(card.watchedCount) watched" : "Watched", systemImage: "checkmark").padding(6)
+            }
+            .accessibilityIdentifier("library.watched.\(card.id)")
+            // On iPhone a held poster plays (see `MediaCardLink`); the title's page clears its watched mark. The Mac keeps
+            // the menu, which a right click opens.
+            #if targetEnvironment(macCatalyst)
+            .contextMenu {
+                Button(card.isShow ? "Mark Watched Episodes as Unwatched" : "Mark as Unwatched") {
+                    Task { await model.markUnwatched(card); await actions?.refresh() }
+                }
+            }
+            #endif
     }
 
 }

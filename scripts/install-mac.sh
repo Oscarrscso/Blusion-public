@@ -24,14 +24,11 @@ WORK="build/mac-install.noindex"
 APP="$ROOT/$WORK/DerivedData/Build/Products/Release-maccatalyst/Blusion.app"
 DEST="/Applications/Blusion.app"
 LOG="$WORK/build.log"
-TRASH="$HOME/.Trash"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 fail() { echo "install-mac: $1" >&2; exit 1; }
-trash_bundle() {
-  local bundle="$1" label="$2" destination
-  [[ -d "$TRASH" && -w "$TRASH" ]] || fail "Trash is unavailable; refusing to delete $bundle"
-  destination="$TRASH/Blusion-$label-$(date +%Y%m%d-%H%M%S)-$$-$RANDOM.app"
-  mv "$bundle" "$destination" || fail "could not move $bundle to Trash"
+# Old copies are deleted outright, not moved to the Trash: they are build products, and the app's data lives outside the bundle.
+remove_bundle() {
+  rm -rf "$1" || fail "could not delete $1"
 }
 mkdir -p "$WORK"
 
@@ -48,14 +45,21 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: ""
+        # This project is generated two folders down, so build scripts find the repository from here.
+        BLUSION_REPO_ROOT: "\$(SRCROOT)/../.."
 YAML
 xcodegen generate --spec "$WORK/project.install.yml" --project "$WORK" --quiet || fail "xcodegen failed"
 REVISION="$(git rev-parse HEAD)"
 TAG="$(git rev-parse --short HEAD)"
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || TAG="$TAG-dirty"
 echo "install-mac: building $TAG ($REVISION; log: $LOG)"
-xcodebuild -project "$WORK/Blusion.xcodeproj" -scheme Blusion -configuration Release \
-  -destination 'platform=macOS,variant=Mac Catalyst' -derivedDataPath "$WORK/DerivedData" -jobs 4 BLUSION_BUILD_TAG="$TAG" BLUSION_SOURCE_REVISION="$REVISION" build >"$LOG" 2>&1 || true
+# This Mac's architecture only: a Release build is otherwise universal and compiles everything twice (arm64 and x86_64). No index
+# store either: Xcode's editor never reads this DerivedData. Run at lower CPU priority so the Mac stays usable while it builds.
+ARCH="$(uname -m)"
+nice -n 10 xcodebuild -project "$WORK/Blusion.xcodeproj" -scheme Blusion -configuration Release \
+  -destination "platform=macOS,variant=Mac Catalyst,arch=$ARCH" -derivedDataPath "$WORK/DerivedData" -jobs 4 \
+  ONLY_ACTIVE_ARCH=YES ARCHS="$ARCH" COMPILER_INDEX_STORE_ENABLE=NO \
+  BLUSION_BUILD_TAG="$TAG" BLUSION_SOURCE_REVISION="$REVISION" build >"$LOG" 2>&1 || true
 if ! grep -q '\*\* BUILD SUCCEEDED \*\*' "$LOG"; then
   grep -E 'error:' "$LOG" | sed -E "s#$ROOT/##g" | sort -u | head -40 >&2
   fail "BUILD FAILED (full log: $LOG)"
@@ -77,11 +81,11 @@ if pkill -f "$DEST/Contents/MacOS/Blusion" >/dev/null 2>&1; then
 fi
 # A whole new bundle, moved into place: never files copied over the old one.
 if [[ -e "$DEST.installing" ]]; then
-  trash_bundle "$DEST.installing" "incomplete-install"
+  remove_bundle "$DEST.installing"
 fi
 ditto "$APP" "$DEST.installing" || fail "could not write to /Applications"
 if [[ -e "$DEST" ]]; then
-  trash_bundle "$DEST" "replaced"
+  remove_bundle "$DEST"
 fi
 mv "$DEST.installing" "$DEST"
 
@@ -90,7 +94,7 @@ mv "$DEST.installing" "$DEST"
 done
 "$LSREGISTER" -f "$DEST" >/dev/null 2>&1 || true
 
-# Stray Mac copies are moved to Trash, not only unlisted: the build product this install copied from, and any Mac Blusion.app left in Xcode's
+# Stray Mac copies are deleted, not only unlisted: the build product this install copied from, and any Mac Blusion.app left in Xcode's
 # DerivedData or in this repo's build/ folder. Spotlight finds a copy on disk, so each one is a second "Blusion" until it is gone.
 # Xcode's own build products go too (any platform: Xcode's Debug iPhone and Mac builds are both listed as Blusion). The iPhone install's
 # build folder, build/iphone*.noindex, is left alone: that install builds it afresh each time.
@@ -98,7 +102,7 @@ for stray in "$APP" "$HOME"/Library/Developer/Xcode/DerivedData/Blusion-*/Build/
              "$ROOT"/build/*/DerivedData/Build/Products/*maccatalyst/Blusion.app; do
   [[ -e "$stray" && "$stray" != "$DEST" ]] || continue
   "$LSREGISTER" -u "$stray" >/dev/null 2>&1 || true
-  trash_bundle "$stray" "duplicate"
+  remove_bundle "$stray"
 done
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DEST/Contents/Info.plist" 2>/dev/null)"

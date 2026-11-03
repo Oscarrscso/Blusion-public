@@ -300,7 +300,8 @@ public enum FusionWidgetCodec {
                                       cardStyle: cardStyle(object["cardStyle"]) ?? .medium,
                                       showsRatings: flag(badges["ratings"]) ?? true,
                                       showsProviders: flag(badges["providers"]) ?? false,
-                                      usesBetterPosters: flag(object["blusionBetterPosters"]) ?? false)
+                                      usesBetterPosters: flag(object["blusionBetterPosters"]) ?? false,
+                                      usesHeroPosters: flag(object["blusionHeroPosters"]))
         }
 
         static func httpURL(_ value: Any?) -> URL? {
@@ -348,6 +349,7 @@ public enum FusionWidgetCodec {
         ]
         // Blusion's own key, written only when it is on: Fusion ignores it, and a file without it reads as off.
         if row.presentation.usesBetterPosters { presentation["blusionBetterPosters"] = true }
+        if let usesHeroPosters = row.presentation.usesHeroPosters { presentation["blusionHeroPosters"] = usesHeroPosters }
         object["limit"] = row.limit
         object["cacheTTL"] = row.cacheTTL
         object["presentation"] = presentation

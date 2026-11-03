@@ -47,7 +47,10 @@ public final class HomeViewModel {
     private let services: AppServices
     private var generation = 0
     public private(set) var loadRevision = 0
+    /// The rows below the one on screen that `loadRowsBelow` loaded ahead, in page order. Their posters are kept loaded too.
+    public private(set) var queuedRowIDs: [String] = []
     @ObservationIgnored private var requestedSections: Set<String> = []
+    @ObservationIgnored private var loadingSections: Set<String> = []
     private var traktPlayback: [TraktPlaybackItem] = []
     private var refreshingPlayback = false
     private var lastPlaybackRefresh = Date.distantPast
@@ -99,16 +102,20 @@ public final class HomeViewModel {
         let previous = sections
         sections = widgets.map { HomeViewModel.startingSection(for: $0, previous: previous, known: [:]) }
         requestedSections = []
+        loadingSections = []
+        queuedRowIDs = []
         loadRevision += 1
         phase = (saved == nil && widgets.isEmpty) ? .noCatalogs : .ready
         if widgets.isEmpty { HomeStartup.shared.markSettled() }
     }
 
-    /// Fetch only sections that enter the viewport. Completed sections keep their metadata when scrolled away.
+    /// Fetch visible or prefetched sections once. Completed sections keep their metadata when scrolled away.
     public func loadVisibleSection(_ id: String) async {
-        guard !Task.isCancelled, !requestedSections.contains(id),
+        guard !Task.isCancelled, !requestedSections.contains(id), !loadingSections.contains(id),
               let section = sections.first(where: { $0.id == id }) else { return }
         let current = generation
+        loadingSections.insert(id)
+        defer { if current == generation { loadingSections.remove(id) } }
         if let row = loadingConfiguration(section.widget.content) {
             await showLastKnownItems(for: [(id, row)], generation: current)
             guard current == generation, !Task.isCancelled else { return }
@@ -126,6 +133,23 @@ public final class HomeViewModel {
         }
     }
 
+    /// Loads the rows below `id`, which has just come on screen, before they scroll in. It loads as many titles as the Lazy load setting
+    /// keeps ready, and `queuedRowIDs` becomes those rows, so only the rows nearest the screen keep their posters loaded.
+    public func loadRowsBelow(_ id: String) async {
+        let current = generation
+        guard !isOffline, let index = sections.firstIndex(where: { $0.id == id }) else { return }
+        var ahead = LazyLoadLookahead.titlesAhead()
+        var queued: [String] = []
+        for next in sections.dropFirst(index + 1).map(\.id) {
+            guard ahead > 0, current == generation, !Task.isCancelled else { return }
+            guard let section = sections.first(where: { $0.id == next }), case .row = section.widget.content else { continue }
+            queued.append(next)
+            if queuedRowIDs != queued { queuedRowIDs = queued }
+            if !requestedSections.contains(next) { await loadVisibleSection(next) }
+            ahead -= sections.first(where: { $0.id == next })?.state.value?.count ?? 0
+        }
+    }
+
     /// Forgets every cached page, then loads again. The rows keep what they show until the new items arrive.
     public func refresh() async {
         await services.posterRatings.refresh()
@@ -139,9 +163,11 @@ public final class HomeViewModel {
         guard let index = sections.firstIndex(where: { $0.id == sectionID }),
               let row = loadingConfiguration(sections[index].widget.content) else { return }
         let current = generation
-        sections[index].state = .loading
-        sections[index].isRefreshing = false
-        sections[index].issue = nil
+        updateSection(at: index) {
+            $0.state = .loading
+            $0.isRefreshing = false
+            $0.issue = nil
+        }
         let result = await HomeViewModel.fetch(id: sectionID, row: row, from: services.widgetContent, seed: itemSeeds[sectionID])
         guard current == generation, !Task.isCancelled else { return }
         apply(result)
@@ -325,9 +351,20 @@ public final class HomeViewModel {
             guard let items = await HomeViewModel.knownItems(for: row, from: content, seed: itemSeeds[id]), !items.isEmpty else { continue }
             guard current == generation, !Task.isCancelled,
                   let index = sections.firstIndex(where: { $0.id == id }), sections[index].state.isLoading else { continue }
-            sections[index].state = .loaded(items)
-            sections[index].isRefreshing = true
+            updateSection(at: index) {
+                $0.state = .loaded(items)
+                $0.isRefreshing = true
+            }
         }
+    }
+
+    /// Changes one section with a single write, and none when nothing changed. Each write to `sections` makes SwiftUI update the whole
+    /// page at once, so a row that loads costs one update rather than one for every field it sets, and a reload that finds the same items
+    /// costs none.
+    private func updateSection(at index: Int, _ change: (inout Section) -> Void) {
+        var section = sections[index]
+        change(&section)
+        if section != sections[index] { sections[index] = section }
     }
 
     /// Applies a finished row load. A failure keeps the items the row already shows (stale content beats an error), but an issue
@@ -335,10 +372,15 @@ public final class HomeViewModel {
     private func apply(_ result: RowResult) {
         guard !Task.isCancelled, result.state.error != .cancelled,
               let index = sections.firstIndex(where: { $0.id == result.id }) else { return }
-        sections[index].isRefreshing = false
-        if result.issue == nil, result.state.error != nil, let shown = sections[index].state.value, !shown.isEmpty { return }
-        sections[index].state = result.state
-        sections[index].issue = result.issue
+        if result.issue == nil, result.state.error != nil, let shown = sections[index].state.value, !shown.isEmpty {
+            updateSection(at: index) { $0.isRefreshing = false }
+            return
+        }
+        updateSection(at: index) {
+            $0.isRefreshing = false
+            $0.state = result.state
+            $0.issue = result.issue
+        }
     }
 
     /// The items of one row, in the order `seed` gives when the row is shuffled. The issue is checked first, so a source that cannot load

@@ -299,7 +299,7 @@ struct WidgetsManagerView: View {
         guard WidgetsManagerViewModel.isDuplicable(widget) else { return nil }
         return {
             guard takesTaps else { return }
-            Haptics.tap()
+            Haptics.play(.buttons)
             Task { await model.duplicate(id: widget.id) }
         }
     }
@@ -393,15 +393,22 @@ struct WidgetsManagerView: View {
         #else
         // The press that lifts a card is on the page's scroll view (see `GridScroller`), not here.
         .sensoryFeedback(.impact(weight: .medium), trigger: liftCount)
-        // A tick as two cards change places. The app's own selection tick, so the Haptics page's switch reaches it. The lift above stays
-        // SwiftUI's: the Haptics page has no feel of that weight to offer, and the Mac's drag gives its own in the branch above.
-        .onChange(of: swapCount) { _, _ in Haptics.selection() }
+        // A tick as two cards change places, in the Pickers & switches place, so the Haptics page reaches it. The lift above stays
+        // SwiftUI's medium impact, a weight the drag's own gesture owns, and the Mac's drag gives its own in the branch above.
+        .onChange(of: swapCount) { _, _ in Haptics.play(.choices) }
         #endif
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                #if targetEnvironment(macCatalyst)
+                HStack {
+                    Spacer()
+                    hideToggle
+                    addMenu
+                }
+                #endif
                 if hidesWidgets && !model.widgets.isEmpty { hiddenRowsLine }
                 if !hidesWidgets && !model.widgets.isEmpty {
                     grid
@@ -429,12 +436,15 @@ struct WidgetsManagerView: View {
         .readableColumn()
         .screenBackground()
         .navigationTitle("Widgets")
+        .macRootNavigation()
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("widgets.manager")
+        #if !targetEnvironment(macCatalyst)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { hideToggle }
             ToolbarItem(placement: .topBarTrailing) { addMenu }
         }
+        #endif
         .task { await model.load() }
         .task { await model.loadShuffle() }
         .onAppear { syncOrder() }
@@ -851,7 +861,7 @@ private struct WidgetCard: View {
     private var styleName: String {
         switch widget.content {
         case .hero: "Hero"
-        case .banner: "Banner"
+        case .banner: "Carousel"
         case .row(let row): row.presentation.showsRank ? "Row Numbered" : "Row Classic"
         case .collection: "Collection"
         case .continueWatching: "Continue Watching"

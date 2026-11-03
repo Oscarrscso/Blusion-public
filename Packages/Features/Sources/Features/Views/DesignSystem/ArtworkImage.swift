@@ -31,10 +31,7 @@ private struct VisibleArtworkPriority: ViewModifier {
         content
             .environment(\.artworkPriority, isVisible ? .medium : .low)
             .environment(\.artworkOrder, order)
-            .onGeometryChange(for: Bool.self) { proxy in
-                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
-                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
-            } action: { isVisible = $0 }
+            .onScrollVisibility { isVisible = $0 }
     }
 }
 
@@ -71,6 +68,7 @@ struct ArtworkImage: View {
     @Environment(\.artworkPriority) private var artworkPriority
     @Environment(\.artworkOrder) private var artworkOrder
     @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
+    @Environment(\.appAppearance) private var appearance
     @State private var isVisible = false
 
     @State private var hasFinishedLoading = false
@@ -155,10 +153,7 @@ struct ArtworkImage: View {
             .loadingCardSpinner(showsLoadingSpinner && url != nil && image == nil && placeholderImage == nil && !hasFinishedLoading)
             .accessibilityHidden(true)
             // Stretching changes only the frame; it must not restart the download, decode or fade.
-            .onGeometryChange(for: Bool.self) { proxy in
-                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
-                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
-            } action: { isVisible = $0 }
+            .onScrollVisibility { isVisible = $0 }
             .task(id: isVisible && sectionIsVisible ? [url, fallbackURL] : []) {
                 guard isVisible && sectionIsVisible else { return }
                 await load()
@@ -250,7 +245,7 @@ struct ArtworkImage: View {
     /// Flat grey like the TV app's loading cards. No gradient: it is drawn once per card and must be cheap.
     private var placeholder: some View {
         ZStack {
-            if contentMode == .fit { Theme.background } else { Theme.placeholder }
+            if contentMode == .fit { appearance.pageBackground } else { Theme.placeholder }
             if !title.isEmpty && (url == nil || hasFinishedLoading) {
                 Text(title)
                     .font(.caption)

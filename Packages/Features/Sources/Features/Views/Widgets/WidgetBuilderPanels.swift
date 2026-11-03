@@ -35,7 +35,7 @@ struct WidgetFieldPanel: View {
                     .font(.headline)
                 Spacer(minLength: 0)
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.buttons)
                     model.selectedField = nil
                 } label: {
                     Image(systemName: "xmark")
@@ -279,7 +279,7 @@ struct WidgetFieldPanel: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: Binding(get: { value }, set: { next in
-                if next != value { Haptics.selection() }
+                if next != value { Haptics.play(.sliders) }
                 update(next)
             }), in: 0...10, step: 0.5)
                 .accessibilityLabel(title)
@@ -501,14 +501,14 @@ struct WidgetFieldPanel: View {
 
     private var postersContent: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            Picker("Hero artwork on posters", selection: presentationBinding(\.usesHeroPosters)) {
+                Text("Default").tag(nil as Bool?)
+                Text("On").tag(true as Bool?)
+                Text("Off").tag(false as Bool?)
+            }
+            .accessibilityIdentifier("widgetEditor.heroPosters")
             Toggle("Use Better Posters addon", isOn: presentationBinding(\.usesBetterPosters))
                 .accessibilityIdentifier("widgetEditor.betterPosters")
-            Text("""
-                Poster cards take their artwork from the BetterPosters addon (btttr.cc), which draws a tag, the genre and the IMDb rating on \
-                each poster. A title it has no artwork for keeps its usual poster. Wide and square cards are not changed.
-                """)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -758,7 +758,7 @@ private struct SearchField: View {
                 .onSubmit { isFocused = false }
             if !text.isEmpty {
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.buttons)
                     text = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")

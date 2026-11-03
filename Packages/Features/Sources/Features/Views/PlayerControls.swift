@@ -102,7 +102,7 @@ struct PlayerControls: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             Button {
-                Haptics.tap()
+                Haptics.play(.playerControls)
                 onClose()
             } label: {
                 Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 44, height: 44)
@@ -121,7 +121,7 @@ struct PlayerControls: View {
                 HStack(spacing: 0) {
                     if hasEpisodes {
                         Button {
-                            Haptics.tap()
+                            Haptics.play(.playerControls)
                             onShowEpisodes()
                         } label: {
                             Image(systemName: "list.bullet").font(.body.weight(.semibold)).frame(width: 44, height: 44)
@@ -150,7 +150,7 @@ struct PlayerControls: View {
                     #endif
                     if model.plan.candidates.count > 1 {
                         Button {
-                            Haptics.tap()
+                            Haptics.play(.playerControls)
                             onShowStreams()
                         } label: {
                             Image(systemName: "arrow.trianglehead.2.clockwise")
@@ -174,7 +174,7 @@ struct PlayerControls: View {
     /// Infuse's zoom button: each tap moves to the next Zoom Mode, and its symbol shows the one in use.
     private var zoomButton: some View {
         Button {
-            Haptics.tap()
+            Haptics.play(.playerControls)
             model.cycleZoomMode()
         } label: {
             Image(systemName: Self.zoomSymbol(model.zoomMode)).font(.body.weight(.semibold)).frame(width: 44, height: 44)
@@ -227,16 +227,16 @@ struct PlayerControls: View {
     private var transport: some View {
         GlassEffectContainer(spacing: 36) {
             HStack(spacing: 36) {
-                Button { Task { await model.skip(by: -10) } } label: {
-                    Image(systemName: "gobackward.10").font(.title2.weight(.medium)).frame(width: 58, height: 58)
+                Button { Task { await model.skipBack() } } label: {
+                    Image(systemName: "gobackward.\(Int(model.skipBackSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
                         .glassEffect(.regular.interactive(), in: .circle)
                         .pointerInteraction(cornerRadius: 29)
                 }
                 #if !targetEnvironment(macCatalyst)
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 #endif
-                .help("Back 10 seconds (←)")
-                .accessibilityLabel("Back 10 seconds")
+                .help("Back \(Int(model.skipBackSeconds)) seconds (←)")
+                .accessibilityLabel("Back \(Int(model.skipBackSeconds)) seconds")
                 .accessibilityIdentifier("player.skipBack")
                 Button { model.togglePlayPause() } label: {
                     ZStack {
@@ -259,16 +259,16 @@ struct PlayerControls: View {
                 .accessibilityLabel(model.wantsPlayback ? "Pause" : "Play")
                 .accessibilityValue(isStalled ? "Loading" : "")
                 .accessibilityIdentifier("player.playPause")
-                Button { Task { await model.skip(by: 10) } } label: {
-                    Image(systemName: "goforward.10").font(.title2.weight(.medium)).frame(width: 58, height: 58)
+                Button { Task { await model.skipForward() } } label: {
+                    Image(systemName: "goforward.\(Int(model.skipForwardSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
                         .glassEffect(.regular.interactive(), in: .circle)
                         .pointerInteraction(cornerRadius: 29)
                 }
                 #if !targetEnvironment(macCatalyst)
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 #endif
-                .help("Forward 10 seconds (→)")
-                .accessibilityLabel("Forward 10 seconds")
+                .help("Forward \(Int(model.skipForwardSeconds)) seconds (→)")
+                .accessibilityLabel("Forward \(Int(model.skipForwardSeconds)) seconds")
                 .accessibilityIdentifier("player.skipForward")
             }
             .buttonStyle(.plain)

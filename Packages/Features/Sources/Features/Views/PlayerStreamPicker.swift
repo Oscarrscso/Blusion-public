@@ -73,7 +73,7 @@ struct PlayerStreamPicker: View {
     private func row(_ candidate: PlaybackCandidate, offset: Int) -> some View {
         let isCurrent = offset == currentIndex
         return Button {
-            Haptics.tap()
+            Haptics.play(.playerControls)
             onSelect(offset)
         } label: {
             HStack(alignment: .center, spacing: 10) {

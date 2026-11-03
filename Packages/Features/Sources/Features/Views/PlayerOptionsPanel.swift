@@ -70,7 +70,7 @@ struct PlayerOptionsPanel: View {
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
-                Button { Haptics.tap(); close() } label: {
+                Button { Haptics.play(.playerControls); close() } label: {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
                 .buttonStyle(.glass)
@@ -102,14 +102,16 @@ struct PlayerOptionsPanel: View {
                         scrollPosition.scrollTo(edge: .top)
                     }
                     .onChange(of: videoMenu) { _, _ in scrollPosition.scrollTo(edge: .top) }
-                    .task(id: infoModel.openedReviews) {
+                    .onChange(of: infoModel.openedReviews) { _, reviews in
                         guard tab == .info else { return }
-                        // Wait for the expanded panel to be laid out before scrolling to it.
-                        try? await Task.sleep(for: .milliseconds(50))
-                        guard !Task.isCancelled else { return }
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            proxy.scrollTo(infoModel.openedReviews == nil ? PlayerInfoMedia.ratingsScrollID : DetailReviewsPanel.scrollID,
-                                           anchor: .top)
+                        Task {
+                            // Wait for the expanded panel to be laid out before scrolling to it.
+                            try? await Task.sleep(for: .milliseconds(50))
+                            guard tab == .info, infoModel.openedReviews == reviews else { return }
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(reviews == nil ? PlayerInfoMedia.ratingsScrollID : DetailReviewsPanel.scrollID,
+                                               anchor: .top)
+                            }
                         }
                     }
                     // Keep the other menus' rows still; Info's synopsis and reviews animate in place.
@@ -214,7 +216,7 @@ struct PlayerOptionsPanel: View {
                             let rgb = colour.rgb
                             let selected = style.colour == colour
                             Button {
-                                if !selected { Haptics.selection() }
+                                if !selected { Haptics.play(.playerOptions) }
                                 restyle { $0.colour = colour }
                             } label: {
                                 Circle().fill(Color(red: rgb.red, green: rgb.green, blue: rgb.blue))
@@ -300,19 +302,30 @@ struct PlayerOptionsPanel: View {
                         .accessibilityIdentifier("player.panel.aspectRatio")
                 }
             }
-            if model.capabilities.contains(.dolbyVisionSwitch) || model.capabilities.contains(.toneMapping) {
-                PanelSection("Colour") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if model.capabilities.contains(.dolbyVisionSwitch) {
-                            PanelToggle(title: "Dolby Vision", isOn: processing.dolbyVision) { model.setDolbyVision($0) }
-                                .accessibilityIdentifier("player.panel.dolbyVision")
+            PanelSection("Colour") {
+                VStack(alignment: .leading, spacing: 14) {
+                    // AVPlayer and AetherEngine have only the system's HDR range or the display's whole one: a switch. mpv goes by degrees.
+                    if model.capabilities.contains(.gradualHDRBrightness) {
+                        PanelSlider(title: "HDR Brightness", value: processing.hdrBrightness, range: VideoProcessing.hdrBrightnessRange,
+                                    label: hdrBrightnessLabel) { value, done in
+                            changeProcessing(save: done) { $0.hdrBrightness = value }
                         }
-                        if model.capabilities.contains(.toneMapping) {
-                            PanelChips(title: "Output", options: HDROutputMode.allCases, selection: processing.hdrOutput,
-                                    label: { $0 == .auto ? "HDR" : "SDR" }) { value in changeProcessing { $0.hdrOutput = value } }
-                            PanelChips(title: "Tone Mapping", options: ToneMappingCurve.allCases, selection: processing.toneMapping,
-                                    label: { $0 == .hable ? "Hable" : $0.label }) { value in changeProcessing { $0.toneMapping = value } }
+                        .accessibilityIdentifier("player.panel.hdrBrightness")
+                    } else {
+                        PanelToggle(title: "Full HDR Brightness", isOn: processing.hdrBrightness > 0) { on in
+                            changeProcessing { $0.hdrBrightness = on ? 1 : 0 }
                         }
+                        .accessibilityIdentifier("player.panel.hdrBrightness")
+                    }
+                    if model.capabilities.contains(.dolbyVisionSwitch) {
+                        PanelToggle(title: "Dolby Vision", isOn: processing.dolbyVision) { model.setDolbyVision($0) }
+                            .accessibilityIdentifier("player.panel.dolbyVision")
+                    }
+                    if model.capabilities.contains(.toneMapping) {
+                        PanelChips(title: "Output", options: HDROutputMode.allCases, selection: processing.hdrOutput,
+                                label: { $0 == .auto ? "HDR" : "SDR" }) { value in changeProcessing { $0.hdrOutput = value } }
+                        PanelChips(title: "Tone Mapping", options: ToneMappingCurve.allCases, selection: processing.toneMapping,
+                                label: { $0 == .hable ? "Hable" : $0.label }) { value in changeProcessing { $0.toneMapping = value } }
                     }
                 }
             }
@@ -338,7 +351,7 @@ struct PlayerOptionsPanel: View {
     /// applies at once and the list stays, so its effect shows behind the panel.
     private func videoSubmenu(_ menu: VideoMenu) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Button { Haptics.tap(); videoMenu = nil } label: {
+            Button { Haptics.play(.playerControls); videoMenu = nil } label: {
                 Label(PlayerPanelTab.picture.title, systemImage: "chevron.backward")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 4)
@@ -375,10 +388,14 @@ struct PlayerOptionsPanel: View {
     }
 
     /// Changes one picture setting and keeps the others, Dolby Vision included.
-    private func changeProcessing(_ change: (inout VideoProcessing) -> Void) {
+    private func changeProcessing(save: Bool = true, _ change: (inout VideoProcessing) -> Void) {
         var processing = model.processing
         change(&processing)
-        model.setProcessing(processing)
+        model.setProcessing(processing, save: save)
+    }
+
+    private func hdrBrightnessLabel(_ value: Double) -> String {
+        value <= 0 ? "Auto" : "\(Int((value * 100).rounded()))%"
     }
 
     // MARK: Speed
@@ -388,7 +405,7 @@ struct PlayerOptionsPanel: View {
             ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in
                 let selected = model.state.rate == rate
                 Button {
-                    if !selected { Haptics.selection() }
+                    if !selected { Haptics.play(.playerOptions) }
                     model.setRate(rate)
                 } label: {
                     Text(rate == 1 ? "1×" : "\(rate.formatted())×")
@@ -692,7 +709,7 @@ private struct PanelOptionRow: View {
 
     var body: some View {
         Button {
-            if !selected { Haptics.selection() }
+            if !selected { Haptics.play(.playerOptions) }
             action()
         } label: {
             HStack(alignment: .center, spacing: 12) {
@@ -752,7 +769,7 @@ private struct PanelMenuRow: View {
     let action: () -> Void
 
     var body: some View {
-        Button { Haptics.tap(); action() } label: {
+        Button { Haptics.play(.playerControls); action() } label: {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.subheadline)
@@ -792,7 +809,7 @@ private struct PanelChips<Value: Hashable>: View {
                     ForEach(options, id: \.self) { option in
                         let selected = option == selection
                         Button {
-                            if !selected { Haptics.selection() }
+                            if !selected { Haptics.play(.playerOptions) }
                             choose(option)
                         } label: {
                             Text(label(option)).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -814,6 +831,40 @@ private struct PanelChips<Value: Hashable>: View {
     }
 }
 
+/// A value on a slider, shown at the right of the title. `change` gets each value as it moves, and `true` once it is let go.
+private struct PanelSlider: View {
+    let title: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let label: (Double) -> String
+    let change: (Double, Bool) -> Void
+    @State private var dragged: Double?
+
+    var body: some View {
+        let shown = dragged ?? value
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.body.weight(.semibold))
+                Spacer()
+                Text(label(shown)).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+            }
+            Slider(value: Binding(get: { shown }, set: { newValue in
+                dragged = newValue
+                change(newValue, false)
+            }), in: range) { editing in
+                guard !editing, let final = dragged else { return }
+                Haptics.play(.playerOptions)
+                change(final, true)
+                dragged = nil
+            }
+            .tint(.white)
+            .accessibilityValue(label(shown))
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18))
+    }
+}
+
 /// A delay set in steps: − and + hold to repeat, the value resets to zero when tapped.
 private struct PanelStepper: View {
     let title: String
@@ -830,7 +881,7 @@ private struct PanelStepper: View {
             HStack(spacing: 0) {
                 stepButton("minus", -step, label: "Earlier")
                 Button {
-                    if value != 0 { Haptics.selection() }
+                    if value != 0 { Haptics.play(.playerOptions) }
                     reset()
                 } label: {
                     Text("\(String(format: "%+.\(digits)f", value)) s").font(.subheadline.weight(.semibold).monospacedDigit())
@@ -849,7 +900,7 @@ private struct PanelStepper: View {
     }
 
     private func stepButton(_ symbol: String, _ delta: TimeInterval, label: String) -> some View {
-        Button { Haptics.selection(); change(delta) } label: {
+        Button { Haptics.play(.playerOptions); change(delta) } label: {
             Image(systemName: symbol).font(.subheadline.weight(.bold)).frame(width: 44, height: 40).contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -865,7 +916,7 @@ private struct PanelToggle: View {
 
     var body: some View {
         Toggle(title, isOn: Binding(get: { isOn }, set: { value in
-            if value != isOn { Haptics.selection() }
+            if value != isOn { Haptics.play(.playerOptions) }
             set(value)
         }))
             .font(.body.weight(.semibold))
@@ -887,7 +938,7 @@ private struct PanelButton: View {
     }
 
     var body: some View {
-        Button { Haptics.tap(); action() } label: {
+        Button { Haptics.play(.playerControls); action() } label: {
             Label(title, systemImage: symbol).font(.subheadline.weight(.semibold)).lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(.white.opacity(0.1), in: .capsule)

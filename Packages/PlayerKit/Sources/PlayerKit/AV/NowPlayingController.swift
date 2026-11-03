@@ -26,12 +26,24 @@ public final class NowPlayingController {
     private let actions: Actions
     private var targets: [(MPRemoteCommand, Any)] = []
     private var title = ""
-    private static let skipInterval: TimeInterval = 15
+    /// How far the lock screen's and Control Center's skip buttons jump. The player gives its own Back and Forward amounts once its
+    /// settings have loaded (`setSkipIntervals`).
+    private var skipBackward: TimeInterval = 15
+    private var skipForward: TimeInterval = 15
 
     public init(title: String, actions: Actions) {
         self.title = title
         self.actions = actions
         install()
+    }
+
+    public func setSkipIntervals(backward: TimeInterval, forward: TimeInterval) {
+        guard backward > 0, forward > 0, backward != skipBackward || forward != skipForward else { return }
+        skipBackward = backward
+        skipForward = forward
+        let center = MPRemoteCommandCenter.shared()
+        center.skipForwardCommand.preferredIntervals = [NSNumber(value: forward)]
+        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: backward)]
     }
 
     public func update(_ state: PlaybackState) {
@@ -53,13 +65,13 @@ public final class NowPlayingController {
 
     private func install() {
         let center = MPRemoteCommandCenter.shared()
-        center.skipForwardCommand.preferredIntervals = [NSNumber(value: Self.skipInterval)]
-        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: Self.skipInterval)]
+        center.skipForwardCommand.preferredIntervals = [NSNumber(value: skipForward)]
+        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipBackward)]
         add(center.playCommand) { $0.actions.play() }
         add(center.pauseCommand) { $0.actions.pause() }
         add(center.togglePlayPauseCommand) { $0.actions.toggle() }
-        add(center.skipForwardCommand) { $0.actions.skip(Self.skipInterval) }
-        add(center.skipBackwardCommand) { $0.actions.skip(-Self.skipInterval) }
+        add(center.skipForwardCommand) { $0.actions.skip($0.skipForward) }
+        add(center.skipBackwardCommand) { $0.actions.skip(-$0.skipBackward) }
         let seek = center.changePlaybackPositionCommand
         seek.isEnabled = true
         targets.append((seek, seek.addTarget { [weak self] event in

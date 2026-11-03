@@ -58,7 +58,7 @@ struct PersonView: View {
         .screenBackground()
         // The name is the page's own heading, so the bar carries no title, and no soft fade darkens the top of the page.
         .scrollEdgeEffectHidden(true, for: .top)
-        .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
+        .pageNavigationBar(hidden: isPhoneInLandscape)
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
         .accessibilityIdentifier("person.scroll")

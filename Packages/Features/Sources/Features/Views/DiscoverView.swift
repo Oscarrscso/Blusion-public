@@ -19,10 +19,40 @@ struct DiscoverView: View {
     }
 
     var body: some View {
+        Group {
+            #if targetEnvironment(macCatalyst)
+            if model.hasSources { macPage } else { scrollPage }
+            #else
+            scrollPage
+            #endif
+        }
+        .task { await model.loadSources() }
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's page: the filters, the grid and its status in one UIKit scroll (see `MacGridPage`), so a long grid scrolls smoothly.
+    private var macPage: some View {
+        var parts: [MacGridPage.Part] = [.full(id: "filters", view: AnyView(filters))]
+        if !model.visibleItems.isEmpty {
+            parts.append(.grid(MacTitleGrid(id: "results", items: model.visibleItems, fillsWidth: true,
+                                            onLastAppear: { Task { await model.loadMore() } }, spacingAfter: metrics.shelfSpacing) { _, item in
+                AnyView(MediaCardLink(item: item).stretched())
+            }))
+        }
+        parts.append(.full(id: "status", view: AnyView(VStack(alignment: .leading, spacing: metrics.shelfSpacing) { resultsStatus })))
+        return MacGridPage(parts: parts, scrollToTop: router.tabTapRevisions[.discover, default: 0])
+            .screenBackground()
+            .navigationTitle("")
+            .macRootNavigation()
+            .pageTabBar(hidden: isPhoneInLandscape)
+            .accessibilityIdentifier("discover.scroll")
+    }
+    #endif
+
+    private var scrollPage: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    pageTitle
                     if model.hasSources {
                         filters
                         VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
@@ -41,31 +71,17 @@ struct DiscoverView: View {
             .screenBackground()
             .browsePageTopMargin()
             .navigationTitle("")
-            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+            .macRootNavigation()
+            .pageTabBar(hidden: isPhoneInLandscape)
             #if !targetEnvironment(macCatalyst)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(removing: .title)
             #endif
-            .task { await model.loadSources() }
             .accessibilityIdentifier("discover.scroll")
             // A tap on Discover's tab item goes back to its first page, and scrolls it to the top.
             .onChange(of: router.tabTapRevisions[.discover, default: 0]) { _, _ in
                 withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo(Self.topID, anchor: .top) }
             }
-        }
-    }
-
-    /// The page's title, drawn in the content so the navigation bar stays free of text. A phone in landscape has no room for a title
-    /// above the grid, so it is left out there; the tab bar still names the page.
-    @ViewBuilder
-    private var pageTitle: some View {
-        if !isPhoneInLandscape {
-            Text("Discover")
-                .font(Theme.Typography.largeTitle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, metrics.pageMargin)
-                .padding(.bottom, metrics.headerSpacing)
-                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -134,9 +150,9 @@ struct DiscoverView: View {
                 .accessibilityIdentifier("discover.genreMenu")
             }
         }
-        .onChange(of: model.selectedGenre) { _, _ in Haptics.selection() }
-        .onChange(of: model.selectedSource) { _, _ in Haptics.selection() }
-        .onChange(of: model.minimumYear) { _, _ in Haptics.selection() }
+        .onChange(of: model.selectedGenre) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.selectedSource) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.minimumYear) { _, _ in Haptics.play(.choices) }
     }
 
     @ViewBuilder
@@ -144,7 +160,14 @@ struct DiscoverView: View {
         if !model.visibleItems.isEmpty {
             // On Mac the posters span the filters' width, from the first filter's leading edge to the last one's trailing edge.
             MediaGrid(items: model.visibleItems, onLastAppear: { Task { await model.loadMore() } }, fillsWidth: true)
-        } else if !model.items.isEmpty {
+        }
+        resultsStatus
+    }
+
+    /// What the page shows besides the grid: a message when nothing matches, the first page's placeholders, an error, or the spinner.
+    @ViewBuilder
+    private var resultsStatus: some View {
+        if model.visibleItems.isEmpty, !model.items.isEmpty {
             // Every title loaded so far is outside the year span: keep reading until one fits, or the catalogue ends.
             EmptyStateView("No titles match", systemImage: "line.3.horizontal.decrease.circle", message: "Try another year.")
                 .task(id: model.items.count) { if model.canLoadMore { await model.loadMore() } }

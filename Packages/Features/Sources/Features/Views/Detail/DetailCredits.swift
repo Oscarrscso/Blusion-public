@@ -11,10 +11,15 @@ struct DetailCredits: View {
     /// The page's width, so four whole cast cards fit across it.
     let pageWidth: CGFloat
     @Environment(\.layoutMetrics) private var metrics
+    /// Appearance's title page sections: Cast & Crew and Information.
+    @Environment(\.appAppearance) private var appearance
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
-            if let group = model.shownCreditGroup, let people = model.shownCredits, !people.isEmpty {
+            if !appearance.showsCast {
+                // Appearance's Cast & Crew is off: the information alone.
+                EmptyView()
+            } else if let group = model.shownCreditGroup, let people = model.shownCredits, !people.isEmpty {
                 VStack(alignment: .leading, spacing: metrics.headerSpacing) {
                     // TMDb's cast and crew, one part at a time, with photos. The heading is the part shown and the menu of the others.
                     CreditGroupMenu(groups: model.creditGroups, shown: group, playColourHex: model.playColourHex) { model.creditGroup = $0 }
@@ -31,7 +36,7 @@ struct DetailCredits: View {
                     .id(group)
                     .accessibilityIdentifier("detail.castCarousel")
                 }
-                .onChange(of: model.creditGroup) { _, _ in Haptics.selection() }
+                .onChange(of: model.creditGroup) { _, _ in Haptics.play(.choices) }
             } else if model.isLoadingCredits {
                 VStack(alignment: .leading, spacing: metrics.headerSpacing) {
                     DetailSkeletonLine(font: .subheadline.weight(.semibold), width: 48)
@@ -86,9 +91,11 @@ struct DetailCredits: View {
                 }
             }
             // The information follows the cast and crew on iPhone and on the Mac alike.
-            DetailInformation(model: model)
-                .frame(maxWidth: metrics.readableWidth, alignment: .leading)
-                .padding(.horizontal, contentMargin)
+            if appearance.showsInformation {
+                DetailInformation(model: model)
+                    .frame(maxWidth: metrics.readableWidth, alignment: .leading)
+                    .padding(.horizontal, contentMargin)
+            }
         }
         .detailLoadingTransition(model.isLoadingCredits)
         .environment(\.showsArtworkLoadingSpinner, true)

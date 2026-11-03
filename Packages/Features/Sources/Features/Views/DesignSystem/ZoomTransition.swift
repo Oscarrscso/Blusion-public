@@ -10,6 +10,8 @@ struct TitleDestination: Hashable {
     let sourceID: String
     var artwork: TMDbArtwork?
     var artworkChecked = false
+    /// Carries the widget's effective choice to the detail page, including an explicit Off override.
+    var usesHeroPosters: Bool? = nil
     /// Opens with no animation, for a source whose picture and logo the title page repeats in the same place (Home's spotlight): only
     /// the content below changes. `sourceID` is unused then.
     var opensInstantly = false
@@ -30,9 +32,11 @@ extension EnvironmentValues {
 
 private struct ZoomNamespaceProvider: ViewModifier {
     @Namespace private var namespace
+    /// Appearance's Zoom transitions off: no namespace, so cards and titles push and pop as plain pages.
+    @Environment(\.appAppearance) private var appearance
 
     func body(content: Content) -> some View {
-        content.environment(\.zoomNamespace, namespace)
+        content.environment(\.zoomNamespace, appearance.zoomTransitions ? namespace : nil)
     }
 }
 
@@ -329,7 +333,7 @@ private final class BackSwipe: NSObject, UIGestureRecognizerDelegate {
         else { return }
         hasGoneBack = true
         // The same light tap as opening a title, once per swipe that goes back.
-        Haptics.tap()
+        Haptics.play(.navigation)
         // A screen that was not popped stays, and keeps taking touches.
         guard onSwipe() else { return }
         // Off at once: a touch that lands while the screen zooms away goes to the screen underneath.

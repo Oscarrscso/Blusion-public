@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// A slider with a few fixed stops, drawn in Liquid Glass: a glass track and a glass thumb that follows the finger and settles on the
@@ -42,7 +43,7 @@ struct GlassSlider: View {
                         dragFraction = raw
                         let stop = Int((raw * CGFloat(stops - 1)).rounded()) + 1
                         // One tick per stop crossed, not one per pixel: a drag over three stops ticks three times.
-                        if stop != value { Haptics.selection(); value = stop }
+                        if stop != value { Haptics.play(.sliders); value = stop }
                     }
                     .onEnded { _ in
                         withAnimation(.snappy(duration: 0.2)) { dragFraction = nil }

@@ -11,14 +11,12 @@ struct SettingsView: View {
     @State private var datasetStatus: IMDbDatasetStatus?
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
     @AppStorage(ImageCachePolicy.diskMegabytesKey) private var imageCacheMegabytes = ImageCachePolicy.defaultDiskMegabytes
+    @AppStorage(AppearancePreferences.defaultsKey) private var appearance = AppearancePreferences()
     private let services: AppServices
     let fallbackEngineLinked: Bool
     let aetherEngineLinked: Bool
-    @Environment(AppRouter.self) private var router
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
-    /// The id of the first section, which the list's scroll goes back to when the Settings tab's item is tapped.
-    private static let topID = "settings.top"
     /// Ghost mode, kept between launches (see `GhostMode`). Pulling the page down and holding it for two seconds switches it.
     @AppStorage(GhostMode.defaultsKey) private var ghostIsOn = false
     /// How far the page is pulled down past its top, in points.
@@ -37,165 +35,159 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            List {
-                if ghostIsOn {
-                    Section {
-                        HStack(spacing: Theme.Spacing.m) {
-                            Text("👻").font(.title2).accessibilityHidden(true)
-                            Text("Ghost mode is on").font(.subheadline.weight(.semibold))
-                            Spacer(minLength: 0)
-                            Button("Turn Off") { setGhost(false) }
-                                .buttonStyle(.glassCapsule)
-                                .accessibilityIdentifier("settings.ghost.off")
-                        }
-                        .accessibilityElement(children: .contain)
-                        .accessibilityIdentifier("settings.ghost")
+        List {
+            if ghostIsOn {
+                Section {
+                    HStack(spacing: Theme.Spacing.m) {
+                        Text("👻").font(.title2).accessibilityHidden(true)
+                        Text("Ghost mode is on").font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Button("Turn Off") { setGhost(false) }
+                            .buttonStyle(.glassCapsule)
+                            .accessibilityIdentifier("settings.ghost.off")
                     }
-                }
-                Section("Content") {
-                    NavigationLink(value: SettingsDestination.addons) {
-                        SettingsRow(title: "Addons", summary: "\(model.installedAddonCount) installed", systemImage: "puzzlepiece.extension")
-                    }
-                    .accessibilityIdentifier("settings.addons")
-                    NavigationLink { AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } }) } label: {
-                        SettingsRow(title: "Addon Speed",
-                                    summary: AddonSpeedViewModel.summary(for: model.settings.autoPickWait, names: model.addonNames),
-                                    systemImage: "speedometer")
-                    }
-                    .accessibilityIdentifier("settings.section.addonSpeed")
-                    NavigationLink(value: SettingsDestination.widgets) {
-                        SettingsRow(title: "Widgets", summary: "Home rows and layout", systemImage: "rectangle.3.group")
-                    }
-                    .accessibilityIdentifier("settings.widgets")
-                }
-                .id(Self.topID)
-                Section("Playback & appearance") {
-                    NavigationLink { PlaybackSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Playback", summary: playbackSummary, systemImage: "play.rectangle")
-                    }
-                    .accessibilityIdentifier("settings.section.playback")
-                    NavigationLink { PlayerSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Player", summary: "Subtitles, audio, picture, skip buttons", systemImage: "slider.horizontal.3")
-                    }
-                    .accessibilityIdentifier("settings.section.player")
-                    NavigationLink { AppearanceSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Appearance", summary: appearanceSummary, systemImage: "paintpalette")
-                    }
-                    .accessibilityIdentifier("settings.section.appearance")
-                    NavigationLink { LazyLoadSettingsPage() } label: {
-                        SettingsRow(title: "Lazy load", summary: lazyLoadLabel(lookaheadLevel), systemImage: "arrow.down.to.line")
-                    }
-                    .accessibilityIdentifier("settings.section.lazyLoad")
-                    // A Mac has no haptic hardware, so the page would be sliders it cannot demonstrate.
-                    #if !targetEnvironment(macCatalyst)
-                    NavigationLink { HapticsSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Haptics", summary: hapticsSummary, systemImage: "hand.tap")
-                    }
-                    .accessibilityIdentifier("settings.section.haptics")
-                    #endif
-                }
-                Section("Ratings") {
-                    NavigationLink { ReviewServicesPage(model: model, services: services) } label: {
-                        SettingsRow(title: "Review services", summary: reviewServicesSummary, systemImage: "star.bubble")
-                    }
-                    .accessibilityIdentifier("settings.section.reviews")
-                    NavigationLink { IMDbRatingsPage(status: datasetStatus) } label: {
-                        SettingsRow(title: "IMDb ratings", summary: IMDbDatasetSummary.text(datasetStatus), systemImage: "arrow.down.circle")
-                    }
-                    .accessibilityIdentifier("settings.section.imdb")
-                }
-                Section("Accounts & server") {
-                    NavigationLink { TraktAccountView(services: services) } label: {
-                        SettingsRow(title: "Trakt", summary: "Sync and lists", systemImage: "person.crop.circle")
-                    }
-                    .accessibilityIdentifier("settings.trakt")
-                    NavigationLink { AccountsSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Continue refresh", summary: continueRefreshSummary, systemImage: "arrow.clockwise")
-                    }
-                    .accessibilityIdentifier("settings.section.accounts")
-                    NavigationLink { ServerSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Streaming server", summary: model.settings.streamingServerURL ?? "Not set", systemImage: "server.rack")
-                    }
-                    .accessibilityIdentifier("settings.section.server")
-                    if fallbackEngineLinked {
-                        NavigationLink { FallbackSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked) } label: {
-                            SettingsRow(title: "Fallback player", summary: FallbackSettingsPage.summary(model.settings, aetherEngineLinked: aetherEngineLinked),
-                                        systemImage: "film")
-                        }
-                        .accessibilityIdentifier("settings.section.fallback")
-                    }
-                }
-                Section("Data") {
-                    NavigationLink { DownloadSettingsPage(services: services) } label: {
-                        SettingsRow(title: "Downloads", summary: "", systemImage: "arrow.down.circle")
-                    }
-                    NavigationLink { ImageCacheSettingsPage() } label: {
-                        SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
-                    }
-                    .accessibilityIdentifier("settings.section.imageCache")
-                    NavigationLink { DataSettingsPage(model: model) } label: {
-                        SettingsRow(title: "Clear data", summary: "History, library, settings", systemImage: "trash")
-                    }
-                    .accessibilityIdentifier("settings.section.data")
-                }
-                Section("About") {
-                    NavigationLink { AboutSettingsPage(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked) } label: {
-                        SettingsRow(title: "About", summary: "Version \(SettingsViewModel.appVersion)", systemImage: "info.circle")
-                    }
-                    .accessibilityIdentifier("settings.section.about")
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("settings.ghost")
                 }
             }
-            .scrollIndicators(.visible, axes: .vertical)
-            .scrollIndicatorsFlash(onAppear: true)
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .readableColumn()
-            .trackLandscapeTabScroll()
-            .screenBackground()
-            .navigationTitle("Settings")
-            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                await model.load()
-                datasetStatus = await services.posterRatings.imdbDatasetStatus()
-            }
-            // A new copy of the IMDb data arrived while Settings was open, or the review services changed.
-            .onChange(of: services.posterRatings.reviewServicesRevision) {
-                model.refreshOMDbUsage()
-                Task { datasetStatus = await services.posterRatings.imdbDatasetStatus() }
-            }
-            .accessibilityIdentifier("settings.form")
-            // The pull past the top, which the ghost's indicator follows.
-            .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
-                pull = value
-            }
-            .overlay(alignment: .top) { ghostPullIndicator }
-            // Held past the mark for two seconds, the pull switches ghost mode. Let go sooner and nothing happens.
-            .task(id: pull >= Self.holdPull) {
-                guard pull >= Self.holdPull else {
-                    holdProgress = 0
-                    return
+            Section("Content") {
+                NavigationLink(value: SettingsDestination.addons) {
+                    SettingsRow(title: "Addons", summary: "\(model.installedAddonCount) installed", systemImage: "puzzlepiece.extension")
                 }
-                withAnimation(.linear(duration: Self.holdDuration)) { holdProgress = 1 }
-                do { try await Task.sleep(for: .seconds(Self.holdDuration)) } catch {
-                    holdProgress = 0
-                    return
+                .accessibilityIdentifier("settings.addons")
+                NavigationLink { AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } }) } label: {
+                    SettingsRow(title: "Addon Speed",
+                                summary: AddonSpeedViewModel.summary(for: model.settings.autoPickWait, names: model.addonNames),
+                                systemImage: "speedometer")
                 }
-                setGhost(!ghostIsOn)
+                .accessibilityIdentifier("settings.section.addonSpeed")
+                NavigationLink(value: SettingsDestination.widgets) {
+                    SettingsRow(title: "Widgets", summary: "Home rows and layout", systemImage: "rectangle.3.group")
+                }
+                .accessibilityIdentifier("settings.widgets")
             }
-            // A tap on Settings' tab item goes back to its first page, and scrolls it to the top.
-            .onChange(of: router.tabTapRevisions[.settings, default: 0]) { _, _ in
-                withAnimation(.snappy(duration: 0.35)) { proxy.scrollTo(Self.topID, anchor: .top) }
+            Section("Playback & appearance") {
+                NavigationLink { PlaybackSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Playback", summary: playbackSummary, systemImage: "play.rectangle")
+                }
+                .accessibilityIdentifier("settings.section.playback")
+                NavigationLink { PlayerSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Player", summary: "Subtitles, audio, picture, skip buttons", systemImage: "slider.horizontal.3")
+                }
+                .accessibilityIdentifier("settings.section.player")
+                NavigationLink { AppearanceSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Appearance", summary: appearanceSummary, systemImage: "paintpalette")
+                }
+                .accessibilityIdentifier("settings.section.appearance")
+                NavigationLink { LazyLoadSettingsPage() } label: {
+                    SettingsRow(title: "Lazy load", summary: lazyLoadLabel(lookaheadLevel), systemImage: "arrow.down.to.line")
+                }
+                .accessibilityIdentifier("settings.section.lazyLoad")
+                // A Mac has no haptic hardware, so the page would be sliders it cannot demonstrate.
+                #if !targetEnvironment(macCatalyst)
+                NavigationLink { HapticsSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Haptics", summary: hapticsSummary, systemImage: "hand.tap")
+                }
+                .accessibilityIdentifier("settings.section.haptics")
+                #endif
             }
+            Section("Ratings") {
+                NavigationLink { ReviewServicesPage(model: model, services: services) } label: {
+                    SettingsRow(title: "Review services", summary: reviewServicesSummary, systemImage: "star.bubble")
+                }
+                .accessibilityIdentifier("settings.section.reviews")
+                NavigationLink { IMDbRatingsPage(status: datasetStatus) } label: {
+                    SettingsRow(title: "IMDb ratings", summary: IMDbDatasetSummary.text(datasetStatus), systemImage: "arrow.down.circle")
+                }
+                .accessibilityIdentifier("settings.section.imdb")
+            }
+            Section("Accounts & server") {
+                NavigationLink { TraktAccountView(services: services) } label: {
+                    SettingsRow(title: "Trakt", summary: "Sync and lists", systemImage: "person.crop.circle")
+                }
+                .accessibilityIdentifier("settings.trakt")
+                NavigationLink { AccountsSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Continue refresh", summary: continueRefreshSummary, systemImage: "arrow.clockwise")
+                }
+                .accessibilityIdentifier("settings.section.accounts")
+                NavigationLink { ServerSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Streaming server", summary: model.settings.streamingServerURL ?? "Not set", systemImage: "server.rack")
+                }
+                .accessibilityIdentifier("settings.section.server")
+                if fallbackEngineLinked {
+                    NavigationLink { FallbackSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked) } label: {
+                        SettingsRow(title: "Fallback player", summary: FallbackSettingsPage.summary(model.settings, aetherEngineLinked: aetherEngineLinked),
+                                    systemImage: "film")
+                    }
+                    .accessibilityIdentifier("settings.section.fallback")
+                }
+            }
+            Section("Data") {
+                NavigationLink { DownloadSettingsPage(services: services) } label: {
+                    SettingsRow(title: "Downloads", summary: "", systemImage: "arrow.down.circle")
+                }
+                NavigationLink { ImageCacheSettingsPage() } label: {
+                    SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
+                }
+                .accessibilityIdentifier("settings.section.imageCache")
+                NavigationLink { DataSettingsPage(model: model) } label: {
+                    SettingsRow(title: "Clear data", summary: "History, library, settings", systemImage: "trash")
+                }
+                .accessibilityIdentifier("settings.section.data")
+            }
+            Section("About") {
+                NavigationLink { AboutSettingsPage(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked) } label: {
+                    SettingsRow(title: "About", summary: "Version \(SettingsViewModel.appVersion)", systemImage: "info.circle")
+                }
+                .accessibilityIdentifier("settings.section.about")
+            }
+        }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .readableColumn()
+        .trackLandscapeTabScroll()
+        .screenBackground()
+        .navigationTitle("Settings")
+        .macRootNavigation()
+        .pageTabBar(hidden: isPhoneInLandscape)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await model.load()
+            datasetStatus = await services.posterRatings.imdbDatasetStatus()
+        }
+        // A new copy of the IMDb data arrived while Settings was open, or the review services changed.
+        .onChange(of: services.posterRatings.reviewServicesRevision) {
+            model.refreshOMDbUsage()
+            Task { datasetStatus = await services.posterRatings.imdbDatasetStatus() }
+        }
+        .accessibilityIdentifier("settings.form")
+        // The pull past the top, which the ghost's indicator follows.
+        .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
+            pull = value
+        }
+        .overlay(alignment: .top) { ghostPullIndicator }
+        // Held past the mark for two seconds, the pull switches ghost mode. Let go sooner and nothing happens.
+        .task(id: pull >= Self.holdPull) {
+            guard pull >= Self.holdPull else {
+                holdProgress = 0
+                return
+            }
+            withAnimation(.linear(duration: Self.holdDuration)) { holdProgress = 1 }
+            do { try await Task.sleep(for: .seconds(Self.holdDuration)) } catch {
+                holdProgress = 0
+                return
+            }
+            setGhost(!ghostIsOn)
         }
     }
 
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
     private func setGhost(_ isOn: Bool) {
-        // The tap, not a selection tick: Ghost mode changes what every screen shows, so it lands like a change of screen.
-        Haptics.tap()
+        // A button's tap, not a switch's: Ghost mode changes what every screen shows, so it lands like a change of screen.
+        Haptics.play(.buttons)
         withAnimation(.snappy(duration: 0.3)) { ghostIsOn = isOn }
     }
 
@@ -233,19 +225,37 @@ struct SettingsView: View {
         return "\(model.settings.playerPreference.title) · \(quality) · \(model.settings.autoPickSource.title)"
     }
 
+    /// The preset in use, or what differs from the app's own look (accent, background, cards, text), then the poster switches that are on.
     private var appearanceSummary: String {
         var on: [String] = []
+        if let preset = appearance.preset, preset != .original { return preset.label }
+        if appearance.accent != .blusion { on.append(appearance.accent.label) }
+        if appearance.background != .black { on.append(appearance.background.label) }
+        if appearance.cardScale != .standard { on.append("\(appearance.cardScale.label) cards") }
+        if appearance.textSize != .system { on.append("\(appearance.textSize.label) text") }
+        if appearance.font != .standard { on.append(appearance.font.label) }
+        if !on.isEmpty || !appearance.isDefault {
+            return on.isEmpty ? "Custom" : on.joined(separator: ", ")
+        }
+        if model.settings.usesHeroPosters { on.append("Hero artwork on posters") }
         if model.settings.showsPosterRatings { on.append("Ratings on posters") }
         if model.settings.showsColouredRatingLogos { on.append("Coloured logos") }
-        return on.isEmpty ? "Rating options off" : on.joined(separator: ", ")
+        return on.isEmpty ? "Default appearance" : on.joined(separator: ", ")
     }
 
-    /// The Haptics row shows the tap strength.
+    /// The Haptics row shows whether anything has been tuned: the overall strength when it is not 100%, and how many places are off.
     private var hapticsSummary: String {
         let haptics = model.settings.haptics
         guard haptics.isOn else { return "Off" }
-        let tap = Int((haptics.tapStrength * 100).rounded())
-        return "Tap \(tap)%"
+        let places = HapticPreferences.Place.allCases
+        var parts: [String] = []
+        if haptics.overall != HapticPreferences.Default.overallStrength {
+            parts.append("\(Int((haptics.overall * 100).rounded()))% overall")
+        }
+        let off = places.filter { !haptics.plays($0) }.count
+        if off > 0 { parts.append("\(off) of \(places.count) off") }
+        guard parts.isEmpty else { return parts.joined(separator: " · ") }
+        return places.allSatisfy(haptics.isDefault) ? "Default" : "Custom"
     }
 
     private var reviewServicesSummary: String {
@@ -269,8 +279,9 @@ private func lazyLoadLabel(_ level: Int) -> String {
     LazyLoadLookahead.levels[min(max(level, 1), LazyLoadLookahead.levels.count) - 1].label
 }
 
-/// One row of the Settings root, in the format of the Widgets page: a symbol, a title and a one-line summary.
-private struct SettingsRow: View {
+/// One row of the Settings root, in the format of the Widgets page: a symbol, a title and a one-line summary. Also the Haptics page's
+/// rows, one per place.
+struct SettingsRow: View {
     let title: String
     let summary: String
     let systemImage: String
@@ -295,6 +306,7 @@ extension View {
             .readableColumn()
             .screenBackground()
             .navigationTitle(title)
+            .macBackNavigation()
             .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -326,7 +338,7 @@ private struct PlaybackSettingsPage: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Auto Pick source")
                     Picker("Auto Pick source", selection: Binding(get: { model.settings.autoPickSource }, set: { value in
-                        Haptics.selection()
+                        Haptics.play(.choices)
                         Task { await model.setAutoPickSource(value) }
                     })) {
                         ForEach(StreamSourcePreference.allCases) { Text($0.title).tag($0) }
@@ -337,12 +349,12 @@ private struct PlaybackSettingsPage: View {
                 }
                 Picker("Preferred quality",
                        selection: Binding(get: { model.settings.preferredResolution },
-                                          set: { value in Haptics.selection(); Task { await model.setPreferredResolution(value) } })) {
+                                          set: { value in Haptics.play(.choices); Task { await model.setPreferredResolution(value) } })) {
                     ForEach(SettingsViewModel.resolutionOptions) { Text($0.label).tag($0.value) }
                 }
                 .accessibilityIdentifier("settings.resolution")
                 Picker("Subtitles", selection: Binding(get: { model.settings.subtitleLanguage }, set: { value in
-                    Haptics.selection()
+                    Haptics.play(.choices)
                     Task { await model.setSubtitleLanguage(value) }
                 })) {
                     ForEach(SettingsViewModel.languageOptions) { Text($0.label).tag($0.value) }
@@ -356,28 +368,6 @@ private struct PlaybackSettingsPage: View {
         .task {
             if let url = URL(string: "infuse://") { infuseInstalled = UIApplication.shared.canOpenURL(url) }
         }
-    }
-}
-
-private struct AppearanceSettingsPage: View {
-    let model: SettingsViewModel
-
-    var body: some View {
-        List {
-            Section {
-                Toggle("Ratings on posters", isOn: Binding(get: { model.settings.showsPosterRatings }, set: { value in
-                    Task { await model.setShowsPosterRatings(value) }
-                }))
-                .accessibilityIdentifier("settings.posterRatings")
-                Toggle("Coloured rating logos", isOn: Binding(get: { model.settings.showsColouredRatingLogos }, set: { value in
-                    Task { await model.setShowsColouredRatingLogos(value) }
-                }))
-                .accessibilityIdentifier("settings.colouredRatingLogos")
-            }
-        }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Appearance")
     }
 }
 
@@ -576,7 +566,7 @@ private struct FallbackSettingsPage: View {
 
     private func binding<Value>(_ keyPath: WritableKeyPath<PlayerPreferences, Value>) -> Binding<Value> {
         Binding(get: { model.settings.player[keyPath: keyPath] }, set: { value in
-            Haptics.selection()
+            Haptics.play(.choices)
             Task { await model.updatePlayer { $0[keyPath: keyPath] = value } }
         })
     }
@@ -585,7 +575,7 @@ private struct FallbackSettingsPage: View {
         List {
             Section {
                 Toggle("Use the fallback player", isOn: Binding(get: { model.settings.fallbackEngineEnabled },
-                                        set: { value in Haptics.selection(); Task { await model.setFallbackEngineEnabled(value) } }))
+                                        set: { value in Haptics.play(.choices); Task { await model.setFallbackEngineEnabled(value) } }))
                     .accessibilityIdentifier("settings.fallbackToggle")
             }
             if aetherEngineLinked, model.settings.fallbackEngineEnabled {
@@ -773,7 +763,7 @@ private struct AddonSpeedSettingsPage: View {
 
     private func waitChoice(_ title: String, _ wait: AutoPickWait) -> some View {
         Button {
-            Haptics.selection()
+            Haptics.play(.choices)
             Task { await model.choose(wait, saved: onChange) }
         } label: {
             HStack {
@@ -835,6 +825,7 @@ struct AcknowledgementsView: View {
         .readableColumn()
         .screenBackground()
         .navigationTitle("Acknowledgements")
+        .macBackNavigation()
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("acknowledgements.list")
     }

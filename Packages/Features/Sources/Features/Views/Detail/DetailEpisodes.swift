@@ -126,7 +126,7 @@ struct DetailEpisodes: View {
         Menu {
             ForEach(model.seasons, id: \.self) { season in
                 Button(season == 0 ? "Specials" : "Season \(season)") {
-                    if model.selectedSeason != season { Haptics.selection() }
+                    if model.selectedSeason != season { Haptics.play(.choices) }
                     model.selectedSeason = season
                 }
             }
@@ -347,7 +347,7 @@ struct DetailEpisodes: View {
                                       image: Self.paletteItem(Self.paletteSymbol(downloaded ? "arrow.down.circle.fill" : "arrow.down.circle"),
                                                               caption: "Download", mode: .alwaysTemplate)) { _ in
             // A UIAction is not on the main actor, so the haptic has to come back to it.
-            Task { @MainActor in Haptics.tap(); await model.download(request) }
+            Task { @MainActor in Haptics.play(.buttons); await model.download(request) }
         }
         let imdbMode: UIImage.RenderingMode = ratings?.showsColouredLogos == true ? .alwaysOriginal : .alwaysTemplate
         let imdbAction = UIAction(title: "IMDb", image: Self.paletteItem(Self.menuIMDbLogo(), caption: nil, mode: imdbMode)) { _ in
@@ -414,7 +414,7 @@ struct DetailEpisodes: View {
                 }
             }
             Button("Download", systemImage: downloaded ? "arrow.down.circle.fill" : "arrow.down.circle") {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 Task { await model.download(request) }
             }
             Button {
@@ -495,7 +495,7 @@ private struct EpisodeRow: View {
         runtimeMinutes.map { Duration.seconds($0 * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide)) }
     }
     let width: CGFloat
-    @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = 128
+    @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = 140
     @State private var overviewTextHeight: CGFloat = 0
     @State private var overviewFrameHeight: CGFloat = 0
     /// Menu previews show all the text; shelf cards let the synopsis absorb title wrapping inside a fixed height.
@@ -508,10 +508,15 @@ private struct EpisodeRow: View {
     var isLoadingStreams = false
     /// The still's corner radius. The menu's preview gives it one that follows its panel's, which is rounder than a card's.
     var stillRadius: CGFloat = Theme.Radius.card
+    @Environment(\.appAppearance) private var appearance
 
     private var hasProgress: Bool {
         !watched && fraction.map { $0.isFinite && $0 > 0 && $0 < 1 } == true
     }
+
+    /// Appearance's Hide spoilers: an episode not yet started keeps its still blurred and its synopsis greyed out. The title, number,
+    /// date and score stay, so the episode can still be found.
+    private var hidesSpoilers: Bool { appearance.hidesSpoilers && !watched && !hasProgress }
 
     /// How far the progress line and the watched mark move in from the still's edges, so a rounder corner does not cut into them.
     private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
@@ -586,6 +591,9 @@ private struct EpisodeRow: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             if let episode = video.episode {
                 Text("EPISODE \(episode)").font(Theme.Typography.eyebrow).foregroundStyle(.white.opacity(0.75))
+                    #if targetEnvironment(macCatalyst)
+                    .padding(.top, isShortWidth ? 0 : -Theme.Spacing.xs)
+                    #endif
             }
             Group {
                 if showsWholeOverview {
@@ -595,7 +603,11 @@ private struct EpisodeRow: View {
                         .lineLimit(2)
                 }
             }
+            #if targetEnvironment(macCatalyst)
+            .font((isShortWidth ? Font.footnote : .body).weight(.medium))
+            #else
             .font(.footnote.weight(.medium))
+            #endif
             .allowsTightening(true)
             .foregroundStyle(.white)
         }
@@ -606,8 +618,14 @@ private struct EpisodeRow: View {
         if let overview = video.overview, !overview.isEmpty {
             // Preserve the original line budget. Measuring before padding lets the divider move without resizing the text.
             Text(overview)
+                #if targetEnvironment(macCatalyst)
+                .font(isShortWidth ? .caption : .body)
+                #else
                 .font(.caption)
+                #endif
                 .foregroundStyle(.white.opacity(0.85))
+                .redacted(reason: hidesSpoilers ? .placeholder : [])
+                .accessibilityHidden(hidesSpoilers)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { overviewTextHeight = $0 }
                 .padding(.bottom, showsWholeOverview ? 0 : -Theme.Spacing.xs)
         }
@@ -616,6 +634,7 @@ private struct EpisodeRow: View {
     /// The episode's own still, or the series' backdrop when the addon sent none.
     private var still: some View {
         ArtworkImage(url: video.thumbnail ?? artwork, maxPixelSize: nil, fallbackURL: artwork, extendsArtworkDownward: true)
+            .blur(radius: hidesSpoilers ? 22 : 0, opaque: true)
             .opacity(airsLater ? 0.45 : 1)
     }
 

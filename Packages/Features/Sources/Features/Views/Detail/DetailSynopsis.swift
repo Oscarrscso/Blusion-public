@@ -47,7 +47,7 @@ struct DetailSynopsis: View {
 
     /// Opens or folds the synopsis, with the app's light tap, once for each tap.
     private func toggleDescription() {
-        Haptics.tap()
+        Haptics.play(.buttons)
         withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
     }
 }

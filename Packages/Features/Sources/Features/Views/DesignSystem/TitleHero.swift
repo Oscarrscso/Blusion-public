@@ -7,6 +7,8 @@ import SwiftUI
 enum TitleHero {
     /// On a Mac title page, the widest the synopsis and the trailer's panel under the hero run, and the stream list in their place.
     static let macDetailsWidth: CGFloat = 640
+    /// The desktop artwork's height, also used to bound its scroll observation.
+    static func macHeight(pageHeight: CGFloat) -> CGFloat { min(max(pageHeight * 0.62, 440), 620) + 80 }
     /// The portrait picture is drawn this much larger than its frame (see `pictureHeight`).
     static let zoom: CGFloat = 1.15
     /// The length of the bottom fade, as a share of the unzoomed hero height. The fade keeps that length however far the picture runs.
@@ -349,7 +351,7 @@ final class HeroLoader {
 
 /// The hero picture, drawn over the poster it stands in with until the picture is revealed. The stand-in is the title's card poster (see
 /// `PosterQuality.poster(for:)`), slightly blurred and with a spinner over it. Metahub's poster takes its place only if that one fails.
-/// The picture itself is shown only while `isRevealed`, with the logo.
+/// Hero-poster mode keeps cached hero artwork visible even while its logo or another orientation finishes loading.
 struct HeroPicture: View {
     let slot: HeroSlot
     let isRevealed: Bool
@@ -363,6 +365,11 @@ struct HeroPicture: View {
     let usesSystemSpinner: Bool
     /// The stand-in's address, chosen once when the page opens (see `standInURL(for:)`).
     @State private var standIn: URL?
+    @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var globalHeroPosters = false
+    @Environment(\.heroPosterOverride) private var heroPosterOverride
+    private var usesHeroPosters: Bool { heroPosterOverride ?? globalHeroPosters }
+    @Environment(PosterRatingsStore.self) private var ratingsStore: PosterRatingsStore?
+    @Environment(\.isLandscape) private var isLandscape
 
     init(slot: HeroSlot, isRevealed: Bool, contentMode: ContentMode, alignment: Alignment = TitleHero.imageAlignment, preview: MetaPreview,
          standInFromBackdrop: Bool = false, usesSystemSpinner: Bool = false) {
@@ -396,9 +403,25 @@ struct HeroPicture: View {
         return false
     }
 
+    private var cachedCardHero: UIImage? {
+        guard usesHeroPosters else { return nil }
+        let artwork = ratingsStore?.cachedHeroArtwork(for: preview)
+        let backdropFirst = standInFromBackdrop || isLandscape
+        let pictures = [backdropFirst ? artwork?.backdrop : artwork?.portrait,
+                        backdropFirst ? artwork?.portrait : artwork?.backdrop,
+                        preview.background, MetahubArtwork.background(imdbID: preview.id), preview.poster]
+        return pictures.compactMap { $0 }.lazy.compactMap { ImagePipeline.shared.cachedImageAtAnySize(for: $0) }.first
+    }
+
     var body: some View {
+        let cachedHero = cachedCardHero
         ZStack {
-            if !isRevealed, let standIn {
+            if !isRevealed, !hasPicture, let cachedHero {
+                Color.clear.overlay(alignment: alignment) {
+                    Image(uiImage: cachedHero).resizable().aspectRatio(contentMode: contentMode)
+                }
+            }
+            if !isRevealed, !(usesHeroPosters && hasPicture), cachedHero == nil, let standIn {
                 // Stays fully opaque while the picture fades in over it (the reveal lasts 0.25 s), then goes unseen. With no picture to
                 // reveal it goes as it did, with a fade.
                 ArtworkImage(url: standIn, maxPixelSize: TitleHero.placeholderPixelSize, contentMode: contentMode,
@@ -430,7 +453,7 @@ struct HeroPicture: View {
                             .transition(.identity)
                     }
                 }
-                .opacity(isRevealed ? 1 : 0)
+                .opacity(isRevealed || (usesHeroPosters && hasPicture) ? 1 : 0)
         }
         .clipped()
         .accessibilityHidden(true)

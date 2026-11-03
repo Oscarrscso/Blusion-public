@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 import UIKit
 
@@ -35,7 +36,7 @@ struct PlayerMenuBar: UIViewRepresentable {
         if control.selectedSegmentIndex != index { control.selectedSegmentIndex = index }
         control.onReselect = { [selection = $selection] in
             // Re-tapping the tab already showing closes the panel, which is a change of screen rather than a tab change.
-            Haptics.tap()
+            Haptics.play(.playerControls)
             selection.wrappedValue = nil
         }
     }
@@ -54,7 +55,7 @@ struct PlayerMenuBar: UIViewRepresentable {
             guard control.tabs.indices.contains(control.selectedSegmentIndex) else { return }
             let tab = control.tabs[control.selectedSegmentIndex]
             guard selection.wrappedValue != tab else { return }
-            Haptics.selection()
+            Haptics.play(.playerOptions)
             selection.wrappedValue = tab
         }
     }

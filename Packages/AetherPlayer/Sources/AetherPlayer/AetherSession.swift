@@ -267,6 +267,11 @@ public final class AetherSession {
         }
     }
 
+    /// How bright HDR gets, 0…1. 0 leaves the engine's own dynamic range; above it the picture asks for the display's whole HDR range.
+    public func setHDRBrightness(_ level: Double) {
+        host.hdrBrightness = level
+    }
+
     /// `aspect` sets the visible picture's display shape; `crop` measures content in the original source. nil leaves either alone. `inset` keeps
     /// Fit that far from the left and the right (points). A change of any of them moves the picture smoothly into its new place.
     public func apply(fit: AetherFit, zoom: Double, aspect: Double? = nil, crop: Double? = nil, inset: Double = 0) {
@@ -668,6 +673,10 @@ final class AetherHostView: UIView {
     private weak var pictureOverlay: CALayer?
     var fit = AetherFit.fit { didSet { if fit != oldValue { setNeedsLayout() } } }
     var zoom = 1.0 { didSet { if zoom != oldValue { setNeedsLayout() } } }
+    /// How bright HDR gets, 0…1. 0 leaves each picture layer as the engine set it.
+    var hdrBrightness = 0.0 { didSet { if hdrBrightness != oldValue { applyDynamicRange() } } }
+    /// What the engine set on a picture layer before the override, so 0 can put it back.
+    private let engineDynamicRange = NSMapTable<CALayer, NSString>.weakToStrongObjects()
     /// Width over height replacing the file's; nil keeps it.
     var aspect: Double? { didSet { if aspect != oldValue { setNeedsLayout() } } }
     /// Width over height to crop the picture to, centred; nil keeps it whole.
@@ -737,7 +746,28 @@ final class AetherHostView: UIView {
         }
     }
 
+    /// Sets the dynamic range on the engine's picture layers (AVPlayerLayer on the native route, AVSampleBufferDisplayLayer on the software
+    /// one). The engine can make a new layer when a file loads, so this also runs on every layout. Core Animation has no level between its
+    /// ranges, so any brightness above 0 asks for `high`, the display's whole HDR range.
+    private func applyDynamicRange() {
+        var pending = [playerView.layer]
+        while let layer = pending.popLast() {
+            pending.append(contentsOf: layer.sublayers ?? [])
+            guard layer is AVPlayerLayer || layer is AVSampleBufferDisplayLayer else { continue }
+            if hdrBrightness > 0 {
+                if engineDynamicRange.object(forKey: layer) == nil {
+                    engineDynamicRange.setObject(layer.preferredDynamicRange.rawValue as NSString, forKey: layer)
+                }
+                if layer.preferredDynamicRange != .high { layer.preferredDynamicRange = .high }
+            } else if let original = engineDynamicRange.object(forKey: layer) {
+                layer.preferredDynamicRange = CALayer.DynamicRange(rawValue: original as String)
+                engineDynamicRange.removeObject(forKey: layer)
+            }
+        }
+    }
+
     private func placePicture() {
+        applyDynamicRange()
         playerView.transform = .identity
         pictureOverlayView.transform = .identity
         let gravity: AVLayerVideoGravity

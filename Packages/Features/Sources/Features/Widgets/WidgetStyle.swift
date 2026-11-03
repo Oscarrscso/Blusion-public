@@ -3,7 +3,7 @@ import StremioKit
 
 /// How a single-source widget looks on Home. One choice in the editor instead of three kinds of widget to add.
 public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
-    case row = "Row", spotlight = "Spotlight", banner = "Banner"
+    case row = "Row", spotlight = "Spotlight", banner = "Carousel"
 
     public var id: String { rawValue }
 

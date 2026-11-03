@@ -409,7 +409,7 @@ public final class WidgetsManagerViewModel {
         switch widget.content {
         case .row(let row): return "Row · \(describe(row.source))"
         case .hero(let row): return "Spotlight · \(describe(row.source))"
-        case .banner(let row): return "Banner · \(describe(row.source))"
+        case .banner(let row): return "Carousel · \(describe(row.source))"
         case .collection(let tiles): return "Collection · \(WidgetsManagerViewModel.plural(tiles.count, "tile"))"
         case .continueWatching: return "Continue"
         case .unsupported(let type): return "Can't show yet · \(type)"
@@ -453,7 +453,7 @@ public final class WidgetsManagerViewModel {
         switch widget.content {
         case .row(let row): return row.presentation.showsRank ? "Numbered row" : "Row"
         case .hero: return "Spotlight"
-        case .banner: return "Banner"
+        case .banner: return "Carousel"
         case .collection: return "Collection"
         case .continueWatching: return "Continue Watching"
         case .unsupported(let type): return "Not supported (\(type))"

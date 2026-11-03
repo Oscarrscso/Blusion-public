@@ -108,7 +108,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
                         standInFromBackdrop: true, usesSystemSpinner: true)
                 .frame(width: artWidth)
                 .frame(maxHeight: .infinity)
-                .modifier(LandscapeHeroZoom(scroll: scroll))
+                .modifier(DetailHeroScrollZoom(scroll: scroll))
                 .clipped()
                 .mask {
                     LinearGradient(stops: [
@@ -121,7 +121,7 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
             BottomFade(length: 0.42)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-        .modifier(LandscapeHeroPull(scroll: scroll))
+        .modifier(DetailHeroScrollPull(scroll: scroll))
         .animation(.smooth(duration: 0.3), value: model.playColourHex)
         .allowsHitTesting(false)
         .ignoresSafeArea(.container, edges: [.top, .horizontal])
@@ -225,8 +225,8 @@ private struct DetailHeroScrollArtwork: View {
 }
 
 /// Landscape: a pull past the top grows the art upward by the pull, so the picture fills it (it is drawn to fill) and stays against the
-/// top of the screen. Only this and `LandscapeHeroZoom` read the offset, so the art's content does not rebuild per scroll tick.
-private struct LandscapeHeroPull: ViewModifier {
+/// top of the screen. Shared with Mac; only the artwork modifiers observe the scroll offset.
+struct DetailHeroScrollPull: ViewModifier {
     let scroll: DetailHeroScrollState
 
     func body(content: Content) -> some View {
@@ -235,7 +235,7 @@ private struct LandscapeHeroPull: ViewModifier {
 }
 
 /// Landscape: scrolling the page down zooms the picture from its top, on the same curve as portrait.
-private struct LandscapeHeroZoom: ViewModifier {
+struct DetailHeroScrollZoom: ViewModifier {
     let scroll: DetailHeroScrollState
 
     func body(content: Content) -> some View {

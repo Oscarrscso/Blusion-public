@@ -30,6 +30,11 @@ struct DetailView: View {
     @State private var heroScroll = DetailHeroScrollState()
     /// Loads the hero picture and logo together, and reveals them together. Starts with what the spotlight showed, when it opened this title.
     @State private var hero: HeroLoader
+    @State private var fullResolutionHero: (url: URL, image: UIImage)?
+    @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var globalHeroPosters = false
+    private let heroPostersOverride: Bool?
+    private let heroHandoff: HeroHandoff?
+    private var usesHeroPosters: Bool { heroPostersOverride ?? globalHeroPosters }
     /// The page's own side safe-area inset, as its geometry reports it: the notch side of a phone held in landscape, zero elsewhere. The
     /// window's share is added in `contentMargin`.
     @State private var sideInset: CGFloat = 0
@@ -52,6 +57,8 @@ struct DetailView: View {
     @State private var hasSettled = false
     @State private var hasAppeared = false
     @Environment(\.layoutMetrics) private var metrics
+    /// Appearance's title page sections: Reviews, Cast & Crew, Information and More Like This.
+    @Environment(\.appAppearance) private var appearance
     @Environment(\.isLandscape) private var isLandscape
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(AppRouter.self) private var router
@@ -108,12 +115,14 @@ struct DetailView: View {
     /// settled. A Continue Watching card opens its title this way, with the item it resumes. The picker reveals once its streams are
     /// ready, as it does after Play.
     init(preview: MetaPreview, services: AppServices, artwork: TMDbArtwork? = nil, artworkChecked: Bool = false, handoff: HeroHandoff? = nil,
-         streams: StreamRequest? = nil) {
+         streams: StreamRequest? = nil, heroPostersOverride: Bool? = nil) {
         _model = State(initialValue: DetailViewModel(preview: preview, services: services, artwork: artwork, artworkChecked: artworkChecked,
                                                      trailerPreparer: AVTrailerPreparer()))
         _hero = State(initialValue: HeroLoader(seeding: handoff))
         _pendingStreams = State(initialValue: streams)
         self.services = services
+        self.heroPostersOverride = heroPostersOverride
+        self.heroHandoff = handoff
         opensFromSpotlight = handoff != nil
     }
 
@@ -123,7 +132,7 @@ struct DetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         #if targetEnvironment(macCatalyst)
-                        DesktopDetailHero(model: model, size: geometry.size, contentMargin: contentMargin, pictureSlot: pictureSlot,
+                        DesktopDetailHero(model: model, scroll: heroScroll, size: geometry.size, contentMargin: contentMargin, pictureSlot: pictureSlot,
                                           logoSlot: logoSlot, isRevealed: isHeroRevealed, showsDetails: !showsStreams) {
                             DetailActions(model: model, isConfirmingUnmarkShow: $isConfirmingUnmarkShow,
                                           showsActions: !showsStreams, isLoadingStreams: loadingTrigger == .play,
@@ -174,7 +183,7 @@ struct DetailView: View {
                                              episodeScore: model.episodeScore(for: request),
                                              episodeSwitcher: episodeSwitcher(for: request),
                                              forcesAutomaticStart: playOpeningMode == .infuse,
-                                             onAutomaticStart: { started in if started { streams.startedAutomatically() } },
+                                             onAutomaticStart: { _ in streams.startedAutomatically() },
                                              playColourHex: model.playColourHex,
                                              allowsAutomaticStart: playOpeningMode != .streamSelector,
                                              preferredAutomaticPlayer: playOpeningMode == .infuse ? .infuse : nil)
@@ -216,7 +225,7 @@ struct DetailView: View {
                                         .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                                 }
                                 VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
-                                    if model.isLoadingReviews || !model.reviews.isEmpty {
+                                    if appearance.showsReviews && (model.isLoadingReviews || !model.reviews.isEmpty) {
                                         DetailReviews(reviews: model.reviews, isLoading: model.isLoadingReviews && model.reviews.isEmpty,
                                                       consensus: model.reviewConsensus,
                                                       isSummarizing: model.isSummarizingReviews, reviewedCount: model.reviewedCount,
@@ -228,11 +237,13 @@ struct DetailView: View {
                                             // A changed review corpus resets the panel and cancels its in-flight AI task.
                                             .id(ReviewConsensusReader.key(for: model.reviews))
                                     }
-                                    DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width)
+                                    if appearance.showsCast || appearance.showsInformation {
+                                        DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width)
+                                    }
                                 }
                                 .padding(.top, model.isSeries ? metrics.titleSectionSpacing
                                     : isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
-                                if model.isLoadingRelated || !model.relatedTitles.isEmpty {
+                                if appearance.showsRelated && (model.isLoadingRelated || !model.relatedTitles.isEmpty) {
                                     related
                                         .padding(.top, metrics.titleSectionSpacing)
                                 }
@@ -240,7 +251,7 @@ struct DetailView: View {
                             .transition(.opacity)
                         }
                     }
-                    .padding(.bottom, Theme.Spacing.xxl)
+                        .padding(.bottom, Theme.Spacing.xxl)
                     // The hero reserves transparent space while its artwork loads; drags there must still scroll the page.
                     .contentShape(Rectangle())
                     .detailLoadingTransition(model.isLoadingReviews)
@@ -262,8 +273,12 @@ struct DetailView: View {
                 // The page passes the reference without reading its offset, so only the artwork observes each tick.
                 .onScrollGeometryChange(for: CGFloat.self) { scroll in
                     let offset = scroll.contentOffset.y + scroll.contentInsets.top
+                    #if targetEnvironment(macCatalyst)
+                    let hero = TitleHero.macHeight(pageHeight: geometry.size.height)
+                    #else
                     let hero = isLandscape ? TitleHero.landscapeHeroHeight(pageHeight: geometry.size.height)
                                            : TitleHero.height(width: geometry.size.width, metrics: metrics)
+                    #endif
                     return min(offset, hero + scroll.containerSize.height)
                 } action: { _, value in
                     heroScroll.offset = value
@@ -317,9 +332,10 @@ struct DetailView: View {
         }
         // The settle scales the whole visible page about the screen's centre; the background behind it stays put.
         .heroSettle(trigger: hasSettled)
+        .environment(\.heroPosterOverride, usesHeroPosters)
         .screenBackground()
         #if targetEnvironment(macCatalyst)
-        // The artwork runs under the top bar, so the bar's material blurs the picture rather than sitting over a strip of its own.
+        // The artwork reaches the top without reserving a native navigation bar.
         .ignoresSafeArea(.container, edges: .top)
         #else
         // The picture runs to the top of the screen in both orientations; the back button floats over it.
@@ -328,7 +344,7 @@ struct DetailView: View {
         .scrollEdgeEffectHidden(true, for: .top)
         .pageTopBar(hidden: true)
         // Phone landscape uses the shared corner Back (RootTabView), the same size and place as on See All and category pages.
-        .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
+        .pageNavigationBar(hidden: isPhoneInLandscape)
         .navigationBarTitleDisplayMode(.inline)
         // A detail page's landscape controls start tucked away and omit the title and divider already represented by its hero.
         .onAppear { landscapeTabs?.prepareForDetailPage() }
@@ -341,6 +357,12 @@ struct DetailView: View {
         .task { await model.load(afterHero: { await loadHero() }, priorityStream: pendingStreams, prefetchOnOpen: true) }
         .task(id: "\(heroURL?.absoluteString ?? "-")|\(logoURL?.absoluteString ?? "-")|\(model.isLoadingArtwork)|\(showsBackdrop)") {
             await loadHero()
+        }
+        .task(id: "\(heroURL?.absoluteString ?? "-")|\(usesHeroPosters)") {
+            guard usesHeroPosters, let url = heroURL else { return }
+            let image = try? await ImagePipeline.shared.image(for: url, maxPixelSize: nil, priority: .high, urgent: true)
+            guard !Task.isCancelled, let image else { return }
+            fullResolutionHero = (url, image)
         }
         // The primary stream lookup is registered by the title loader only after the hero picture and logo.
         // Continue Watching gets its selected episode, not an unrelated prefetch. This task handles
@@ -532,6 +554,7 @@ struct DetailView: View {
     /// Whether the page shows the wide backdrop rather than the tall poster. The Mac page always lays out full width, so it always uses the
     /// backdrop, whatever the window's shape; iPhone and iPad choose by orientation.
     private var showsBackdrop: Bool {
+        if usesHeroPosters { return isLandscape }
         #if targetEnvironment(macCatalyst)
         return true
         #else
@@ -543,12 +566,20 @@ struct DetailView: View {
     private var heroURL: URL? { showsBackdrop ? model.backdropURL : model.portraitArtworkURL }
 
     /// The longest edge the hero is decoded to: full screen for the backdrop, the smaller size shared with Home in portrait.
-    private var heroPixelSize: CGFloat { showsBackdrop ? TitleHero.landscapePixelSize : TitleHero.portraitPixelSize }
+    private var heroPixelSize: CGFloat {
+        if let picture = heroHandoff?.picture, picture.url == heroURL { return picture.maxPixelSize }
+        return usesHeroPosters ? PosterQuality.heroPosterPixelSize : (showsBackdrop ? TitleHero.landscapePixelSize : TitleHero.portraitPixelSize)
+    }
 
     /// Portrait only, and only when the picture carries the title: the logo is neither loaded nor drawn, its space is kept.
     private var hidesLogo: Bool { !showsBackdrop && model.portraitHidesLogo }
     private var logoURL: URL? { hidesLogo ? nil : model.logoURL }
-    private var pictureSlot: HeroSlot { hero.slot(url: heroURL, maxPixelSize: heroPixelSize, lookupFinished: !model.isLoadingArtwork) }
+    private var pictureSlot: HeroSlot {
+        if usesHeroPosters, let fullResolutionHero, fullResolutionHero.url == heroURL {
+            return .ready(fullResolutionHero.image)
+        }
+        return hero.slot(url: heroURL, maxPixelSize: heroPixelSize, lookupFinished: !model.isLoadingArtwork)
+    }
     private var logoSlot: HeroSlot { hero.slot(url: logoURL, maxPixelSize: HeroLoader.logoPixelSize, lookupFinished: !model.isLoadingArtwork) }
     /// The picture and the logo are revealed together, once neither is still pending.
     private var isHeroRevealed: Bool { HeroLoader.isRevealed(pictureSlot, logoSlot) }

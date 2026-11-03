@@ -84,18 +84,21 @@ public struct WidgetPresentation: Sendable, Codable, Equatable, Hashable {
     public var showsRank: Bool
     /// Poster cards take their artwork from the BetterPosters addon, falling back to the title's own poster.
     public var usesBetterPosters: Bool
+    /// Nil follows Appearance; true/false overrides hero artwork for this widget.
+    public var usesHeroPosters: Bool?
 
     public init(aspectRatio: AspectRatio = .poster, cardStyle: CardStyle = .medium, showsRatings: Bool = true, showsProviders: Bool = false,
-                showsRank: Bool = false, usesBetterPosters: Bool = false) {
+                showsRank: Bool = false, usesBetterPosters: Bool = false, usesHeroPosters: Bool? = nil) {
         self.aspectRatio = aspectRatio
         self.cardStyle = cardStyle
         self.showsRatings = showsRatings
         self.showsProviders = showsProviders
         self.showsRank = showsRank
         self.usesBetterPosters = usesBetterPosters
+        self.usesHeroPosters = usesHeroPosters
     }
 
-    private enum CodingKeys: String, CodingKey { case aspectRatio, cardStyle, showsRatings, showsProviders, showsRank, usesBetterPosters }
+    private enum CodingKeys: String, CodingKey { case aspectRatio, cardStyle, showsRatings, showsProviders, showsRank, usesBetterPosters, usesHeroPosters }
 
     /// `showsRank` and `usesBetterPosters` are missing from files written before they existed, so they default to off.
     public init(from decoder: Decoder) throws {
@@ -105,7 +108,8 @@ public struct WidgetPresentation: Sendable, Codable, Equatable, Hashable {
                   showsRatings: try container.decode(Bool.self, forKey: .showsRatings),
                   showsProviders: try container.decode(Bool.self, forKey: .showsProviders),
                   showsRank: try container.decodeIfPresent(Bool.self, forKey: .showsRank) ?? false,
-                  usesBetterPosters: try container.decodeIfPresent(Bool.self, forKey: .usesBetterPosters) ?? false)
+                  usesBetterPosters: try container.decodeIfPresent(Bool.self, forKey: .usesBetterPosters) ?? false,
+                  usesHeroPosters: try container.decodeIfPresent(Bool.self, forKey: .usesHeroPosters))
     }
 }
 

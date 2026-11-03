@@ -17,6 +17,7 @@ struct TraktListBrowserView: View {
 
     @State private var browser: TraktBrowserViewModel
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.appAppearance) private var appearance
 
     init(services: AppServices, navigationTitle: String, actionTitle: String, title: Binding<String>, titlePlaceholder: String,
          sort: Binding<TraktListSort?>, selectedID: Int?, canAdd: Bool, select: @escaping (TraktListSummary) -> Void,
@@ -106,8 +107,8 @@ struct TraktListBrowserView: View {
         .padding(.vertical, Theme.Spacing.s)
         // Solid, up under the navigation bar: the rows scroll out of sight beneath the controls. With nothing behind them the rows showed
         // through and between the glass buttons.
-        .background { Theme.background.ignoresSafeArea(edges: .top) }
-        .onChange(of: sort) { _, _ in Haptics.selection() }
+        .background { appearance.pageBackground.ignoresSafeArea(edges: .top) }
+        .onChange(of: sort) { _, _ in Haptics.play(.choices) }
     }
 
     private var titleField: some View {
@@ -204,7 +205,7 @@ struct TraktListBrowserView: View {
             if browser.showsUsers {
                 ForEach(browser.users) { user in
                     Button {
-                        Haptics.selection()
+                        Haptics.play(.choices)
                         browser.browse(user: user)
                     } label: { TraktUserRow(user: user) }
                         .buttonStyle(.plain)
@@ -214,7 +215,7 @@ struct TraktListBrowserView: View {
             } else {
                 ForEach(browser.lists) { list in
                     Button {
-                        Haptics.selection()
+                        Haptics.play(.choices)
                         select(list)
                     } label: { TraktListRow(list: list, isSelected: list.id == selectedID) }
                         .buttonStyle(.plain)

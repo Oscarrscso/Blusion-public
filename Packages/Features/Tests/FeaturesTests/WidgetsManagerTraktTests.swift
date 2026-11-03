@@ -66,7 +66,7 @@ import StremioKitTestSupport
         let widget = WidgetsManagerViewModel.makeTraktBanner(source)
         #expect(widget.title == "Best Of" && !widget.hideTitle)
         let vm = try await model(clientID: "key", transport: StubTransport(data: Data()))
-        #expect(vm.summary(of: widget) == "Banner · Trakt list · Best Of by u")
+        #expect(vm.summary(of: widget) == "Carousel · Trakt list · Best Of by u")
         guard case .banner(let row) = widget.content else {
             Issue.record("a banner should be a banner")
             return

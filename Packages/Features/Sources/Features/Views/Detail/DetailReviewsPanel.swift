@@ -95,7 +95,7 @@ struct DetailReviewsPanel: View {
                 }
                 Spacer(minLength: 0)
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.buttons)
                     onClose()
                 } label: {
                     Image(systemName: "xmark")

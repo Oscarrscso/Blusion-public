@@ -681,10 +681,11 @@ public final class PosterRatingsStore {
         guard let entry = entries[lookup.item.identity] else { return }
         switch lookup.provider {
         case .letterboxd:
-            if let rating = cached.rating { entry.letterboxd = rating }
+            // Each write redraws the posters that show this title, even one that sets the same value, so only changes are written.
+            if let rating = cached.rating, entry.letterboxd != rating { entry.letterboxd = rating }
         case .tmdb:
-            if let rating = cached.reviews?.tmdb { entry.tmdb = rating }
-            if let url = cached.reviews?.tmdbURL { entry.tmdbURL = url }
+            if let rating = cached.reviews?.tmdb, entry.tmdb != rating { entry.tmdb = rating }
+            if let url = cached.reviews?.tmdbURL, entry.tmdbURL != url { entry.tmdbURL = url }
             // The answer names the title's TMDb id, also when it was read from the cache: its page then asks only for its artwork.
             if let tmdb, let reviews = cached.reviews {
                 let item = lookup.item
@@ -692,8 +693,8 @@ public final class PosterRatingsStore {
             }
         case .omdb:
             // Only scores OMDb gave are set: a title it has none for keeps whatever the other providers said.
-            if let score = cached.reviews?.rottenTomatoes { entry.rottenTomatoes = score }
-            if let score = cached.reviews?.metacritic { entry.metacritic = score }
+            if let score = cached.reviews?.rottenTomatoes, entry.rottenTomatoes != score { entry.rottenTomatoes = score }
+            if let score = cached.reviews?.metacritic, entry.metacritic != score { entry.metacritic = score }
         }
     }
 

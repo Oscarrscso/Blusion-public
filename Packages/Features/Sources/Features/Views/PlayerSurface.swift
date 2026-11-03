@@ -221,6 +221,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     let pip: PiPProxy
     var layout = VideoLayout()
     var upscaling = UpscalingMode.off
+    var hdrBrightness = 0.0
     var embeddedSubtitlesOn = false
     var ambientMode = false
     var superResolution: SuperResolutionRenderer?
@@ -233,6 +234,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.engine.map { ObjectIdentifier($0) } == rhs.engine.map { ObjectIdentifier($0) }
             && lhs.pip === rhs.pip && lhs.layout == rhs.layout && lhs.upscaling == rhs.upscaling
+            && lhs.hdrBrightness == rhs.hdrBrightness
             && lhs.embeddedSubtitlesOn == rhs.embeddedSubtitlesOn && lhs.ambientMode == rhs.ambientMode
             && lhs.superResolution === rhs.superResolution && lhs.sampler === rhs.sampler
     }
@@ -260,9 +262,11 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             }
             view.watch(avEngine.player)
             view.layout = layout
+            HDRBrightnessOverride.apply(hdrBrightness, to: view.playerLayer)
             if let superResolution {
                 view.host(superResolution: superResolution.displayLayer)
                 // The size is read from the layer as it is laid out, not here: the first update comes before the view has a size.
+                HDRBrightnessOverride.apply(hdrBrightness, to: superResolution.displayLayer)
                 superResolution.update(source: avEngine, wanted: upscaling == .ai, displayScale: Self.displayScale(of: view),
                                        gravity: view.videoGravity, embeddedSubtitlesOn: embeddedSubtitlesOn)
             }
@@ -279,6 +283,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
                 let host = engine as? any PictureOverlayHosting
                 let wanted = upscaling == .ai
                 host?.hostPictureOverlay(wanted ? superResolution.displayLayer : nil)
+                HDRBrightnessOverride.apply(hdrBrightness, to: superResolution.displayLayer)
                 superResolution.update(source: engine as? any AVPlayerFrameSource, wanted: wanted, displayScale: Self.displayScale(of: view),
                                        gravity: host?.pictureGravity ?? .resizeAspect, embeddedSubtitlesOn: false)
             }
@@ -289,6 +294,23 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             view.embed(nil)
             superResolution?.update(source: nil, wanted: false, displayScale: 1, gravity: .resizeAspect, embeddedSubtitlesOn: false)
             sampler?.update(source: nil, ambient: false)
+        }
+    }
+}
+
+/// HDR brightness on a picture layer we draw (AVPlayer's, and the super resolution layer). Core Animation has no level between its ranges,
+/// so any brightness above 0 asks for `high`, the display's whole HDR range; 0 puts back what the layer had.
+@MainActor
+enum HDRBrightnessOverride {
+    private static let originals = NSMapTable<CALayer, NSString>.weakToStrongObjects()
+
+    static func apply(_ level: Double, to layer: CALayer) {
+        if level > 0 {
+            if originals.object(forKey: layer) == nil { originals.setObject(layer.preferredDynamicRange.rawValue as NSString, forKey: layer) }
+            if layer.preferredDynamicRange != .high { layer.preferredDynamicRange = .high }
+        } else if let original = originals.object(forKey: layer) {
+            layer.preferredDynamicRange = CALayer.DynamicRange(rawValue: original as String)
+            originals.removeObject(forKey: layer)
         }
     }
 }

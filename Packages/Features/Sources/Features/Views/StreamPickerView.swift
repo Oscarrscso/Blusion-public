@@ -90,7 +90,7 @@ struct StreamPickerView: View {
     private let preferredAutomaticPlayer: ExternalPlayer?
     /// Recovery shows the choices without immediately retrying the stream that just failed.
     private let allowsAutomaticStart: Bool
-    /// Auto Pick is still choosing or preparing. Once it has a player to prepare, the list can reveal that card's real progress.
+    /// Auto Pick is still choosing or preparing; keep the selector hidden throughout.
     @State private var awaitsAutomaticStart = false
     @Environment(\.openURL) private var openURL
     @Environment(AppRouter.self) private var router
@@ -170,7 +170,7 @@ struct StreamPickerView: View {
         .navigationTitle(model.request.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(removing: .title)
-        .toolbarVisibility(isPhoneInLandscapeOnPhone ? .hidden : .automatic, for: .navigationBar)
+        .pageNavigationBar(hidden: isPhoneInLandscapeOnPhone)
         .accessibilityIdentifier("streams.list")
     }
 
@@ -284,7 +284,7 @@ struct StreamPickerView: View {
     /// already has the poster and the title.
     private var content: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            if isRevealed {
+            if isRevealed && model.hasLoaded && !model.autoPlaysBestStream {
                 // The text and Auto Pick sit one step apart, as the title's text and its Play button do, not a stack gap apart.
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     // A film's embedded header is empty until the streams load, so it takes no step above Auto Pick.
@@ -335,7 +335,7 @@ struct StreamPickerView: View {
                 // A picker that is never shown is done once it has started a stream: shown again after the player closes, it does not load.
                 if !model.hasLoaded, !isHeadless || !hasSelectedManually {
                     let settings = await services.settings.load()
-                    let startsAutomatically = allowsAutomaticStart && (settings.autoPlayBestStream || forcesAutomaticStart)
+                    let startsAutomatically = settings.autoPlayBestStream || (allowsAutomaticStart && forcesAutomaticStart)
                     model.startsAutomaticallyAnyway = forcesAutomaticStart
                     if startsAutomatically, !hasSelectedManually { awaitsAutomaticStart = true }
                     if startsAutomatically { await model.loadForAutomaticSelection() } else { await model.load() }
@@ -364,7 +364,7 @@ struct StreamPickerView: View {
                     finishAutomaticStart(started: false)
                 }
             }
-            .onChange(of: isReady && (!awaitsAutomaticStart || preparingItemID != nil), initial: true) { _, ready in
+            .onChange(of: isReady && !awaitsAutomaticStart && !model.autoPlaysBestStream, initial: true) { _, ready in
                 guard ready else { return }
                 onReady?(!model.addonSections.isEmpty)
             }
@@ -579,7 +579,7 @@ struct StreamPickerView: View {
         let side = (autoPickButtonHeight > 0 ? autoPickButtonHeight : Self.lastAutoPickHeight ?? 34) * 0.68
         return Button {
             guard let request else { return }
-            Haptics.tap()
+            Haptics.play(.buttons)
             step(request)
         } label: {
             Image(systemName: systemImage)
@@ -685,7 +685,7 @@ struct StreamPickerView: View {
         if isEmbedded, let onClose {
             let side = autoPickButtonHeight > 0 ? autoPickButtonHeight : 34
             Button {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 onClose()
             } label: {
                 Image(systemName: "xmark")
@@ -1072,7 +1072,7 @@ struct StreamPickerView: View {
     private func contextActions(for item: RankedStream) -> some View {
         if DownloadEligibility.container(for: item, config: model.listing.config) != nil, services.downloads != nil {
             Button("Download", systemImage: "arrow.down.circle") {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 Task { await services.downloads?.enqueue(item, request: model.request) }
             }.accessibilityIdentifier("stream.nativeDownload")
         }
@@ -1246,8 +1246,7 @@ struct StreamPickerView: View {
         }
     }
 
-    /// The automatic start made when the streams open is over. Started, the list is never shown; with nothing started, it shows once
-    /// every addon has answered, as it does with Auto Pick off.
+    /// Finish the automatic attempt. The saved Auto Pick preference keeps the selector hidden even if playback fails.
     private func finishAutomaticStart(started: Bool) {
         if !started { awaitsAutomaticStart = false }
         onAutomaticStart?(started)

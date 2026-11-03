@@ -24,7 +24,7 @@ public struct DataResetService: Sendable {
             case .downloads: return "Removes downloaded videos and subtitles."
             case .history: return "Removes your watch progress and watched marks. Continue will be empty."
             case .library: return "Removes every saved title from your library."
-            case .settings: return "Resets playback and ratings preferences, account credentials and the streaming server."
+            case .settings: return "Resets playback, appearance and ratings preferences, account credentials and the streaming server."
             case .widgets: return "Puts Home back to the automatic layout. Your widgets are removed."
             case .addons: return "Removes every installed addon and its saved link. You'll need to add them again."
             case .everything: return "Removes watch history, saved titles, downloads, settings, your Home layout and all addons."
@@ -50,6 +50,8 @@ public struct DataResetService: Sendable {
             await services.library.clear()
         case .settings:
             await services.settings.save(PlaybackSettings())
+            // Appearance follows at once: every screen reads it with `@AppStorage`.
+            AppearancePreferences.reset()
             await services.downloads?.preferencesChanged()
             await services.traktAccount.clearCredentials()
             await services.traktSync.signedOut()

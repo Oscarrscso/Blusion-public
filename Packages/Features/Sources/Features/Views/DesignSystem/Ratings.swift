@@ -293,7 +293,7 @@ struct RatingButton: View {
             .pointerInteraction(cornerRadius: 999)
         }
         .buttonStyle(.plain)
-        .titleTapHaptic()
+        .titleTapHaptic(.buttons)
         .help(isSearch ? "Search \(site.name) for \(title) below" : "Show \(title) on \(site.name) below")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(score.map { "\(site.name) \($0)" } ?? site.name)

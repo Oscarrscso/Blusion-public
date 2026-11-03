@@ -351,10 +351,10 @@ struct PlayerContent: View {
         }
         // Both timeline handlers and picture swipes share this state: one tick per scrub, never per seek update.
         .onChange(of: model.isScrubbing) { _, scrubbing in
-            if scrubbing { Haptics.tap() }
+            if scrubbing { Haptics.play(.playerControls) }
         }
         .onChange(of: model.heldSpeed) { old, new in
-            if let old, let new, old.rate != new.rate { Haptics.selection() }
+            if let old, let new, old.rate != new.rate { Haptics.play(.playerOptions) }
             if old != nil, new == nil { endPictureHold() }
         }
         .onAppear {
@@ -600,7 +600,7 @@ struct PlayerContent: View {
             HStack {
                 Spacer()
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.playerControls)
                     if model.skipEndsMedia(marker) && model.hasNextEpisode {
                         playNextEpisode()
                     } else {
@@ -648,6 +648,7 @@ struct PlayerContent: View {
     private var configuredSurface: PlayerSurface {
         let engine = model.coordinator?.engine
         var picture = PlayerSurface(engine: engine, pip: pip, layout: model.videoLayout, upscaling: model.processing.upscaling,
+                      hdrBrightness: model.processing.hdrBrightness,
                       embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
                       ambientMode: model.preferences.ambientMode, superResolution: superResolution, sampler: picture,
                       onFirstVideoFrame: {
@@ -695,12 +696,13 @@ struct PlayerContent: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { location in
                     guard acceptsPictureTap else { return }
-                    Haptics.tap()
+                    Haptics.play(.playerControls)
+                    // Settings → Player can turn the skips off: the whole picture then plays and pauses, as its middle does.
                     let third = proxy.size.width / 3
-                    if location.x < third {
-                        Task { await model.skip(by: -10) }
-                    } else if location.x > 2 * third {
-                        Task { await model.skip(by: 10) }
+                    if model.preferences.doubleTapSkips && location.x < third {
+                        Task { await model.skipBack() }
+                    } else if model.preferences.doubleTapSkips && location.x > 2 * third {
+                        Task { await model.skipForward() }
                     } else {
                         model.togglePlayPause()
                     }
@@ -739,7 +741,7 @@ struct PlayerContent: View {
                         } else if value.magnification < 0.92 {
                             model.pinchZoom(in: false)
                         }
-                        if model.zoomMode != previousZoom { Haptics.selection() }
+                        if model.zoomMode != previousZoom { Haptics.play(.playerOptions) }
                     })
         }
         .ignoresSafeArea()
@@ -758,7 +760,7 @@ struct PlayerContent: View {
         holdTrack.holdBegan = true
         holdTrack.baselineY = point.y
         // Confirms the hold has taken. A hold the film cannot take stays silent.
-        Haptics.tap()
+        Haptics.play(.playerControls)
     }
 
     /// The held finger moved: its height from where the hold began steps the speed (`SpeedHoldRules`). Nothing else reads the movement.
@@ -897,7 +899,7 @@ struct PlayerContent: View {
         let third = size.width / 3
         let inMiddle = value.startLocation.x >= third && value.startLocation.x <= 2 * third
         if wasSwiping, !wasLevel, value.translation.height > 140, inMiddle || !model.preferences.swipeGestures {
-            Haptics.tap()
+            Haptics.play(.playerControls)
             close()
         }
     }
@@ -1068,7 +1070,7 @@ struct PlayerContent: View {
             HStack(spacing: 10) {
                 Spacer()
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.playerControls)
                     watchesCredits = true
                     stopCountdown()
                 } label: {
@@ -1081,7 +1083,7 @@ struct PlayerContent: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("player.upNext.credits")
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.playerControls)
                     playNextEpisode()
                 } label: {
                     Label("Next Episode", systemImage: "play.fill")
@@ -1159,8 +1161,13 @@ private struct PlayerChrome: ViewModifier {
                     toggle: { model.togglePlayPause() },
                     skip: { seconds in Task { await model.skip(by: seconds) } },
                     seek: { position in Task { await model.coordinator?.seek(to: position) } }))
+                nowPlaying?.setSkipIntervals(backward: model.skipBackSeconds, forward: model.skipForwardSeconds)
             }
             .onChange(of: model.state) { _, state in nowPlaying?.update(state) }
+            // The settings load after the screen appears: the lock screen takes the player's skip amounts when they arrive.
+            .onChange(of: model.skipBackSeconds + 1000 * model.skipForwardSeconds) { _, _ in
+                nowPlaying?.setSkipIntervals(backward: model.skipBackSeconds, forward: model.skipForwardSeconds)
+            }
             .onDisappear {
                 // Backgrounding can report the surface as gone without a dismissal: lock-screen controls stay then, as playback does.
                 if LivePlaybackSession.closesOnDisappear(scenePhase: scenePhase) {
@@ -1187,9 +1194,9 @@ private struct PlayerKeyboard: View {
                 .keyboardShortcut(.escape, modifiers: [])
             Button("Play or pause") { model.togglePlayPause() }
                 .keyboardShortcut(" ", modifiers: [])
-            Button("Back 10 seconds") { Task { await model.skip(by: -10) } }
+            Button("Back \(Int(model.skipBackSeconds)) seconds") { Task { await model.skipBack() } }
                 .keyboardShortcut(.leftArrow, modifiers: [])
-            Button("Forward 10 seconds") { Task { await model.skip(by: 10) } }
+            Button("Forward \(Int(model.skipForwardSeconds)) seconds") { Task { await model.skipForward() } }
                 .keyboardShortcut(.rightArrow, modifiers: [])
             Button("Subtitles") { Task { await model.cycleSubtitles() } }
                 .keyboardShortcut("c", modifiers: [])

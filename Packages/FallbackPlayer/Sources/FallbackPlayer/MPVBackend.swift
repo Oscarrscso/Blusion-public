@@ -349,6 +349,7 @@ public final class MPVBackend: FallbackBackend {
     private var appliedScale: CGSize?
     private var appliedSubMarginY: Int?
     private var appliedFilter: String?
+    private var appliedGammaLift = 0
     /// The playing video's Dolby Vision profile, read at each reconfig; nil when it has none.
     private var dolbyVisionProfile: Int?
     private var downloads: [Task<Void, Never>] = []
@@ -358,7 +359,7 @@ public final class MPVBackend: FallbackBackend {
 
     public var capabilities: EngineCapabilities {
         var capabilities: EngineCapabilities = [.engineSubtitles, .subtitleDelay, .audioDelay, .externalAudio, .aspectOverride, .deinterlace,
-                                                .toneMapping, .subtitleStyling, .videoLayout, .upscaling]
+                                                .toneMapping, .subtitleStyling, .videoLayout, .upscaling, .gradualHDRBrightness]
         // Profile 5 has no HDR10 picture under its Dolby Vision, so there is nothing to switch to.
         if let profile = dolbyVisionProfile, profile != 5 { capabilities.insert(.dolbyVisionSwitch) }
         return capabilities
@@ -557,6 +558,12 @@ public final class MPVBackend: FallbackBackend {
         let read = MPVProperties(handle: handle)
         if let profile = read.int("current-tracks/video/dolby-vision-profile"), profile > 0 { dolbyVisionProfile = profile } else { dolbyVisionProfile = nil }
         applyGeometry()
+        // HDR brightness also lifts an HDR source's mid-tones (mpv's gamma, up to +30 of its −100…100), which is most of what reads as
+        // "brighter" on a phone. SDR sources are left alone.
+        let sourceGamma = read.string("video-params/gamma")
+        let isHDRSource = sourceGamma == "pq" || sourceGamma == "hlg"
+        let lift = isHDRSource && processing.hdrOutput == .auto ? Int((processing.hdrBrightness * 30).rounded()) : 0
+        if lift != appliedGammaLift, set("gamma", String(lift)) { appliedGammaLift = lift }
         // Off strips the Dolby Vision metadata, so libplacebo shows the HDR10 base layer; never for profile 5, which has none.
         let filter = !processing.dolbyVision && dolbyVisionProfile != nil && dolbyVisionProfile != 5 ? "format=dolbyvision=no" : ""
         if filter != (appliedFilter ?? ""), set("vf", filter) { appliedFilter = filter }
@@ -574,6 +581,12 @@ public final class MPVBackend: FallbackBackend {
         let hdr = processing.hdrOutput == .auto
         set("target-colorspace-hint", hdr ? "yes" : "no")
         host.metalLayer.wantsExtendedDynamicRangeContent = hdr
+        // Above 0, HDR brightness asks for the display's whole HDR range; at 0 the layer keeps what it had.
+        if hdr, processing.hdrBrightness > 0 {
+            host.metalLayer.preferredDynamicRange = .high
+        } else if host.metalLayer.preferredDynamicRange == .high {
+            host.metalLayer.preferredDynamicRange = hdr ? .automatic : .standard
+        }
         // mpv's own renderer has no machine-learning scaler in this build, so "AI" uses its sharpest conventional one; the statistics say so.
         switch processing.upscaling {
         case .off:

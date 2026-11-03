@@ -20,6 +20,12 @@ struct AddonsView: View {
     var body: some View {
         @Bindable var model = model
         List {
+            #if targetEnvironment(macCatalyst)
+            if !model.addons.isEmpty {
+                HStack { Spacer(); EditButton() }
+                    .listRowBackground(Color.clear)
+            }
+            #endif
             installSection(model: $model.installText)
             if model.addons.isEmpty {
                 emptySection
@@ -33,10 +39,13 @@ struct AddonsView: View {
         .readableColumn()
         .screenBackground()
         .navigationTitle("Addons")
+        .macBackNavigation()
         .navigationBarTitleDisplayMode(.inline)
+        #if !targetEnvironment(macCatalyst)
         .toolbar {
             if !model.addons.isEmpty { ToolbarItem(placement: .primaryAction) { EditButton() } }
         }
+        #endif
         .navigationDestination(for: UUID.self) { id in
             if let addon = model.addons.first(where: { $0.id == id }) {
                 AddonDetailView(model: model, addon: addon)
@@ -149,7 +158,7 @@ struct AddonsView: View {
                         }
                     }
                     Toggle("Enabled", isOn: Binding(get: { addon.isEnabled }, set: { value in
-                        Haptics.selection()
+                        Haptics.play(.choices)
                         Task { await model.setEnabled(value, id: addon.id) }
                     }))
                         .labelsHidden()
@@ -163,7 +172,7 @@ struct AddonsView: View {
                 .contextMenu {
                     Button {
                         UIPasteboard.general.string = addon.manifestURL.absoluteString
-                        Haptics.tap()
+                        Haptics.play(.buttons)
                     } label: { Label("Copy Link", systemImage: "doc.on.doc") }
                     .accessibilityIdentifier("addons.menu.copyLink.\(addon.name)")
                     Button {
@@ -236,6 +245,7 @@ struct AddonDetailView: View {
         .readableColumn()
         .screenBackground()
         .navigationTitle(details.name)
+        .macBackNavigation()
         .navigationBarTitleDisplayMode(.inline)
     }
 }

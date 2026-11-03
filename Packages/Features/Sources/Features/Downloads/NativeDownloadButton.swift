@@ -53,7 +53,7 @@ struct NativeDownloadButton: View {
     var body: some View {
         let button = Button {
             guard let manager, isAvailable, !isLoading else { return }
-            Haptics.tap()
+            Haptics.play(.buttons)
             if let item {
                 switch item.state {
                 case .queued, .downloading: Task { await manager.pause(item.id) }
@@ -81,7 +81,7 @@ struct NativeDownloadButton: View {
         .frame(width: size, height: size)
         .highPriorityGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
             // The same tap as the button itself: a long press opens the Downloads screen, it does not do anything heavier.
-            Haptics.tap()
+            Haptics.play(.buttons)
             router?.opensDownloads = true
             router?.open(.library)
         })

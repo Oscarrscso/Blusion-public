@@ -41,7 +41,7 @@ enum Theme {
     /// Gap between cards in a row or a grid on a phone. Adaptive screens read `LayoutMetrics.cardSpacing`.
     static let cardSpacing: CGFloat = 12
 
-    /// The TV app's page: pure black, edge to edge.
+    /// The TV app's page: pure black, edge to edge. Appearance's Background can choose another (`AppearancePreferences.pageBackground`).
     static let background = Color.black
     /// A raised surface on the black page (grouped panels, placeholders): the system's dark secondary grouped grey.
     static let surface = Color.white.opacity(0.11)
@@ -124,13 +124,18 @@ extension View {
 private struct MediaArtworkModifier: ViewModifier {
     let cornerRadius: CGFloat
     @Environment(\.pixelLength) private var pixelLength
+    /// Appearance's corners scale every artwork's radius alike.
+    @Environment(\.layoutMetrics) private var metrics
+    /// Appearance's Artwork outline turns the hairline off.
+    @Environment(\.appAppearance) private var appearance
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius * metrics.cornerScale, style: .continuous)
         content
             .clipShape(shape)
             .overlay {
                 shape.strokeBorder(Theme.artworkBorder, lineWidth: pixelLength)
+                    .opacity(appearance.artworkOutline ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -139,20 +144,23 @@ private struct MediaArtworkModifier: ViewModifier {
 
 private struct ScreenBackgroundModifier: ViewModifier {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(\.appAppearance) private var appearance
 
     /// On iPhone every page's top edge gets the system's soft scroll-edge blur, and hero pages (Home's spotlight, Detail) hide it so it never
-    /// shows over their artwork at rest. Mac has no soft edge: over black it reads as a black band, so its top bar is a material blur instead.
+    /// shows over their artwork at rest. Mac keeps the top edge clear so no fixed band follows the scrolling page.
     @ViewBuilder
     func body(content: Content) -> some View {
         // Keep the same view hierarchy through rotation so scrolling and artwork tasks survive.
-        content.background { Theme.background.ignoresSafeArea() }
+        content.background { appearance.pageBackground.ignoresSafeArea() }
+            .scrollBounceBehavior(.always, axes: .vertical)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
             .scrollEdgeEffectHidden(isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone, for: .bottom)
             .pageTopBar(hidden: isPhoneLandscape)
+            .macPageScroll()
     }
 
-    /// Mac builds take the top bar's material blur (see `pageTopBar`), with no soft edge.
+    /// Mac builds keep the top bar clear (see `pageTopBar`), with no soft edge.
     private static var isMacCatalyst: Bool {
         #if targetEnvironment(macCatalyst)
         return true
@@ -169,9 +177,8 @@ extension View {
         modifier(BrowsePageTopMarginModifier())
     }
 
-    /// A page's navigation bar. On iPhone it is hidden when `hidden` (the page runs under it), and the system's own otherwise. On Mac it is
-    /// always visible, with the system's regular material, so the page beneath blurs and the bar never reads as a black band. `hidden` does
-    /// not apply on Mac.
+    /// A page's navigation background. Mac keeps it transparent while retaining native Back, Search and toolbar controls.
+    /// iPhone hides the background when `hidden`, and uses the system's normal background otherwise.
     func pageTopBar(hidden: Bool) -> some View {
         modifier(PageTopBarModifier(hidden: hidden))
     }
@@ -181,10 +188,15 @@ private struct BrowsePageTopMarginModifier: ViewModifier {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
     func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        // The shared Mac scroll modifier reserves the navigation space for every page.
+        content
+        #else
         let usesLandscapeEdge = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
         content
             .ignoresSafeArea(.container, edges: usesLandscapeEdge ? .top : [])
             .contentMargins(.top, Theme.Spacing.l, for: .scrollContent)
+        #endif
     }
 }
 
@@ -194,29 +206,32 @@ private struct PageTopBarModifier: ViewModifier {
     func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
         content
-            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
-            .toolbarBackground(.regularMaterial, for: .navigationBar)
+            .toolbarBackground(.clear, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #else
         content.toolbarBackgroundVisibility(hidden ? .hidden : .automatic, for: .navigationBar)
         #endif
     }
 }
 
-/// A fade from clear to black, eased so there is no visible edge where it starts. Hero artwork and the backdrops of title pages
-/// end in one. `length` is the share of the height the fade covers, measured from the bottom.
+/// A fade from clear to the page's background (black unless Appearance chose another), eased so there is no visible edge where it
+/// starts. Hero artwork and the backdrops of title pages end in one. `length` is the share of the height the fade covers, measured from
+/// the bottom.
 struct BottomFade: View {
     var length: Double = 0.55
     var strength: Double = 1
+    @Environment(\.appAppearance) private var appearance
 
     var body: some View {
         let start = max(0, 1 - length)
+        let colour = appearance.pageBackground
         LinearGradient(stops: [
-            .init(color: .black.opacity(0), location: start),
-            .init(color: .black.opacity(0.10 * strength), location: start + (1 - start) * 0.18),
-            .init(color: .black.opacity(0.32 * strength), location: start + (1 - start) * 0.40),
-            .init(color: .black.opacity(0.62 * strength), location: start + (1 - start) * 0.65),
-            .init(color: .black.opacity(0.88 * strength), location: start + (1 - start) * 0.85),
-            .init(color: .black.opacity(strength), location: 1),
+            .init(color: colour.opacity(0), location: start),
+            .init(color: colour.opacity(0.10 * strength), location: start + (1 - start) * 0.18),
+            .init(color: colour.opacity(0.32 * strength), location: start + (1 - start) * 0.40),
+            .init(color: colour.opacity(0.62 * strength), location: start + (1 - start) * 0.65),
+            .init(color: colour.opacity(0.88 * strength), location: start + (1 - start) * 0.85),
+            .init(color: colour.opacity(strength), location: 1),
         ], startPoint: .top, endPoint: .bottom)
         .allowsHitTesting(false)
         .accessibilityHidden(true)

@@ -268,7 +268,7 @@ private struct SentenceCard: View {
             .buttonStyle(.plain)
             if token.isRemovable {
                 Button {
-                    Haptics.tap()
+                    Haptics.play(.buttons)
                     model.remove(token)
                 } label: {
                     Image(systemName: "xmark")
@@ -412,7 +412,7 @@ private struct PillButton: View {
     var body: some View {
         let isOpen = model.selectedField == pill.field
         Button {
-            Haptics.tap()
+            Haptics.play(.buttons)
             model.select(pill.field)
         } label: {
             HStack(spacing: Theme.Spacing.s) {

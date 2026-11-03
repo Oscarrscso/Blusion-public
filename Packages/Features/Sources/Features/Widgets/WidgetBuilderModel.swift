@@ -345,7 +345,8 @@ public final class WidgetBuilderModel {
             Pill(field: .limit, title: "Items", value: "\(row.limit)", systemImage: "number", isEnabled: true),
             Pill(field: .style, title: "Style", value: style.rawValue, systemImage: "rectangle.3.group", isEnabled: true),
             Pill(field: .cards, title: "Cards", value: cards, systemImage: "rectangle.portrait", isEnabled: true),
-            Pill(field: .posters, title: "Posters", value: row.presentation.usesBetterPosters ? "Better Posters" : "Standard",
+            Pill(field: .posters, title: "Posters", value: row.presentation.usesHeroPosters == true ? "Hero artwork"
+                 : row.presentation.usesBetterPosters ? "Better Posters" : row.presentation.usesHeroPosters == false ? "Standard" : "Default",
                  systemImage: "photo.artframe", isEnabled: true),
             Pill(field: .shuffle, title: "Shuffle", value: Self.shuffleText(row.shuffle), systemImage: "shuffle", isEnabled: true),
             Pill(field: .randomSource, title: "Random Source", value: Self.randomSourceText(row.randomSource), systemImage: "dice",

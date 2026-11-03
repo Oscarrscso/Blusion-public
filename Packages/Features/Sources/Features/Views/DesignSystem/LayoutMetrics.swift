@@ -41,6 +41,12 @@ struct LayoutMetrics: Equatable, Sendable {
     var heroHeightFraction: CGFloat
     /// The tallest the featured carousel is allowed to be (a tall window should not make it a tower).
     var heroMaxHeight: CGFloat
+    /// Appearance's card size: scales the widths that are not stored above (landscape posters, Continue cards, wide grids' columns).
+    var cardScale: CGFloat = 1
+    /// Appearance's corners, as a share of each artwork's own radius (see `mediaArtwork(cornerRadius:)`).
+    var cornerScale: CGFloat = 1
+    /// Poster columns of a grid on a phone held upright (Appearance's Columns).
+    var phonePosterColumns: Int = 3
 
     static let compact = LayoutMetrics(
         isRegular: false, pageMargin: Theme.Spacing.l, shelfSpacing: 28, headerSpacing: 10, cardSpacing: 12,
@@ -54,7 +60,26 @@ struct LayoutMetrics: Equatable, Sendable {
         readableWidth: 640, heroHeightFraction: 0.58, heroMaxHeight: 620
     )
 
-    var continueCardWidth: CGFloat { isRegular ? 256 : 210 }
+    var continueCardWidth: CGFloat { ((isRegular ? 256 : 210) * cardScale).rounded() }
+
+    /// These metrics as Settings → Appearance asks: cards scaled by the card size, gaps by the spacing, artwork corners by the corners,
+    /// and the phone's poster grid at the chosen number of columns. The defaults change nothing.
+    func customised(by appearance: AppearancePreferences) -> LayoutMetrics {
+        var metrics = self
+        let size = CGFloat(appearance.cardScale.factor)
+        let gaps = CGFloat(appearance.density.factor)
+        metrics.cardScale = size
+        metrics.posterWidth = (posterWidth * size).rounded()
+        metrics.wideCardWidth = (wideCardWidth * size).rounded()
+        metrics.squareWidth = (squareWidth * size).rounded()
+        metrics.tileWidth = (tileWidth * size).rounded()
+        metrics.shelfSpacing = (shelfSpacing * gaps).rounded()
+        metrics.headerSpacing = (headerSpacing * gaps).rounded()
+        metrics.cardSpacing = max(2, (cardSpacing * gaps).rounded())
+        metrics.cornerScale = CGFloat(appearance.corners.factor)
+        metrics.phonePosterColumns = appearance.phoneGridColumns
+        return metrics
+    }
 
     /// The horizontal inset of a title page's content: the page margin, but never less than `Theme.Spacing.l`. Home uses it too, so its
     /// headings, selector and shelves line up with the title page.
@@ -71,30 +96,33 @@ struct LayoutMetrics: Equatable, Sendable {
     var titleRatingsGap: CGFloat { (Theme.Spacing.xl + Theme.Spacing.l + Theme.Spacing.s) / 2 }
 
     /// Other landscape rows keep their own base, so a larger Continue card does not resize them.
-    var landscapePosterWidth: CGFloat { (isRegular ? 180 : 148) * 1.2 }
+    var landscapePosterWidth: CGFloat { (isRegular ? 180 : 148) * 1.2 * cardScale }
 
     func heroHeight(forContainerHeight height: CGFloat) -> CGFloat {
         min(max(height * heroHeightFraction, 380), heroMaxHeight)
     }
 
-    /// The columns of a poster grid: three on a phone, as many as fit on a wide screen.
+    /// The columns of a poster grid: three on a phone (or Appearance's Columns), as many as fit on a wide screen, at the card size.
     var posterGridColumns: [GridItem] {
         isRegular
-            ? [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: cardSpacing, alignment: .top)]
-            : Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top), count: 3)
+            ? [GridItem(.adaptive(minimum: (140 * cardScale).rounded(), maximum: (200 * cardScale).rounded()), spacing: cardSpacing,
+                        alignment: .top)]
+            : Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top), count: max(1, phonePosterColumns))
     }
 
     /// The columns of a grid of 16:9 cards or category tiles: two on a phone, as many as fit on a wide screen.
     var wideGridColumns: [GridItem] {
         isRegular
-            ? [GridItem(.adaptive(minimum: 240, maximum: 340), spacing: cardSpacing, alignment: .top)]
+            ? [GridItem(.adaptive(minimum: (240 * cardScale).rounded(), maximum: (340 * cardScale).rounded()), spacing: cardSpacing,
+                        alignment: .top)]
             : Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top), count: 2)
     }
 
     /// The columns of a grid of square cards.
     var squareGridColumns: [GridItem] {
         isRegular
-            ? [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: cardSpacing, alignment: .top)]
+            ? [GridItem(.adaptive(minimum: (150 * cardScale).rounded(), maximum: (220 * cardScale).rounded()), spacing: cardSpacing,
+                        alignment: .top)]
             : Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top), count: 3)
     }
 
@@ -149,6 +177,8 @@ extension View {
 }
 
 extension EnvironmentValues {
+    /// Nil follows Appearance; a widget can explicitly turn hero posters on or off.
+    @Entry var heroPosterOverride: Bool? = nil
     @Entry var isLandscape = false
     /// True only for a phone turned sideways. A Mac window is never a phone, so its bar and spotlight keep the portrait rules there.
     @Entry var isPhoneLandscape = false
@@ -156,7 +186,8 @@ extension EnvironmentValues {
     @Entry var heroContainerHeight: CGFloat = 800
     /// Home supplies its width too, so the portrait spotlight is the same height as the title page's picture.
     @Entry var heroContainerWidth: CGFloat = 390
-    @Entry var isHomeScrolling = false
+    /// Whether Home is scrolling, as an object: only the views that read `isScrolling` redraw when a scroll starts or stops, not all of Home.
+    @Entry var homeScroll: HomeScrollState? = nil
     /// An offscreen Home section must not activate cards inside its horizontal scroll view.
     @Entry var loadsVisibleArtwork = true
     /// The safe-area insets of the window this view is in, as its root measured them. A screen that runs under the bars or the notch reads
@@ -166,10 +197,17 @@ extension EnvironmentValues {
     @Entry var layoutMetricsOverride: LayoutMetrics?
 
     /// The metrics of the current layout: compact in a compact-width window (an iPhone, a narrow split view), regular otherwise
-    /// (a Mac window, an iPad). Reading it makes the view depend on the size class, so it follows window resizes.
+    /// (a Mac window, an iPad), customised by Settings → Appearance. Reading it makes the view depend on the size class and on
+    /// Appearance, so it follows window resizes and a change of card size, spacing, corners or columns. A forced set is taken as given:
+    /// screens that adjust the metrics they read (Home's margin) pass on metrics that are already customised.
     var layoutMetrics: LayoutMetrics {
-        get { layoutMetricsOverride ?? (horizontalSizeClass == .compact ? .compact : .regular) }
+        get { layoutMetricsOverride ?? (horizontalSizeClass == .compact ? LayoutMetrics.compact : LayoutMetrics.regular).customised(by: appAppearance) }
         set { layoutMetricsOverride = newValue }
     }
+}
+/// Home's scroll phase. Kept out of Home's own state, so a scroll starting or stopping redraws only the spotlight that reads it.
+@MainActor @Observable
+final class HomeScrollState {
+    var isScrolling = false
 }
 #endif

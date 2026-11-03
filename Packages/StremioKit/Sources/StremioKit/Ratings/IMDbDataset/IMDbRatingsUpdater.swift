@@ -175,7 +175,7 @@ public actor IMDbRatingsUpdater {
             metadata["source"] = source.absoluteString
             metadata["etag"] = etag
             metadata["last_modified"] = lastModified
-            let job = Task.detached(priority: .utility) { () throws -> IMDbRatingsImporter.Summary in
+            let job = Task.detached(priority: .background) { () throws -> IMDbRatingsImporter.Summary in
                 let summary = try IMDbRatingsImporter.build(from: file, to: built, minimumRows: minimumRows, metadata: metadata)
                 // A copy a fifth smaller than the one in use is more likely a damaged file than a real change.
                 if let previousRows, summary.rows * 5 < previousRows * 4 {

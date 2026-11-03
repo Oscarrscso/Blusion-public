@@ -310,7 +310,7 @@ struct DetailReviews: View {
     /// as it opened: one animation for the state, the card's width and the text. While it moves, a light tick comes for each line of
     /// text that is revealed or put away.
     private func toggleReview(_ id: String) {
-        Haptics.tap()
+        Haptics.play(.buttons)
         tickLines(ofReview: id)
         let opening = expandedReviewID != id
         // Set in the same step as the open, so a layout pass that reads the card's new width already finds it settling.

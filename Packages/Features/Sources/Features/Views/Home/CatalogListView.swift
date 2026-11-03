@@ -20,19 +20,16 @@ struct CatalogListView: View {
     }
 
     var body: some View {
-        ScrollView {
-            content
-                .padding(.bottom, Theme.Spacing.l)
+        Group {
+            #if targetEnvironment(macCatalyst)
+            if model.items.isEmpty { scrollPage } else { macPage }
+            #else
+            scrollPage
+            #endif
         }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        // A phone in landscape has no navigation bar here, so the filters and grid use the full height behind the floating Back control.
-        .trackLandscapeTabScroll()
-        .screenBackground()
-        .browsePageTopMargin()
         .navigationTitle(isPhoneInLandscape ? "" : request.title)
-        .toolbarVisibility(isPhoneInLandscape ? .hidden : .automatic, for: .navigationBar)
-        .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+        .pageNavigationBar(hidden: isPhoneInLandscape)
+        .pageTabBar(hidden: isPhoneInLandscape)
         .onAppear { landscapeTabs?.showPageTitle(request.title) }
         .onDisappear {
             // A detail covers this destination without replacing it. Keep the title for the root navigation state to restore on return.
@@ -44,6 +41,59 @@ struct CatalogListView: View {
             hasStarted = true
             await model.load()
         }
+    }
+
+    private var scrollPage: some View {
+        ScrollView {
+            content
+                .padding(.bottom, Theme.Spacing.l)
+        }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
+        // A phone in landscape has no navigation bar here, so the filters and grid use the full height behind the floating Back control.
+        .trackLandscapeTabScroll()
+        .screenBackground()
+        .browsePageTopMargin()
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's page once titles have loaded: the filters, the grid and its status in one UIKit scroll (see `MacGridPage`).
+    private var macPage: some View {
+        var parts: [MacGridPage.Part] = [.full(id: "filters", view: AnyView(filters))]
+        if case .failed(let error) = model.state {
+            parts.append(.full(id: "error", view: AnyView(InlineErrorView(error.message, retry: retry)
+                .padding(.horizontal, Theme.screenPadding)
+                .padding(.bottom, Theme.Spacing.l))))
+        }
+        if model.visibleItems.isEmpty, model.state != .loadingMore {
+            parts.append(.full(id: "noMatches", view: AnyView(noMatches)))
+        } else {
+            let presentation = request.presentation
+            parts.append(.grid(MacTitleGrid(id: "grid", items: model.visibleItems, aspect: presentation.aspectRatio.cardAspect,
+                                            usesBetterPosters: presentation.usesBetterPosters,
+                                            onLastAppear: { Task { await model.loadMore() } }) { _, item in
+                AnyView(MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, showsRating: presentation.showsRatings,
+                                      usesBetterPosters: presentation.usesBetterPosters).stretched())
+            }))
+        }
+        if model.state == .loadingMore {
+            parts.append(.full(id: "spinner", view: AnyView(Spinner().frame(maxWidth: .infinity).padding(.vertical, Theme.Spacing.l))))
+        }
+        return MacGridPage(parts: parts)
+            .environment(\.heroPosterOverride, request.presentation.usesHeroPosters)
+            .accessibilityIdentifier("catalogList.grid")
+            .screenBackground()
+    }
+    #endif
+
+    private var noMatches: some View {
+        EmptyStateLayout(title: "No titles match", systemImage: "line.3.horizontal.decrease.circle",
+                         message: "Try removing a filter.") {
+            Button("Clear Filters") { model.filter.clearFilters() }
+                .buttonStyle(.primaryActionCompact)
+                .accessibilityIdentifier("catalogList.noMatches.clear")
+        }
+        .accessibilityIdentifier("catalogList.noMatches")
     }
 
     /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well. A phone in landscape has no navigation
@@ -63,17 +113,12 @@ struct CatalogListView: View {
                         .padding(.bottom, Theme.Spacing.l)
                 }
                 if model.visibleItems.isEmpty, model.state != .loadingMore {
-                    EmptyStateLayout(title: "No titles match", systemImage: "line.3.horizontal.decrease.circle",
-                                     message: "Try removing a filter.") {
-                        Button("Clear Filters") { model.filter.clearFilters() }
-                            .buttonStyle(.primaryActionCompact)
-                            .accessibilityIdentifier("catalogList.noMatches.clear")
-                    }
-                    .accessibilityIdentifier("catalogList.noMatches")
+                    noMatches
                 } else {
                     MediaGrid(items: model.visibleItems, aspect: request.presentation.aspectRatio.cardAspect,
                               showsRating: request.presentation.showsRatings, onLastAppear: { Task { await model.loadMore() } },
                               usesBetterPosters: request.presentation.usesBetterPosters)
+                        .environment(\.heroPosterOverride, request.presentation.usesHeroPosters)
                         .accessibilityIdentifier("catalogList.grid")
                 }
                 if model.state == .loadingMore {
@@ -160,7 +205,7 @@ struct CatalogListView: View {
             }
             .accessibilityIdentifier("catalogList.filter.rating")
         }
-        .onChange(of: model.filter) { _, _ in Haptics.selection() }
+        .onChange(of: model.filter) { _, _ in Haptics.play(.choices) }
         .task(id: model.filter) { await model.fillForFilter() }
         .accessibilityIdentifier("catalogList.filters")
     }

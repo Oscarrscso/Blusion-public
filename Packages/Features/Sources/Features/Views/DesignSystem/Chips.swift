@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// A filter chip: the system's Liquid Glass button as a capsule, and the selected one its prominent form in white with dark text
@@ -38,8 +39,8 @@ struct GlassChip: View {
         .pointerFeedback()
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("chip.\(title)")
-        // The app's own selection tick rather than SwiftUI's, so the Haptics page's switch reaches filter chips too.
-        .onChange(of: isSelected) { _, _ in Haptics.selection() }
+        // The app's Pickers & switches place rather than SwiftUI's feedback, so the Haptics page reaches filter chips too.
+        .onChange(of: isSelected) { _, _ in Haptics.play(.choices) }
     }
 
     private var button: some View {

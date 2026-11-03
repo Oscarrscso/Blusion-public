@@ -5,6 +5,8 @@ import StremioKit
 /// posters are the English ones and come in three sizes; TMDb's come in several. This only rewrites the URL: no request is made, and a URL
 /// it does not know is returned as it came.
 enum PosterQuality {
+    /// Hero-poster cards use this downsample; details keep it visible while loading the original-resolution image.
+    static let heroPosterPixelSize: CGFloat = 1200
     /// TMDb's poster sizes are w92, w154, w185, w342, w500, w780 and original. w154 was the old floor, too soft for a hero's stand-in on a 3x
     /// phone, so w342 is the floor now.
     static let tmdbSize = "w342"

@@ -112,7 +112,7 @@ struct AppDestinations: ViewModifier {
             .navigationDestination(for: TitleDestination.self) { destination in
                 let detail = IMDbTitlePage(preview: destination.preview, services: services) {
                     DetailView(preview: $0, services: services, artwork: destination.artwork, artworkChecked: destination.artworkChecked,
-                               handoff: destination.handoff, streams: destination.streams)
+                               handoff: destination.handoff, streams: destination.streams, heroPostersOverride: destination.usesHeroPosters)
                 }
                 .titlePage(on: path)
                 if destination.opensInstantly {
@@ -142,7 +142,7 @@ struct AppDestinations: ViewModifier {
     }
 }
 
-/// A title's page in a stack: no tab bar while it is on top (iPhone and iPad; the Mac has only its sidebar), and the bar starts coming
+/// A title's page in a stack: no tab bar while it is on top (iPhone and iPad; Mac uses the shared scrolling navigation), and the bar starts coming
 /// back the moment it is left, as the stack's path shrinks at the start of the way back rather than once it has finished. Its depth is
 /// noted with the router, so the Continue Watching bar goes and comes back with it (see `AppRouter.showsTitlePage`).
 private struct TitlePageBars: ViewModifier {
@@ -176,13 +176,13 @@ private struct TitlePageBars: ViewModifier {
     }
 }
 
-/// The corner Back replaces native navigation only on landscape iPhone browsing pages.
+/// Mac and landscape iPhone browsing pages use Back without a navigation bar.
 private struct BrowsingBackNavigation: ViewModifier {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
     func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
-        content
+        content.macBackNavigation()
         #else
         let usesCornerBack = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
         content

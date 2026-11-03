@@ -72,16 +72,19 @@ struct MediaCard: View {
     /// True while a held poster's streams load: a spinner over the artwork, as on an episode's card.
     /// True while the picture on show is the usual poster, which stands in for a BetterPosters picture that has not loaded (or did not).
     @State private var posterFellBack = false
-    @State private var isVisible = false
-    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
-    /// Mac: use a wordless backdrop already known when the card appears, without starting a second artwork lookup while browsing.
-    @State private var textlessBackdrop: URL?
+    @State private var hasShownArtwork = false
+    @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var usesHeroPosters = false
+    @Environment(\.heroPosterOverride) private var heroPosterOverride
+    @State private var heroArtwork: TMDbArtwork?
+    @State private var heroArtworkChecked = false
+    @State private var heroImageIsReady = false
     /// Optional, as the rating badges read it: a screen without the store keeps the addon's picture.
     @Environment(PosterRatingsStore.self) private var ratingsStore: PosterRatingsStore?
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.displayScale) private var displayScale
     @Environment(\.isLandscape) private var isLandscape
+    @Environment(\.appAppearance) private var appearance
 
     init(item: MetaPreview, aspect: CardAspect = .poster, size: CardSize = .medium, showsTitle: Bool? = nil, showsRating: Bool = true,
          width: CGFloat? = nil, subtitle: String? = nil, usesBetterPosters: Bool = false) {
@@ -98,11 +101,11 @@ struct MediaCard: View {
     var body: some View {
         let fixed = resolvedWidth
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            if isVisible && sectionIsVisible {
+            if hasShownArtwork {
                 artwork
             } else {
                 artworkSpace.background(Theme.placeholder)
-                    .clipShape(RoundedRectangle(cornerRadius: artworkAspect.cornerRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: artworkAspect.cornerRadius * metrics.cornerScale))
             }
             if showsCaption { captions }
         }
@@ -111,10 +114,10 @@ struct MediaCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(spokenName)
         .accessibilityIdentifier("poster.\(item.id)")
-        .onGeometryChange(for: Bool.self) { proxy in
-                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
-                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
-            } action: { isVisible = $0 }
+        .onScrollVisibility { visible in
+                // Keep the artwork's state alive until SwiftUI releases the card, including at landscape scroll edges.
+                if visible { hasShownArtwork = true }
+            }
     }
 
     /// The card takes whatever width it is offered rather than its fixed width. Only a grid column offers a real width; a row does not.
@@ -135,23 +138,34 @@ struct MediaCard: View {
         Self.resolvedWidth(width: width, aspect: aspect, size: size, metrics: metrics, isLandscape: isLandscape)
     }
 
-    private static func resolvedWidth(width: CGFloat?, aspect: CardAspect, size: CardSize, metrics: LayoutMetrics, isLandscape: Bool) -> CGFloat {
+    static func resolvedWidth(width: CGFloat?, aspect: CardAspect, size: CardSize, metrics: LayoutMetrics, isLandscape: Bool) -> CGFloat {
         width ?? (isLandscape && aspect == .poster
             ? (metrics.landscapePosterWidth * size.scale).rounded()
             : size.width(for: aspect, metrics: metrics))
     }
 
     /// The pictures a card for `item` asks `ImagePipeline` for, with the URLs and pixel sizes it uses. The card draws from this, and so does
-    /// the grid's artwork buffer, so what the buffer loads is exactly what the card finds in the cache. A landscape poster also shows the
+    /// `BufferedArtwork`, so what the buffer loads is exactly what the card finds in the cache. A landscape poster also shows the
     /// title's logo. A poster that uses Better Posters asks for its BetterPosters picture, which the card shows first.
     static func artworkRequests(for item: MetaPreview, aspect: CardAspect, size: CardSize = .medium, width: CGFloat? = nil,
                                 metrics: LayoutMetrics, isLandscape: Bool, displayScale: CGFloat,
-                                usesBetterPosters: Bool = false) -> [ArtworkPrefetcher.Request] {
+                                usesBetterPosters: Bool = false, usesHeroPosters: Bool = false,
+                                heroArtwork: TMDbArtwork? = nil, heroArtworkChecked: Bool = false) -> [ArtworkPrefetcher.Request] {
         let landscape = isLandscape && aspect == .poster
         let fixed = resolvedWidth(width: width, aspect: aspect, size: size, metrics: metrics, isLandscape: isLandscape)
         let pixels = pixelSize(width: fixed, artwork: landscape ? .wide : aspect, displayScale: displayScale)
         var requests: [ArtworkPrefetcher.Request] = []
-        if landscape {
+        if usesHeroPosters && aspect == .poster {
+            // Never download a provisional backdrop before the actual poster's lookup has answered.
+            guard heroArtwork != nil || heroArtworkChecked else { return [] }
+            if let url = (landscape ? heroArtwork?.backdrop : heroArtwork?.portrait)
+                ?? item.background ?? MetahubArtwork.background(imdbID: item.id) {
+                requests.append(.init(url: url, maxPixelSize: PosterQuality.heroPosterPixelSize))
+            }
+            if let logo = item.logo ?? heroArtwork?.logo {
+                requests.append(.init(url: logo, maxPixelSize: logoPixelSize))
+            }
+        } else if landscape {
             if let url = landscapeArtworkURL(for: item) { requests.append(.init(url: url, maxPixelSize: pixels)) }
             if let logo = landscapeLogoURL(for: item) { requests.append(.init(url: logo, maxPixelSize: logoPixelSize)) }
         } else if let url = betterPosterURL(for: item, aspect: aspect, usesBetterPosters: usesBetterPosters)
@@ -191,65 +205,80 @@ struct MediaCard: View {
 
     private var usesLandscapeArtwork: Bool { isLandscape && aspect == .poster }
 
+    private var usesHeroArtwork: Bool { (heroPosterOverride ?? usesHeroPosters) && aspect == .poster }
+
+    private var resolvedHeroArtwork: TMDbArtwork? {
+        heroArtwork ?? ratingsStore?.cachedHeroArtwork(for: item)
+    }
+
+    private var heroArtworkURL: URL? {
+        guard heroArtworkChecked || resolvedHeroArtwork != nil else { return nil }
+        return (usesLandscapeArtwork ? resolvedHeroArtwork?.backdrop : resolvedHeroArtwork?.portrait)
+            ?? item.background ?? MetahubArtwork.background(imdbID: item.id)
+    }
+
     private var artworkAspect: CardAspect { usesLandscapeArtwork ? .wide : aspect }
 
     private var showsCaption: Bool {
-        !usesLandscapeArtwork && (showsTitle ?? aspect.showsCaptionByDefault)
+        !usesLandscapeArtwork && (showsTitle ?? aspect.showsCaption(appearance))
     }
 
     /// The BetterPosters picture this card shows first, or nil when it shows the usual artwork.
     private var betterPosterURL: URL? {
-        Self.betterPosterURL(for: item, aspect: artworkAspect, usesBetterPosters: usesBetterPosters)
+        guard !usesHeroArtwork else { return nil }
+        return Self.betterPosterURL(for: item, aspect: artworkAspect, usesBetterPosters: usesBetterPosters)
     }
 
     private var artwork: some View {
         artworkSpace
             .overlay {
-                if usesLandscapeArtwork {
-                    LandscapeArtwork(title: item.name, artwork: textlessBackdrop ?? Self.landscapeArtworkURL(for: item),
+                if usesHeroArtwork {
+                    LandscapeArtwork(title: item.name, artwork: heroArtworkURL,
+                                     logo: item.logo ?? resolvedHeroArtwork?.logo,
+                                     maxPixelSize: PosterQuality.heroPosterPixelSize,
+                                     logoAlignment: usesLandscapeArtwork ? .center : .bottom,
+                                     logoBottomInset: usesLandscapeArtwork ? 0 : (showsRating && ratingsStore?.isEnabled == true ? Theme.Spacing.xl + Theme.Spacing.s : Theme.Spacing.m),
+                                     showsLogo: usesLandscapeArtwork || resolvedHeroArtwork?.portraitHidesLogo != true,
+                                     acceptsAnyCachedSize: false, usesHeroLogo: true, artworkIsReady: $heroImageIsReady)
+                        .id(heroArtworkURL)
+                } else if usesLandscapeArtwork {
+                    LandscapeArtwork(title: item.name, artwork: Self.landscapeArtworkURL(for: item),
                                      logo: Self.landscapeLogoURL(for: item), maxPixelSize: pixelSize,
                                      fallbackArtwork: PosterQuality.poster(for: item))
                 } else {
-                    // One picture view whether or not the card uses BetterPosters, so turning the setting on or off keeps the picture on show
-                    // until the other one has loaded: the usual poster stays while the BetterPosters picture loads, and no placeholder shows.
+                    // A BetterPosters card waits for its own picture: the usual poster is only its fallback, for when that picture fails.
+                    // The view is keyed by the picture, so turning the setting on or off starts the card from its placeholder.
                     ArtworkImage(url: betterPosterURL ?? artworkURL, title: item.name, maxPixelSize: pixelSize,
                                  fallbackURL: betterPosterURL == nil ? nil : artworkURL, usesFallback: $posterFellBack,
-                                 keepsPictureOnShow: aspect == .poster)
+                                 keepsPictureOnShow: betterPosterURL == nil && aspect == .poster)
+                        .id(betterPosterURL)
                 }
             }
             .overlay(alignment: .bottom) {
-                if showsRating && (aspect != .wide || isLandscape) && (betterPosterURL == nil || posterFellBack) {
+                if showsRating && (!usesHeroArtwork || heroImageIsReady) && (aspect != .wide || isLandscape) && (betterPosterURL == nil || posterFellBack) {
                     PosterRatingsOverlay(item: item, isLandscape: isLandscape)
                 }
             }
             .mediaArtwork(cornerRadius: artworkAspect.cornerRadius)
             .zoomSource(id: zoomID ?? "", in: zoomID == nil ? nil : zoomNamespace)
-            #if targetEnvironment(macCatalyst)
-            .task(id: "\(item.identity)|\(usesLandscapeArtwork)") { await findTextlessBackdrop() }
-            #endif
+            .task(id: "\(item.identity)|\(usesHeroArtwork)|\(ratingsStore?.reviewServicesRevision ?? 0)") {
+                heroArtwork = nil
+                heroArtworkChecked = false
+                guard usesHeroArtwork else { return }
+                if let ratingsStore {
+                    heroArtwork = ratingsStore.cachedHeroArtwork(for: item)
+                    await ratingsStore.prewarmHeroArtwork(for: item)
+                    guard !Task.isCancelled else { return }
+                    heroArtwork = ratingsStore.cachedHeroArtwork(for: item)
+                }
+                heroArtworkChecked = true
+            }
             // The title's Play colour is read from its poster while the card is on show, so its page has the colour on the first frame.
             .task(id: item.identity) {
                 await PlayColourStore.shared.read(identity: item.identity, pictures: PlayColourStore.pictures(for: item),
                                                   logos: PlayColourStore.logos(for: item))
             }
     }
-
-    #if targetEnvironment(macCatalyst)
-    /// Mac: keep browsing artwork stable. A later appearance can use a backdrop found by a hover prewarm or the title page.
-    private func findTextlessBackdrop() async {
-        guard usesLandscapeArtwork, let ratingsStore, ratingsStore.canLookUpHeroArtwork else {
-            textlessBackdrop = nil
-            return
-        }
-        textlessBackdrop = Self.cardSized(ratingsStore.cachedHeroArtwork(for: item)?.textlessBackdrop)
-    }
-
-    /// TMDb's original-size picture at the size a card needs.
-    private static func cardSized(_ url: URL?) -> URL? {
-        guard let url, url.host == "image.tmdb.org" else { return url }
-        return URL(string: url.absoluteString.replacingOccurrences(of: "/t/p/original/", with: "/t/p/w780/")) ?? url
-    }
-    #endif
 
     /// The artwork's box. A fixed card already knows its width, so its height is set outright: an aspect-ratio box would take
     /// its height from whatever the enclosing row proposes, and cards after the first in a row came out squeezed. Only a grid
@@ -311,6 +340,8 @@ struct MediaCardLink: View {
     private var stretches = false
     @Environment(\.zoomScope) private var zoomScope
     @Environment(TitleActions.self) private var actions: TitleActions?
+    @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var usesHeroPosters = false
+    @Environment(\.heroPosterOverride) private var heroPosterOverride
 
     init(item: MetaPreview, aspect: CardAspect = .poster, size: CardSize = .medium, showsTitle: Bool? = nil, showsRating: Bool = true,
          width: CGFloat? = nil, subtitle: String? = nil, usesBetterPosters: Bool = false) {
@@ -330,11 +361,12 @@ struct MediaCardLink: View {
         let card = MediaCard(item: item, aspect: aspect, size: size, showsTitle: showsTitle, showsRating: showsRating, width: width,
                              subtitle: subtitle, usesBetterPosters: usesBetterPosters)
             .zoomSource(sourceID)
-        NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID)) {
+        NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID,
+                                              usesHeroPosters: (heroPosterOverride ?? usesHeroPosters) && aspect == .poster)) {
             stretches ? card.stretched() : card
         }
         .buttonStyle(PressableCardStyle.poster)
-        .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
+        .simultaneousGesture(TapGesture().onEnded { Haptics.play(.titles) })
         .prewarmsHeroArtwork(item)
         .help(item.name)
         #if targetEnvironment(macCatalyst)
@@ -401,10 +433,7 @@ private struct PrewarmHeroArtworkModifier: ViewModifier {
         let shouldPrewarm = isVisible && sectionIsVisible
         #endif
         return content
-            .onGeometryChange(for: Bool.self) { proxy in
-                guard let viewport = proxy.bounds(of: .scrollView) else { return true }
-                return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
-            } action: { isVisible = $0 }
+            .onScrollVisibility { isVisible = $0 }
             #if targetEnvironment(macCatalyst)
             .onHover { isHovering = $0 }
             #endif

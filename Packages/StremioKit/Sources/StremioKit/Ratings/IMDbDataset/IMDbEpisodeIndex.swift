@@ -115,7 +115,8 @@ public actor IMDbEpisodeIndex {
                 let built = work.appendingPathComponent("episodes-building.sqlite")
                 let previous = exists ? state.rowCount : nil
                 let minRows = minimumRows
-                let job = Task.detached(priority: .utility) {
+                // Background, not utility: a daily rebuild of eight million rows must never compete with the screen.
+                let job = Task.detached(priority: .background) {
                     let rows = try IMDbEpisodeImporter.build(from: download, to: built, minimumRows: minRows)
                     if let previous, rows * 5 < previous * 4 {
                         throw IMDbImportError.smallerThanBefore(new: rows, old: previous)
@@ -185,6 +186,9 @@ enum IMDbEpisodeImporter {
         do {
             try IMDbRatingsImporter.exec(db, "PRAGMA journal_mode = OFF")
             try IMDbRatingsImporter.exec(db, "PRAGMA synchronous = OFF")
+            // Rows arrive in episode order but are keyed by series, so inserts land all over the table: a larger page cache (32 MB)
+            // keeps them from rereading and rewriting the same pages.
+            try IMDbRatingsImporter.exec(db, "PRAGMA cache_size = -32768")
             try IMDbRatingsImporter.exec(db, "CREATE TABLE episodes (parent_id INTEGER NOT NULL, season INTEGER NOT NULL, "
                                          + "episode INTEGER NOT NULL, episode_id INTEGER NOT NULL, PRIMARY KEY(parent_id, season, episode)) WITHOUT ROWID")
             try IMDbRatingsImporter.exec(db, "BEGIN")
@@ -197,24 +201,23 @@ enum IMDbEpisodeImporter {
             var hasHeader = false
             var failure: Error?
             var lines = IMDbRatingsImporter.LineSplitter()
+            let expectedHeader = Array(header.utf8)
             func line(_ bytes: UnsafeBufferPointer<UInt8>) {
                 guard failure == nil else { return }
-                let fields = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .newlines)
+                // Read straight from the bytes: about eight million lines go through here, so no String is made for any of them.
+                var end = bytes.count
+                if end > 0, bytes[end - 1] == 0x0D { end -= 1 }
+                let fields = UnsafeBufferPointer(rebasing: bytes[..<end])
                 if !hasHeader {
                     hasHeader = true
-                    if fields != header { failure = IMDbImportError.badHeader }
+                    if !fields.elementsEqual(expectedHeader) { failure = IMDbImportError.badHeader }
                     return
                 }
-                let parts = fields.split(separator: "\t", omittingEmptySubsequences: false)
-                guard parts.count == 4,
-                      let id = IMDbEpisodeIndex.idNumber(String(parts[0])),
-                      let parent = IMDbEpisodeIndex.idNumber(String(parts[1])),
-                      let season = Int64(parts[2]), let episode = Int64(parts[3]),
-                      season >= 0, episode >= 0 else { return }
-                sqlite3_bind_int64(insert, 1, parent)
-                sqlite3_bind_int64(insert, 2, season)
-                sqlite3_bind_int64(insert, 3, episode)
-                sqlite3_bind_int64(insert, 4, id)
+                guard let row = Row(fields) else { return }
+                sqlite3_bind_int64(insert, 1, row.parent)
+                sqlite3_bind_int64(insert, 2, row.season)
+                sqlite3_bind_int64(insert, 3, row.episode)
+                sqlite3_bind_int64(insert, 4, row.id)
                 let status = sqlite3_step(insert)
                 if status == SQLITE_DONE {
                     if sqlite3_changes(db) > 0 { count += 1 }
@@ -250,6 +253,57 @@ enum IMDbEpisodeImporter {
             close()
             try? FileManager.default.removeItem(at: destination)
             throw error
+        }
+    }
+
+    /// One data line, `tt0000001<TAB>tt0000002<TAB>1<TAB>3`, read from its bytes. Nil for a line to skip: a missing season or episode
+    /// (`\N`) or anything else malformed.
+    struct Row {
+        let id: Int64
+        let parent: Int64
+        let season: Int64
+        let episode: Int64
+
+        init?(_ line: UnsafeBufferPointer<UInt8>) {
+            var fields: (Int64, Int64, Int64, Int64) = (0, 0, 0, 0)
+            var start = 0
+            for index in 0..<4 {
+                var end = start
+                while end < line.count, line[end] != 0x09 { end += 1 }
+                // Exactly four fields: the last runs to the end of the line, the others stop at a tab.
+                guard (index == 3) == (end == line.count) else { return nil }
+                let field = UnsafeBufferPointer(rebasing: line[start..<end])
+                let value: Int64?
+                if index < 2 {
+                    guard field.count > 2, field[0] == 0x74, field[1] == 0x74 else { return nil }
+                    value = Self.integer(UnsafeBufferPointer(rebasing: field[2...])).flatMap { $0 > 0 ? $0 : nil }
+                } else {
+                    value = Self.integer(field)
+                }
+                guard let value else { return nil }
+                switch index {
+                case 0: fields.0 = value
+                case 1: fields.1 = value
+                case 2: fields.2 = value
+                default: fields.3 = value
+                }
+                start = end + 1
+            }
+            id = fields.0
+            parent = fields.1
+            season = fields.2
+            episode = fields.3
+        }
+
+        /// One to eighteen ASCII digits.
+        private static func integer(_ field: UnsafeBufferPointer<UInt8>) -> Int64? {
+            guard !field.isEmpty, field.count <= 18 else { return nil }
+            var value: Int64 = 0
+            for byte in field {
+                guard byte >= 0x30, byte <= 0x39 else { return nil }
+                value = value * 10 + Int64(byte - 0x30)
+            }
+            return value
         }
     }
 }

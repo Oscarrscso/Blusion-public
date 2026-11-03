@@ -25,6 +25,14 @@ struct SearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: metrics.shelfSpacing) {
+                    #if targetEnvironment(macCatalyst)
+                    TextField("Shows, Movies, and More", text: $model.query)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isSearchFocused)
+                        .submitLabel(.search)
+                        .onSubmit { Task { await model.submit() } }
+                        .padding(.horizontal, metrics.pageMargin)
+                    #endif
                     if model.isOffline {
                         OfflineBanner()
                     } else if !model.failures.isEmpty {
@@ -56,10 +64,13 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.immediately)
             .screenBackground()
             .navigationTitle(isPhoneInLandscape ? "" : "Search")
-            .toolbar(isPhoneInLandscape ? .hidden : .automatic, for: .tabBar)
+            .macRootNavigation()
+            .pageTabBar(hidden: isPhoneInLandscape)
+            #if !targetEnvironment(macCatalyst)
             .searchable(text: $model.query, isPresented: $isSearchPresented,
                         placement: .navigationBarDrawer(displayMode: .always), prompt: "Shows, Movies, and More")
             .searchFocused($isSearchFocused)
+            #endif
             // Coming from another tab, Search starts on an empty field.
             .onChange(of: router.searchBrowseRevision) { model.query = "" }
             // A title opened from a search was recorded as a recent search; the list reads them again.
@@ -127,7 +138,7 @@ struct SearchView: View {
                     HStack {
                         SectionHeader("Recent Searches")
                         Button("Clear", systemImage: "xmark") {
-                            Haptics.tap()
+                            Haptics.play(.buttons)
                             model.clearRecents()
                         }
                             .labelStyle(.iconOnly)
@@ -185,9 +196,7 @@ struct SearchView: View {
         resultRow("Movies", type: "movie")
         resultRow("Series", type: "series")
         ForEach(model.groups.filter { $0.type != "movie" && $0.type != "series" }) { group in
-            MediaRow(group.title) {
-                ForEach(group.items, id: \.identity) { MediaCardLink(item: $0) }
-            }
+            MediaRow(group.title, items: group.items, id: \.identity, artworkItems: group.items) { _, item in MediaCardLink(item: item) }
         }
         aiResults
     }
@@ -199,9 +208,7 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: metrics.headerSpacing) {
                 resultHeader(title, type: type)
                     .padding(.horizontal, metrics.pageMargin)
-                MediaRow(title, hideTitle: true) {
-                    ForEach(items, id: \.identity) { MediaCardLink(item: $0) }
-                }
+                MediaRow(title, hideTitle: true, items: items, id: \.identity, artworkItems: items) { _, item in MediaCardLink(item: item) }
             }
         } else if model.phase == .searching {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -261,8 +268,8 @@ struct SearchView: View {
                     .accessibilityIdentifier("search.ai.loading")
                 }
                 if !model.describedItems.isEmpty {
-                    MediaRow("", hideTitle: true) {
-                        ForEach(model.describedItems, id: \.identity) { MediaCardLink(item: $0) }
+                    MediaRow("", hideTitle: true, items: model.describedItems, id: \.identity, artworkItems: model.describedItems) { _, item in
+                        MediaCardLink(item: item)
                     }
                     .accessibilityIdentifier("search.ai.matches")
                 } else if model.aiPhase == .done, model.aiIssue == nil {

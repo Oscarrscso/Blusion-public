@@ -3,223 +3,351 @@ import Foundation
 import StremioKit
 import SwiftUI
 
-/// Groups tuning and previews by the action that uses them.
+/// Settings → Haptics: every place in the app that gives a haptic, grouped by what the hand is doing, each row showing what it plays now.
+/// A row opens that place's own page: its switch, its feel, its strength and a way to try it. The master switch and the overall strength
+/// sit above them, so the whole app can be quietened or lifted at once.
+///
+/// The page holds one draft of the tuning, shared with the place pages, so a change made a level down shows in its row on the way back.
 struct HapticsSettingsPage: View {
+    typealias Place = HapticPreferences.Place
+
     let model: SettingsViewModel
 
-    /// What the sliders and switches show. Held here so a drag stays smooth; committed to the store when it ends.
-    @State private var draft = HapticPreferences()
-    /// The strength last previewed per feel, so a drag fires once per whole percent rather than once per pixel.
-    @State private var lastPreview: [Haptics.Feel: Double] = [:]
+    /// What the page and its place pages show. Held here so a drag stays smooth; saved when it ends.
+    @State private var draft: HapticPreferences
+    /// The overall strength last previewed, so a drag plays once per step rather than once per pixel.
+    @State private var lastPreview: Double?
+
+    init(model: SettingsViewModel) {
+        self.model = model
+        // Read once: coming back from a place page must keep the draft it changed, not the saved copy that may still be catching up.
+        _draft = State(initialValue: model.settings.haptics)
+    }
+
+    /// One section of the page: the places felt while the hand does one kind of thing.
+    private struct PlaceGroup: Sendable {
+        let title: String
+        let places: [Place]
+    }
+
+    /// The places, grouped by what the hand is doing when it feels them. Every place appears once.
+    private static let groups: [PlaceGroup] = [
+        PlaceGroup(title: "Taps", places: [.buttons, .titles, .navigation]),
+        PlaceGroup(title: "Choices", places: [.choices, .sliders]),
+        PlaceGroup(title: "Player", places: [.playerControls, .playerOptions]),
+        PlaceGroup(title: "Motion", places: [.shelves, .banner, .reviews]),
+        PlaceGroup(title: "Confirmations", places: [.saved]),
+    ]
 
     var body: some View {
         List {
             Section {
-                // Apply before previewing so the master switch takes effect immediately.
+                // Apply before previewing so the master switch takes effect immediately. On is the default, so it saves as nothing.
                 Toggle("Haptics", isOn: Binding(get: { draft.isOn }, set: { value in
-                    draft.isEnabled = value
-                    commit()
-                    if value { Haptics.preview(.tap) }
+                    draft.isEnabled = value ? nil : false
+                    save()
+                    if value { Haptics.preview(.buttons) }
                 }))
                 .accessibilityIdentifier("settings.haptics.enabled")
             }
             Group {
-                Section("Buttons & title taps") {
-                    styleRow(feel: .tap, key: \.tapStyle, fallback: HapticPreferences.Default.tapStyle, identifier: "tap")
-                    strengthRow("Strength", feel: .tap, key: \.tap, fallback: HapticPreferences.Default.tap, identifier: "tap")
-                    previewButton("Test button tap", feel: .tap, identifier: "tap")
+                Section {
+                    overallRow
                 }
-                Section("Scrolling poster shelves") {
-                    styleRow(feel: .shelfSnap, key: \.shelfSnapStyle, fallback: HapticPreferences.Default.shelfSnapStyle, identifier: "shelfSnap")
-                    strengthRow("Strength", feel: .shelfSnap, key: \.shelfSnap,
-                                fallback: HapticPreferences.Default.shelfSnap, identifier: "shelfSnap")
-                    spacingRow
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Swipe to test shelf ticks")
-                        ShelfScroll(margin: 0, spacing: Theme.Spacing.s, lazy: false) {
-                            ForEach(1...8, id: \.self) { number in
-                                Text("Poster \(number)")
-                                    .frame(width: 100, height: 120)
-                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                                    .reportsShelfEdge(id: number)
+                ForEach(Self.groups, id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.places) { place in
+                            NavigationLink {
+                                HapticPlacePage(place: place, model: model, draft: $draft)
+                            } label: {
+                                SettingsRow(title: place.title, summary: summary(place), systemImage: place.systemImage)
                             }
+                            .accessibilityIdentifier("settings.haptics.place.\(place.rawValue)")
                         }
-                        .accessibilityLabel("Swipe posters to test shelf ticks")
                     }
-                }
-                Section("Home banner page changes") {
-                    styleRow(feel: .pageChange, key: \.pageChangeStyle, fallback: HapticPreferences.Default.pageChangeStyle, identifier: "pageChange")
-                    strengthRow("Strength", feel: .pageChange, key: \.pageChange,
-                                fallback: HapticPreferences.Default.pageChange, identifier: "pageChange")
-                    previewButton("Test page change", feel: .pageChange, identifier: "pageChange")
-                }
-                Section("Expanding & folding reviews") {
-                    styleRow(feel: .textLines, key: \.textLinesStyle, fallback: HapticPreferences.Default.textLinesStyle, identifier: "textLines")
-                    strengthRow("Tick strength", feel: .textLines, key: \.textLines,
-                                fallback: HapticPreferences.Default.textLines, identifier: "textLines")
-                    tickLimitRow
-                    Button("Test review · \(draft.reviewTicks) ticks") {
-                        Haptics.apply(draft)
-                        Haptics.lines(draft.reviewTicks, over: .seconds(DetailReviews.foldDuration))
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityIdentifier("settings.haptics.preview.textLines")
-                }
-                Section("Tabs, filters & pickers") {
-                    toggle("Selection tick", feel: .selection, isOn: { draft.selectionOn }, identifier: "selection") { draft.selection = $0 }
-                    previewButton("Test selection change", feel: .selection, identifier: "selection")
-                        .disabled(!draft.selectionOn)
-                }
-                Section("Save confirmation") {
-                    toggle("Saved feedback", feel: .success, isOn: { draft.successOn }, identifier: "success") { draft.success = $0 }
-                    previewButton("Test saved confirmation", feel: .success, identifier: "success")
-                        .disabled(!draft.successOn)
-                }
-                Section("Playback failure") {
-                    toggle("Failure feedback", feel: .failure, isOn: { draft.failureOn }, identifier: "failure") { draft.failure = $0 }
-                    previewButton("Test playback failure", feel: .failure, identifier: "failure")
-                        .disabled(!draft.failureOn)
                 }
             }
             .disabled(!draft.isOn)
             Section {
-                Button("Reset to defaults") {
+                Button("Reset all to defaults") {
                     draft = HapticPreferences()
-                    lastPreview = [:]
-                    commit()
-                    Haptics.preview(.tap)
+                    lastPreview = nil
+                    save()
+                    Haptics.preview(.buttons)
                 }
+                .disabled(draft == HapticPreferences())
                 .accessibilityIdentifier("settings.haptics.reset")
             }
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Haptics")
-        .onAppear { draft = model.settings.haptics }
     }
 
-    /// Strength changes preview one tick; the named test buttons demonstrate the complete action.
-    private func strengthRow(_ title: String, feel: Haptics.Feel, key: WritableKeyPath<HapticPreferences, Double?>,
-                             fallback: Double, identifier: String) -> some View {
-        let saved = resolved(key, fallback)
+    /// Scales every impact in the app at once. Each step plays a button tap at the new strength.
+    private var overallRow: some View {
+        let value = draft.overall
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack {
-                Text(title)
+                Text("Overall strength")
                 Spacer()
-                Text(percent(saved)).foregroundStyle(.secondary).monospacedDigit()
+                Text(HapticFormat.percent(value)).foregroundStyle(.secondary).monospacedDigit()
             }
-            Slider(value: Binding(get: { resolved(key, fallback) }, set: { value in
-                draft[keyPath: key] = value
-                previewIfNewPercent(feel, value)
-            }), in: HapticPreferences.Limits.strength, step: 0.01, onEditingChanged: { editing in
+            Slider(value: Binding(get: { draft.overall }, set: { raw in
+                let value = HapticFormat.snapped(raw)
+                draft.overallStrength = value
+                guard lastPreview != value else { return }
+                lastPreview = value
+                Haptics.apply(draft)
+                // A tick or a pattern has no strength to show, so the preview is the button tap as an impact.
+                let feel = draft.feel(.buttons)
+                Haptics.preview(.buttons, feel: feel.takesStrength ? feel : .light)
+            }), in: HapticPreferences.Limits.overallStrength, step: 0.05, onEditingChanged: { editing in
                 if !editing {
-                    lastPreview[feel] = nil
-                    commit()
+                    lastPreview = nil
+                    save()
                 }
             })
-            .accessibilityLabel(title)
-            .accessibilityValue(percent(saved))
-            .accessibilityIdentifier("settings.haptics.\(identifier)")
+            .accessibilityLabel("Overall strength")
+            .accessibilityValue(HapticFormat.percent(value))
+            .accessibilityIdentifier("settings.haptics.overall")
         }
     }
 
-    private func styleRow(feel: Haptics.Feel, key: WritableKeyPath<HapticPreferences, HapticPreferences.ImpactStyle?>,
-                          fallback: HapticPreferences.ImpactStyle, identifier: String) -> some View {
-        Picker("Feel", selection: Binding(get: { draft[keyPath: key] ?? fallback }, set: { value in
-            draft[keyPath: key] = value
-            commit()
-            Haptics.preview(feel)
-        })) {
-            ForEach(HapticPreferences.ImpactStyle.allCases, id: \.self) { style in
-                Text(style.rawValue.capitalized).tag(style)
+    /// What a place plays now, as its row shows it: Off, the feel, and the strength when the feel takes one.
+    private func summary(_ place: Place) -> String {
+        guard draft.plays(place) else { return "Off" }
+        let feel = draft.feel(place)
+        guard feel.takesStrength else { return feel.title }
+        return "\(feel.title) · \(HapticFormat.percent(draft.strength(place)))"
+    }
+
+    private func save() {
+        HapticFormat.save(draft, to: model)
+    }
+}
+
+/// One place's page: its switch, its feel, its strength, anything only it has (a shelf's spacing, a review's ticks), and a way to try it
+/// as it fires in the app.
+private struct HapticPlacePage: View {
+    let place: HapticPreferences.Place
+    let model: SettingsViewModel
+    @Binding var draft: HapticPreferences
+
+    /// The strength last previewed, so a drag plays once per step rather than once per pixel.
+    @State private var lastPreview: Double?
+    /// The sample switch's and slider's own values on the Pickers & switches and Sliders pages.
+    @State private var sampleSwitch = false
+    @State private var sampleStop = 2.0
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(place.title, isOn: Binding(get: { draft.plays(place) }, set: { value in
+                    // On is the default, so turning a place back on saves nothing for it.
+                    draft[place].isOn = value ? nil : false
+                    save()
+                    if value { Haptics.preview(place) }
+                }))
+                .accessibilityIdentifier("settings.haptics.\(place.rawValue).enabled")
+            }
+            Group {
+                Section("Feel") {
+                    Picker("Feel", selection: Binding(get: { draft.feel(place) }, set: { feel in
+                        draft[place].feel = feel == place.defaultFeel ? nil : feel
+                        save()
+                        Haptics.preview(place)
+                    })) {
+                        ForEach(place.feels) { feel in
+                            Text(feel.title).tag(feel)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    .accessibilityIdentifier("settings.haptics.\(place.rawValue).feel")
+                }
+                if draft.feel(place).takesStrength {
+                    Section {
+                        strengthRow
+                    }
+                }
+                switch place {
+                case .shelves:
+                    Section { spacingRow }
+                case .reviews:
+                    Section { tickLimitRow }
+                default:
+                    EmptyView()
+                }
+                Section {
+                    tryIt
+                }
+            }
+            .disabled(!draft.plays(place))
+            Section {
+                Button("Restore default") {
+                    draft.restore(place)
+                    lastPreview = nil
+                    save()
+                    Haptics.preview(place)
+                }
+                .disabled(draft.isDefault(place))
+                .accessibilityIdentifier("settings.haptics.\(place.rawValue).restore")
             }
         }
-        .accessibilityIdentifier("settings.haptics.\(identifier).style")
+        .scrollIndicators(.visible, axes: .vertical)
+        .settingsPage(place.title)
     }
 
-    private func toggle(_ title: String, feel: Haptics.Feel, isOn: @escaping () -> Bool, identifier: String,
-                        set: @escaping (Bool) -> Void) -> some View {
-        Toggle(title, isOn: Binding(get: isOn, set: { value in
-            set(value)
-            commit()
-            if value { Haptics.preview(feel) }
-        }))
-        .accessibilityIdentifier("settings.haptics.\(identifier)")
-    }
-
-    private func previewButton(_ title: String, feel: Haptics.Feel, identifier: String) -> some View {
-        Button {
-            Haptics.apply(draft)
-            Haptics.preview(feel)
-        } label: {
-            Label(title, systemImage: "hand.tap")
+    /// The place's strength. Each step plays the feel at the strength under the finger; letting go saves it.
+    private var strengthRow: some View {
+        let value = draft.strength(place)
+        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack {
+                Text("Strength")
+                Spacer()
+                Text(HapticFormat.percent(value)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Slider(value: Binding(get: { draft.strength(place) }, set: { raw in
+                let value = HapticFormat.snapped(raw)
+                draft[place].strength = value
+                guard lastPreview != value else { return }
+                lastPreview = value
+                Haptics.preview(place, feel: draft.feel(place), strength: value)
+            }), in: HapticPreferences.Limits.strength, step: 0.05, onEditingChanged: { editing in
+                if !editing {
+                    lastPreview = nil
+                    save()
+                }
+            })
+            .accessibilityLabel("Strength")
+            .accessibilityValue(HapticFormat.percent(value))
+            .accessibilityIdentifier("settings.haptics.\(place.rawValue).strength")
         }
-        .buttonStyle(.borderless)
-        .accessibilityIdentifier("settings.haptics.preview.\(identifier)")
     }
 
-    /// Minimum travel before another card-edge crossing can tick.
+    /// How far a shelf travels before the next card edge can tick.
     private var spacingRow: some View {
         let value = draft.shelfTickSpacingPoints
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack {
-                Text("Minimum travel between ticks")
+                Text("Distance between ticks")
                 Spacer()
                 Text("\(Int(value.rounded())) pt").foregroundStyle(.secondary).monospacedDigit()
             }
-            Slider(value: Binding(get: { draft.shelfTickSpacingPoints }, set: { draft.shelfTickSpacing = $0 }),
+            Slider(value: Binding(get: { draft.shelfTickSpacingPoints }, set: { draft.shelfTickSpacing = $0.rounded() }),
                    in: HapticPreferences.Limits.shelfTickSpacing, step: 2, onEditingChanged: { editing in
-                if !editing { commit() }
+                if !editing { save() }
             })
-            .accessibilityLabel("Minimum shelf travel between ticks")
+            .accessibilityLabel("Distance between ticks")
             .accessibilityValue("\(Int(value.rounded())) points")
-            .accessibilityIdentifier("settings.haptics.shelfSpacing")
+            .accessibilityIdentifier("settings.haptics.shelves.spacing")
         }
     }
 
-    /// The most ticks one unfolded review gives.
+    /// The most ticks one review's unfold gives. Each change plays the run it now makes.
     private var tickLimitRow: some View {
-        let value = draft.reviewTicks
-        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack {
-                Text("Maximum ticks per review")
-                Spacer()
-                Text("\(value)").foregroundStyle(.secondary).monospacedDigit()
+        let limits = HapticPreferences.Limits.reviewTickLimit
+        return Stepper(value: Binding(get: { draft.reviewTicks }, set: { value in
+            draft.reviewTickLimit = value
+            save()
+            playReview()
+        }), in: limits) {
+            LabeledContent("Most ticks per review", value: "\(draft.reviewTicks)")
+        }
+        .accessibilityIdentifier("settings.haptics.reviews.ticks")
+    }
+
+    /// A way to feel the place as it fires in the app: the real control where one fits on this page, a named test otherwise.
+    @ViewBuilder private var tryIt: some View {
+        switch place {
+        case .choices:
+            Toggle("Test switch", isOn: Binding(get: { sampleSwitch }, set: { value in
+                sampleSwitch = value
+                Haptics.play(.choices)
+            }))
+            .accessibilityIdentifier("settings.haptics.choices.test")
+        case .sliders:
+            LabeledContent("Test slider") {
+                Slider(value: Binding(get: { sampleStop }, set: { value in
+                    guard value != sampleStop else { return }
+                    sampleStop = value
+                    Haptics.play(.sliders)
+                }), in: 0...4, step: 1)
             }
-            Slider(value: Binding(get: { Double(draft.reviewTicks) }, set: { draft.reviewTickLimit = Int($0.rounded()) }),
-                   in: Double(HapticPreferences.Limits.reviewTickLimit.lowerBound)...Double(HapticPreferences.Limits.reviewTickLimit.upperBound),
-                   step: 1, onEditingChanged: { editing in
-                if !editing { commit() }
-            })
-            .accessibilityLabel("Review ticks")
-            .accessibilityValue("\(value)")
-            .accessibilityIdentifier("settings.haptics.reviewTicks")
+            .accessibilityIdentifier("settings.haptics.sliders.test")
+        case .shelves:
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Swipe to test")
+                ShelfScroll(margin: 0, spacing: Theme.Spacing.s, lazy: false) {
+                    ForEach(1...10, id: \.self) { number in
+                        Text("Poster \(number)")
+                            .frame(width: 100, height: 120)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                            .reportsShelfEdge(id: number)
+                    }
+                }
+                .accessibilityLabel("Swipe posters to test shelf ticks")
+            }
+            .accessibilityIdentifier("settings.haptics.shelves.test")
+        case .reviews:
+            testButton("Test review unfold") { playReview() }
+        default:
+            testButton(Self.testTitle(place)) {
+                Haptics.apply(draft)
+                Haptics.preview(place)
+            }
         }
     }
 
-    private func resolved(_ key: WritableKeyPath<HapticPreferences, Double?>, _ fallback: Double) -> Double {
-        let raw = draft[keyPath: key] ?? fallback
-        return min(max(raw, HapticPreferences.Limits.strength.lowerBound), HapticPreferences.Limits.strength.upperBound)
+    private func testButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: "hand.tap")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityIdentifier("settings.haptics.\(place.rawValue).test")
     }
 
-    private func percent(_ strength: Double) -> String {
+    /// The named test for a place without a sample control: the action it stands for.
+    private static func testTitle(_ place: HapticPreferences.Place) -> String {
+        switch place {
+        case .buttons: "Test button tap"
+        case .titles: "Test poster tap"
+        case .navigation: "Test tab change"
+        case .playerControls: "Test player control"
+        case .playerOptions: "Test option change"
+        case .banner: "Test page change"
+        case .saved: "Test saved"
+        case .choices, .sliders, .shelves, .reviews: "Test"
+        }
+    }
+
+    /// The whole run a review gives as it unfolds, at the tuned count, over the fold's own animation.
+    private func playReview() {
+        Haptics.apply(draft)
+        Haptics.lines(draft.reviewTicks, over: .seconds(DetailReviews.foldDuration))
+    }
+
+    private func save() {
+        HapticFormat.save(draft, to: model)
+    }
+}
+
+/// What the Haptics pages share: how a strength reads, and how a change is saved.
+private enum HapticFormat {
+    static func percent(_ strength: Double) -> String {
         "\(Int((strength * 100).rounded()))%"
     }
 
-    /// One impact per whole percent, so dragging the slider demonstrates the feel without turning into a rattle.
-    private func previewIfNewPercent(_ feel: Haptics.Feel, _ strength: Double) {
-        let whole = (strength * 100).rounded() / 100
-        guard lastPreview[feel] != whole else { return }
-        lastPreview[feel] = whole
-        Haptics.apply(draft)
-        Haptics.preview(feel, strength: whole)
+    /// A slider's value to the whole percent, so a step that lands a hair off 50% saves as 50% and reads as the default again.
+    static func snapped(_ strength: Double) -> Double {
+        (strength * 100).rounded() / 100
     }
 
-    /// Saves what the page shows and applies it, so the next tap obeys the slider that has just been let go.
-    private func commit() {
-        let saved = draft
-        Haptics.apply(saved)
-        Task { await model.updateHaptics { $0 = saved } }
+    /// Saves what the page shows and applies it, so the next tap obeys the control that has just been let go.
+    @MainActor static func save(_ preferences: HapticPreferences, to model: SettingsViewModel) {
+        Haptics.apply(preferences)
+        Task { await model.updateHaptics { $0 = preferences } }
     }
 }
 #endif

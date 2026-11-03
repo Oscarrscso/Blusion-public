@@ -95,6 +95,8 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
     @Environment(AppRouter.self) private var router
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(\.zoomScope) private var zoomScope
+    /// Appearance's corners, so the loading veil, the zoom and the menu's preview keep the card's own corners.
+    @Environment(\.layoutMetrics) private var metrics
 
     /// True while a card's streams load on Home: every card ignores taps meanwhile, and looks as it did.
     private var isBusy: Bool { launcher?.isResolving ?? false }
@@ -105,17 +107,17 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
         Button {
             guard !isBusy else { return }
             if let item = downloads?.items.first(where: { $0.request.identity == request.identity && $0.state == .complete }) {
-                Haptics.tap()
+                Haptics.play(.titles)
                 Task { if let plan = await downloads?.plan(for: item.id) { router.demoPlan = plan } }
                 return
             }
             guard let launcher else {
-                Haptics.tap()
+                Haptics.play(.titles)
                 return openTitle(sourceID: sourceID)
             }
             // A swipe that ends on the card starts nothing, as on an episode's card.
             guard !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
-            Haptics.tap()
+            Haptics.play(.titles)
             Task {
                 if await launcher.open(itemID: itemID, request: request, preview: preview, sourceID: sourceID) == .openTitle {
                     openTitle(sourceID: sourceID)
@@ -131,14 +133,14 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
                             Spinner()
                                 .controlSize(.large)
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: CardAspect.wide.cornerRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale, style: .continuous))
                         .transition(.opacity)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Loading streams")
                     }
                 }
                 .animation(.smooth(duration: 0.25), value: isLoading)
-                .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: CardAspect.wide.cornerRadius)
+                .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableCardStyle.poster)
@@ -146,21 +148,21 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
         // The hold is the system context menu: a custom long-press gesture here blocked the row's horizontal scroll.
         // No custom preview: the system snapshots the card itself (its artwork, bounds and clipping), and this shape gives the
         // menu the card's corner radius.
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale, style: .continuous))
         .contextMenu {
             Button("Open title", systemImage: "info.circle") {
                 // No card tap fires here: a context menu action is not a tap on the card, so the click stands in for it, and
                 // the screen changes under it.
-                Haptics.scrollSnap()
+                Haptics.play(.titles)
                 router.open(.home)
                 router.homePath.append(TitleDestination(preview: preview, sourceID: sourceID))
             }
             Button("Mark as Watched", systemImage: "checkmark.circle") {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 onMarkWatched()
             }
             Button("Remove from Continue Watching", systemImage: "minus.circle", role: .destructive) {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 onRemove()
             }
         }

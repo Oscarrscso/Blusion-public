@@ -75,7 +75,7 @@ struct TitleStreams: Equatable {
         return true
     }
 
-    /// Auto Pick started a stream from the picked streams: the spinner stops and the details stay.
+    /// Auto Pick finished its attempt: the spinner stops and the details stay, including when playback failed.
     mutating func startedAutomatically() {
         guard request != nil, !isReady else { return }
         hasStarted = true

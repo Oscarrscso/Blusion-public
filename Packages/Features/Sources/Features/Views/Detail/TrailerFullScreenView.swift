@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// A trailer on a phone turned sideways, shown full screen on black with a button that closes the cover. It shows the page's own
@@ -19,7 +20,7 @@ struct TrailerFullScreenView: View {
                     .ignoresSafeArea()
             }
             Button {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 close()
             } label: {
                 Image(systemName: "xmark")

@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// The one main action of a screen ("Play", "Resume", "Install"): the system's Liquid Glass button as a capsule, the button the
@@ -28,7 +29,7 @@ private struct PrimaryActionButton: View {
     var body: some View {
         if let height {
             Button(role: configuration.role) {
-                Haptics.tap()
+                Haptics.play(.buttons)
                 configuration.trigger()
             } label: {
                 configuration.label
@@ -46,7 +47,7 @@ private struct PrimaryActionButton: View {
         // The Mac's own glass button is a third shorter than the round actions beside it, so the capsule is given their height: the label
         // fills the frame and the glass follows it, as a round action's does. A small one (Auto Pick) is a step down.
         Button(role: configuration.role) {
-            Haptics.tap()
+            Haptics.play(.buttons)
             configuration.trigger()
         } label: {
             configuration.label
@@ -61,7 +62,7 @@ private struct PrimaryActionButton: View {
         .pointerFeedback()
         #else
         Button(role: configuration.role) {
-            Haptics.tap()
+            Haptics.play(.buttons)
             configuration.trigger()
         } label: {
             configuration.label
@@ -88,7 +89,7 @@ private struct PrimaryActionButton: View {
 struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role) {
-            Haptics.tap()
+            Haptics.play(.buttons)
             configuration.trigger()
         } label: {
             configuration.label
@@ -212,11 +213,11 @@ struct CircleActionButton: View {
         .accessibilityLabel(isLoading ? "\(title), loading" : (isOn ? (onTitle ?? title) : title))
         .help(isOn ? (onTitle ?? title) : title)
         .accessibilityAddTraits(isOn ? .isSelected : [])
-        // A tick when the state changes, but not when it is read in: a page that opens on a saved title is silent. The app's own
-        // selection tick, so the Haptics page's switch reaches it.
+        // A tick when the state changes, but not when it is read in: a page that opens on a saved title is silent. The Pickers &
+        // switches place, so the Haptics page reaches it.
         .onChange(of: TickState(isOn: isOn, quietRevision: quietRevision)) { old, new in
             guard old.isOn != new.isOn, old.quietRevision == new.quietRevision else { return }
-            Haptics.selection()
+            Haptics.play(.choices)
         }
     }
 }

@@ -70,6 +70,9 @@ public struct EngineCapabilities: OptionSet, Sendable, Hashable {
     public static let upscaling = EngineCapabilities(rawValue: 1 << 9)
     /// The stream is Dolby Vision and the engine can play its HDR10 / HLG base layer instead (`VideoProcessing.dolbyVision`).
     public static let dolbyVisionSwitch = EngineCapabilities(rawValue: 1 << 10)
+    /// HDR brightness changes by degrees (`VideoProcessing.hdrBrightness` between 0 and 1). Without it, the engine's picture has only
+    /// the system's range or the display's whole one, so the player offers it as a switch.
+    public static let gradualHDRBrightness = EngineCapabilities(rawValue: 1 << 11)
 }
 
 /// What is actually playing, for the statistics panel. Fields an engine cannot know stay nil; `notes` say what a value means.

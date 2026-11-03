@@ -434,7 +434,7 @@ struct StreamSaveButton: View {
 
     var body: some View {
         Button {
-            Haptics.tap()
+            Haptics.play(.buttons)
             action()
         } label: {
             Image(systemName: isDownload ? "arrow.down" : (isSaved ? "bookmark.fill" : "bookmark"))

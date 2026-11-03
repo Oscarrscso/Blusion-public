@@ -142,13 +142,13 @@ struct DownloadCard: View {
     private var controls: some View {
         HStack(spacing: Theme.Spacing.s) {
             if item.state == .downloading || item.state == .queued {
-                Button { Haptics.tap(); Task { await manager.pause(item.id) } } label: {
+                Button { Haptics.play(.buttons); Task { await manager.pause(item.id) } } label: {
                     DownloadProgressGlyph(item: item)
                 }
                 .accessibilityLabel("Pause Download")
                 .glassCircleButton(.regular)
             } else if item.state != .complete {
-                Button("Resume", systemImage: "arrow.down.circle") { Haptics.tap(); Task { await manager.resume(item.id) } }
+                Button("Resume", systemImage: "arrow.down.circle") { Haptics.play(.buttons); Task { await manager.resume(item.id) } }
                     .labelStyle(.iconOnly)
                     .glassCircleButton(.regular)
             } else {
@@ -156,7 +156,7 @@ struct DownloadCard: View {
                     .labelStyle(.iconOnly)
                     .glassCircleButton(.regular)
             }
-            Button("Delete", systemImage: "trash", role: .destructive) { Haptics.tap(); Task { await manager.delete(item.id) } }
+            Button("Delete", systemImage: "trash", role: .destructive) { Haptics.play(.buttons); Task { await manager.delete(item.id) } }
                 .labelStyle(.iconOnly)
                 .glassCircleButton(.regular)
         }

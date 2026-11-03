@@ -32,6 +32,7 @@ struct TraktAccountView: View {
         .scrollContentBackground(.hidden)
         .screenBackground()
         .navigationTitle("Trakt")
+        .macBackNavigation()
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
         .onDisappear { model.cancelSignIn() }

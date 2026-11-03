@@ -1,0 +1,29 @@
+# The mpv frameworks MPVKit 1.0.0 embeds (pinned in Packages/FallbackPlayer/Package.swift). The Normalize Catalyst framework bundles
+# phase lists them as inputs so it runs after Xcode has copied them in; update this list when MPVKit changes.
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/gmp.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/gnutls.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/hogweed.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/lcms2.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libass.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libavcodec.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libavdevice.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libavfilter.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libavformat.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libavutil.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libbluray.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libcrypto.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libdav1d.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libdovi.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libfreetype.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libfribidi.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libharfbuzz.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libmpv.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libplacebo.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libshaderc_combined.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libssl.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libswresample.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libswscale.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libuavs3d.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libuchardet.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Libunibreak.framework
+$(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/nettle.framework

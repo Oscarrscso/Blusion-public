@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 extension View {
@@ -29,7 +30,7 @@ private struct SavedHUDModifier: ViewModifier {
             }
             .onChange(of: trigger) {
                 // The app's own success chime rather than SwiftUI's, so the Haptics page controls it with the other feels.
-                Haptics.success()
+                Haptics.play(.saved)
                 hideTask?.cancel()
                 withAnimation(.spring(duration: 0.35, bounce: 0.2)) { isShowing = true }
                 AccessibilityNotification.Announcement(message).post()

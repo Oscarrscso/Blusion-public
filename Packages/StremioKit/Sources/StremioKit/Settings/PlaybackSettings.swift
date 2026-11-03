@@ -23,6 +23,8 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var showsPosterRatings: Bool
     /// Rating logos keep their brand colours. Off by default: they then take the text colour, so they match the rest of the screen.
     public var showsColouredRatingLogos: Bool
+    /// Poster cards use 1200-pixel hero artwork; details reuse it while loading the full-resolution image.
+    public var usesHeroPosters: Bool = false
     /// Play starts the best stream at once instead of showing the list of streams first.
     public var autoPlayBestStream: Bool
     /// Seconds between Trakt playback refreshes. Zero is manual; nil uses the five-minute default for older saved settings.

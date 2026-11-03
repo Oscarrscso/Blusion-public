@@ -64,7 +64,8 @@ public final class PlayerViewModel {
     private let now: @Sendable () -> Date
     private var timeline: SubtitleTimeline?
     private var bitmapTimeline: BitmapSubtitleTimeline?
-    private var lastInteraction: Date
+    /// Written on every pointer move over the Mac player and read only by the idle timer, so it is kept out of observation.
+    @ObservationIgnored private var lastInteraction: Date
     private var userChoseSubtitle = false
     private var userChoseAudio = false
     /// The choice the defaults made, while the listener has not made one: a better default (an embedded track) may still replace it.
@@ -186,6 +187,8 @@ public final class PlayerViewModel {
         let coordinator = PlaybackCoordinator(plan: plan, resumeFrom: resume, progress: session, layout: pictureLayout,
                                               processing: pendingResume?.processing ?? player.processing,
                                               subtitleStyle: player.subtitleStyle, makeEngine: services.makeEngine)
+        // Settings → Player's speed. Kept by the coordinator, which gives it to each engine it makes.
+        if player.playbackSpeed != 1 { coordinator.setRate(Float(player.playbackSpeed)) }
         coordinator.onEnded = { [weak self] in
             self?.hasFinished = true
             // The film ended mid-hold: it must not carry on at the held speed into whatever plays next.
@@ -590,12 +593,22 @@ public final class PlayerViewModel {
         if controlsVisible { controlsVisible = false } else { showControls() }
     }
 
-    /// Call periodically. Hides the controls after a few idle seconds, but only while playing (or stalled while meant to play, so the
-    /// picture is clear and the spinner stands alone) and not scrubbing.
+    /// Call periodically. Hides the controls after a few idle seconds (Settings → Player's Hide controls, three by default, as
+    /// `controlsHideDelay`; never when set to zero), but only while playing (or stalled while meant to play, so the picture is clear and the spinner
+    /// stands alone) and not scrubbing.
     public func hideControlsIfIdle() {
-        guard controlsVisible, wantsPlayback, !isScrubbing, now().timeIntervalSince(lastInteraction) >= Self.controlsHideDelay else { return }
+        let seconds = settings.player.controlsHideSeconds
+        guard seconds > 0, controlsVisible, wantsPlayback, !isScrubbing,
+              now().timeIntervalSince(lastInteraction) >= TimeInterval(seconds) else { return }
         controlsVisible = false
     }
+
+    /// How far Back and Forward jump, in seconds (Settings → Player).
+    public var skipBackSeconds: TimeInterval { TimeInterval(settings.player.skipBackSeconds) }
+    public var skipForwardSeconds: TimeInterval { TimeInterval(settings.player.skipForwardSeconds) }
+
+    public func skipBack() async { await skip(by: -skipBackSeconds) }
+    public func skipForward() async { await skip(by: skipForwardSeconds) }
 
     // MARK: Chapters and skipping
 
@@ -772,9 +785,10 @@ public final class PlayerViewModel {
         showControls()
     }
 
-    public func setProcessing(_ processing: VideoProcessing) {
+    /// `save` false applies it to the picture only, for a slider mid-drag; the release saves it.
+    public func setProcessing(_ processing: VideoProcessing, save: Bool = true) {
         coordinator?.setProcessing(processing)
-        savePreferences { $0.processing = processing }
+        if save { savePreferences { $0.processing = processing } }
         showControls()
     }
 

@@ -95,18 +95,43 @@ struct MediaRow<Content: View>: View {
     let hideTitle: Bool
     let onSeeAll: (() -> Void)?
     let content: () -> Content
+    private let artworkItems: [MetaPreview]
+    private let artworkAspect: CardAspect
+    private let artworkSize: CardSize
+    private let artworkWidth: CGFloat?
+    private let usesBetterPosters: Bool
+    @State private var visibleRange: ClosedRange<Int>?
+    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+    @Environment(\.isLandscape) private var isLandscape
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
     /// The row's own menu, on its title and the space between its cards. A card's hold is the card's own: on iPhone it plays it.
     private var shelfMenu: AnyView?
     @State private var zoomScope = UUID().uuidString
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appAppearance) private var appearance
+    /// The tallest card built so far, for the shape and text size it was measured at. With it the row has a fixed height, so laying out
+    /// the page does not measure the row's cards again on every update: a lazy row that does not know its height builds and sizes cards,
+    /// off screen ones too, each time the page around it changes.
+    @State private var measuredHeight: (key: String, height: CGFloat)?
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's UIKit shelf for a row built from a list of items (see `CollectionShelf`). Nil for a row of arbitrary content.
+    fileprivate var collectionShelf: ((MediaRowShelfContext) -> AnyView)?
+    #endif
 
     init(_ title: String, subtitle: String? = nil, hideTitle: Bool = false, onSeeAll: (() -> Void)? = nil,
-         @ViewBuilder content: @escaping () -> Content) {
+         artworkItems: [MetaPreview] = [], aspect: CardAspect = .poster, size: CardSize = .medium,
+         cardWidth: CGFloat? = nil, usesBetterPosters: Bool = false, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.subtitle = subtitle
         self.hideTitle = hideTitle
         self.onSeeAll = onSeeAll
         self.content = content
+        self.artworkItems = artworkItems
+        self.artworkAspect = aspect
+        self.artworkSize = size
+        self.artworkWidth = cardWidth
+        self.usesBetterPosters = usesBetterPosters
     }
 
     /// Gives the row a menu on its title and the space between its cards, but not on the cards (see `shelfMenu`).
@@ -123,14 +148,40 @@ struct MediaRow<Content: View>: View {
                     .modifier(OptionalContextMenu(menu: shelfMenu))
                     .padding(.horizontal, metrics.pageMargin)
             }
+            shelf
+        }
+        .environment(\.zoomScope, zoomScope)
+    }
+
+    @ViewBuilder
+    private var shelf: some View {
+        #if targetEnvironment(macCatalyst)
+        if let collectionShelf {
+            collectionShelf(MediaRowShelfContext(
+                itemWidth: MediaCard.resolvedWidth(width: artworkWidth, aspect: artworkAspect, size: artworkSize, metrics: metrics,
+                                                   isLandscape: isLandscape),
+                spacing: metrics.cardSpacing, margin: metrics.pageMargin, heightKey: heightKey,
+                onVisibleRange: { range in if visibleRange != range { visibleRange = range } }))
+                .modifier(BufferedArtwork(shelves: [ArtworkShelf(items: bufferedItems, aspect: artworkAspect, size: artworkSize,
+                                                                 width: artworkWidth, usesBetterPosters: usesBetterPosters)]))
+        } else {
+            swiftUIShelf
+        }
+        #else
+        swiftUIShelf
+        #endif
+    }
+
+    private var swiftUIShelf: some View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(subviews: content()) { card in
                         #if targetEnvironment(macCatalyst)
-                        // This row sizes itself; only iPhone haptics consume its card-edge preferences.
-                        card.id(card.id)
+                        // Only iPhone haptics consume card-edge preferences.
+                        card.id(card.id).onGeometryChange(for: CGFloat.self) { $0.size.height } action: { recordHeight($0) }
                         #else
                         card.id(card.id).reportsShelfEdge(id: card.id)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { recordHeight($0) }
                         #endif
                     }
                 }
@@ -146,16 +197,106 @@ struct MediaRow<Content: View>: View {
                     }
                 }
             }
+            .onScrollGeometryChange(for: ClosedRange<Int>?.self) { geometry in
+                guard !artworkItems.isEmpty else { return nil }
+                let width = MediaCard.resolvedWidth(width: artworkWidth, aspect: artworkAspect, size: artworkSize,
+                                                    metrics: metrics, isLandscape: isLandscape)
+                let pitch = width + metrics.cardSpacing
+                let first = min(artworkItems.count - 1, max(0, Int(((geometry.visibleRect.minX - metrics.pageMargin) / pitch).rounded(.down))))
+                let last = min(artworkItems.count - 1, max(first, Int(((geometry.visibleRect.maxX - metrics.pageMargin) / pitch).rounded(.down))))
+                return first...last
+            } action: { _, range in visibleRange = range }
+            .modifier(BufferedArtwork(shelves: [ArtworkShelf(items: bufferedItems, aspect: artworkAspect, size: artworkSize,
+                                                             width: artworkWidth, usesBetterPosters: usesBetterPosters)]))
             .scrollIndicators(.hidden, axes: .horizontal)
             .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
             .softSnappingScroll()
             .scrollClipDisabled()
-        }
-        .environment(\.zoomScope, zoomScope)
+            .frame(height: rowHeight)
+    }
+
+    /// What the cards' height depends on: their shape and size, the text size of their captions and Appearance (card size, poster
+    /// titles, font). A change measures again.
+    private var heightKey: String {
+        "\(artworkAspect.rawValue)|\(artworkSize.rawValue)|\(artworkWidth ?? 0)|\(isLandscape)|\(dynamicTypeSize)|\(metrics.posterWidth)|"
+            + appearance.layoutKey
+    }
+
+    private var rowHeight: CGFloat? {
+        guard let measuredHeight, measuredHeight.key == heightKey else { return nil }
+        return measuredHeight.height
+    }
+
+    /// Keeps the tallest card's height. It only grows for one key, so a card built later that is taller is never cut off.
+    private func recordHeight(_ height: CGFloat) {
+        guard height > 0 else { return }
+        let key = heightKey
+        if let measuredHeight, measuredHeight.key == key, measuredHeight.height >= height - 0.5 { return }
+        measuredHeight = (key, height.rounded(.up))
+    }
+
+    private var bufferedItems: [MetaPreview] {
+        guard sectionIsVisible, let visibleRange,
+              let range = LazyLoadLookahead.bufferRange(visible: visibleRange, count: artworkItems.count,
+                  titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+        return Array(artworkItems[range])
     }
 }
 
-/// A lazy grid whose cards load only while visible. The last visible card requests the next page.
+/// One card's place in a row built from a list of items: its index and identity.
+struct ShelfItem<Item>: Identifiable {
+    let id: String
+    let index: Int
+    let item: Item
+}
+
+/// The cards of a row built from a list of items, for the SwiftUI shelf (iPhone, and anywhere the Mac does not use `CollectionShelf`).
+struct ShelfCards<Item, Card: View>: View {
+    let items: [Item]
+    let id: (Item) -> String
+    let card: (Int, Item) -> Card
+
+    var body: some View {
+        ForEach(items.enumerated().map { ShelfItem(id: id($0.element), index: $0.offset, item: $0.element) }) { entry in
+            card(entry.index, entry.item)
+        }
+    }
+}
+
+#if targetEnvironment(macCatalyst)
+/// What a row tells its `CollectionShelf`: the cards' width, the gaps and margins, and where to report the cards on screen.
+struct MediaRowShelfContext {
+    let itemWidth: CGFloat
+    let spacing: CGFloat
+    let margin: CGFloat
+    let heightKey: String
+    let onVisibleRange: (ClosedRange<Int>?) -> Void
+}
+#endif
+
+extension MediaRow {
+    /// A row of `items`, one card each, all as wide as a card of `aspect`, `size` and `cardWidth`. On Mac it scrolls in a `CollectionShelf`;
+    /// on iPhone it is the SwiftUI shelf, as rows of arbitrary content are.
+    init<Item, Card: View>(_ title: String, subtitle: String? = nil, hideTitle: Bool = false, onSeeAll: (() -> Void)? = nil,
+                           items: [Item], id: @escaping (Item) -> String, artworkItems: [MetaPreview] = [], aspect: CardAspect = .poster,
+                           size: CardSize = .medium, cardWidth: CGFloat? = nil, usesBetterPosters: Bool = false,
+                           scrollToStart: Int = 0,
+                           @ViewBuilder card: @escaping (Int, Item) -> Card) where Content == ShelfCards<Item, Card> {
+        self.init(title, subtitle: subtitle, hideTitle: hideTitle, onSeeAll: onSeeAll, artworkItems: artworkItems, aspect: aspect, size: size,
+                  cardWidth: cardWidth, usesBetterPosters: usesBetterPosters) {
+            ShelfCards(items: items, id: id, card: card)
+        }
+        #if targetEnvironment(macCatalyst)
+        collectionShelf = { context in
+            AnyView(CollectionShelf(items: items, id: id, itemWidth: context.itemWidth, spacing: context.spacing, margin: context.margin,
+                                    heightKey: context.heightKey, scrollToStart: scrollToStart, onVisibleRange: context.onVisibleRange,
+                                    cell: card))
+        }
+        #endif
+    }
+}
+
+/// A lazy grid that preloads the chosen number of titles around the visible cards and requests the next page within that buffer.
 /// `fillsWidth` makes Mac columns span the available width.
 struct MediaGrid: View {
     let items: [MetaPreview]
@@ -165,6 +306,8 @@ struct MediaGrid: View {
     let usesBetterPosters: Bool
     let fillsWidth: Bool
     @State private var zoomScope = UUID().uuidString
+    @State private var visibleIDs: Set<String> = []
+    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isLandscape) private var isLandscape
 
@@ -185,13 +328,42 @@ struct MediaGrid: View {
                 MediaCardLink(item: item, aspect: aspect, showsRating: showsRating, usesBetterPosters: usesBetterPosters)
                     .stretched()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onScrollVisibilityChange(threshold: 0.01) { visible in
-                        if visible, item.identity == items.last?.identity { onLastAppear?() }
+                    .onGeometryChange(for: Bool.self) { proxy in
+                        guard let viewport = proxy.bounds(of: .scrollView) else { return true }
+                        return viewport.intersects(CGRect(origin: .zero, size: proxy.size))
+                    } action: { visible in
+                        if visible { visibleIDs.insert(item.identity) }
+                        else { visibleIDs.remove(item.identity) }
                     }
+                    .onDisappear { visibleIDs.remove(item.identity) }
             }
         }
         .padding(.horizontal, metrics.pageMargin)
         .environment(\.zoomScope, zoomScope)
+        .modifier(BufferedArtwork(shelves: [ArtworkShelf(items: bufferedItems, aspect: aspect, usesBetterPosters: usesBetterPosters)]))
+        .task(id: nextPageID) {
+            if nextPageID != nil { onLastAppear?() }
+        }
+    }
+
+    private var visibleRange: ClosedRange<Int>? {
+        let indices = items.indices.filter { visibleIDs.contains(items[$0].identity) }
+        guard let first = indices.first, let last = indices.last else { return nil }
+        return first...last
+    }
+
+    private var bufferedItems: [MetaPreview] {
+        guard let visibleRange,
+              let range = LazyLoadLookahead.bufferRange(visible: visibleRange, count: items.count,
+                                                       titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+        return Array(items[range])
+    }
+
+    private var nextPageID: String? {
+        guard let visibleRange,
+              visibleRange.upperBound >= LazyLoadLookahead.triggerIndex(count: items.count,
+                  titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return nil }
+        return items.last?.identity
     }
 
     /// Mac, for a grid that fills its width: an adaptive column stops at its maximum width and so can leave a gutter on the right, so its

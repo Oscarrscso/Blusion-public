@@ -31,7 +31,7 @@ struct HeroBannerSection: View {
     private var header: some View {
         if case .loaded(let items) = section.state, !items.isEmpty {
             SectionHeader(section.widget.title, onSeeAll: {
-                Haptics.tap()
+                Haptics.play(.titles)
                 router.homePath.append(CatalogListRequest(title: section.widget.title, sources: [row.source], presentation: row.presentation))
             })
         } else {
@@ -76,13 +76,16 @@ struct HeroBanner: View {
     var menu: AnyView?
     @Environment(\.layoutMetrics) private var metrics
     @State private var heroArtwork: TMDbArtwork?
+    @State private var artworkChecked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            BannerFeature(item: items[0], showsRating: row.presentation.showsRatings, heroArtwork: $heroArtwork)
+            BannerFeature(item: items[0], showsRating: row.presentation.showsRatings, heroArtwork: $heroArtwork, artworkChecked: $artworkChecked)
                 .modifier(OptionalContextMenu(menu: menu))
             if items.count > 1 {
-                let tray = MediaRow("", hideTitle: true) {
+                let tray = MediaRow("", hideTitle: true, artworkItems: Array(items.dropFirst()), aspect: .wide,
+                                    size: row.presentation.cardStyle.cardSize, cardWidth: cardWidth,
+                                    usesBetterPosters: row.presentation.usesBetterPosters) {
                     ForEach(Array(items.dropFirst()), id: \.identity) { item in
                         MediaCardLink(item: item, aspect: .wide, size: row.presentation.cardStyle.cardSize,
                                       showsRating: row.presentation.showsRatings, width: cardWidth, subtitle: item.releaseInfo ?? " ",
@@ -102,17 +105,22 @@ struct HeroBanner: View {
         .padding(.horizontal, metrics.pageMargin)
     }
 
-    static let cornerRadius: CGFloat = 28
+    static let cornerRadius: CGFloat = 20
+
+    static func featureHeight(width: CGFloat, margin: CGFloat, isPhoneLandscape: Bool) -> CGFloat {
+        min((width - margin * 2) * 9 / 16, isPhoneLandscape ? 180 : 260)
+    }
 
     /// The small cards of the tray: about a third of the banner's width on a phone, a little under a shelf poster's width.
     private var cardWidth: CGFloat {
         (metrics.posterWidth * 0.96 * row.presentation.cardStyle.cardSize.scale).rounded()
     }
 
-    /// The featured picture, blurred and darkened, so the tray picks up the colours above it.
+    /// The featured picture, blurred and darkened, so the tray picks up the colours above it. It waits for the same lookup as the feature
+    /// and decodes at the feature's size, so the one download and decode serve both and no poster loads beside it.
     private var tray: some View {
-        ArtworkImage(url: heroArtwork?.backdrop ?? items[0].background ?? MetahubArtwork.background(imdbID: items[0].id), maxPixelSize: 256,
-                     contentMode: .fill, placeholderURL: items[0].poster, imageAlignment: .bottom)
+        ArtworkImage(url: artworkChecked ? (heroArtwork?.backdrop ?? items[0].background ?? MetahubArtwork.background(imdbID: items[0].id)) : nil,
+                     maxPixelSize: 2048, contentMode: .fill, imageAlignment: .bottom)
             .blur(radius: 40)
             .overlay { Color.black.opacity(0.55) }
             .background(Theme.surface)
@@ -124,24 +132,27 @@ private struct BannerFeature: View {
     let item: MetaPreview
     let showsRating: Bool
     @Binding var heroArtwork: TMDbArtwork?
+    @Binding var artworkChecked: Bool
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.heroContainerWidth) private var containerWidth
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(PosterRatingsStore.self) private var ratings
 
     var body: some View {
         let sourceID = "banner/\(item.identity)"
         let openTitle = {
-            Haptics.tap()
+            Haptics.play(.titles)
             router.homePath.append(TitleDestination(preview: item, sourceID: sourceID, artwork: heroArtwork,
                                                     artworkChecked: heroArtwork != nil))
         }
         Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .frame(height: HeroBanner.featureHeight(width: containerWidth, margin: metrics.pageMargin, isPhoneLandscape: isPhoneLandscape))
             .frame(maxWidth: .infinity)
             .overlay {
-                ArtworkImage(url: heroArtwork?.backdrop ?? item.background ?? MetahubArtwork.background(imdbID: item.id), maxPixelSize: 2048,
-                             contentMode: .fill, placeholderURL: item.poster ?? MetahubArtwork.poster(imdbID: item.id), imageAlignment: .top)
+                ArtworkImage(url: artworkChecked ? (heroArtwork?.backdrop ?? item.background ?? MetahubArtwork.background(imdbID: item.id)) : nil,
+                             title: item.name, maxPixelSize: 2048, contentMode: .fill, imageAlignment: .top)
             }
             .clipped()
             // Marked before the fade, so the zoom carries a solid picture. The fade is see-through at the bottom, and there the zoom
@@ -151,12 +162,12 @@ private struct BannerFeature: View {
                 LinearGradient(stops: [.init(color: .black, location: 0.8), .init(color: .black.opacity(0), location: 1)],
                                startPoint: .top, endPoint: .bottom)
             }
-            .overlay(alignment: .top) {
-                LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 110)
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 120)
                     .allowsHitTesting(false)
             }
-            .overlay(alignment: .topLeading) {
+            .overlay(alignment: .bottomLeading) {
                 caption
                     .allowsHitTesting(false)
             }
@@ -175,6 +186,7 @@ private struct BannerFeature: View {
                 let loaded = await ratings.heroArtwork(for: item)
                 guard !Task.isCancelled else { return }
                 heroArtwork = loaded
+                artworkChecked = true
             }
     }
 
@@ -182,16 +194,16 @@ private struct BannerFeature: View {
     private var caption: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.name)
-                .font(.title.bold())
+                .font(.title2.bold())
                 .lineLimit(2)
             Text([item.releaseInfo, rating].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.title3)
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.75))
         }
         .foregroundStyle(.white)
         .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.top, Theme.Spacing.m)
+        .padding(.bottom, Theme.Spacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -203,10 +215,12 @@ private struct BannerFeature: View {
 /// The grey stand-in for a banner, the same shape as the loaded card, shimmering while the items load.
 struct HeroBannerPlaceholder: View {
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.heroContainerWidth) private var containerWidth
+    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
     var body: some View {
         VStack(spacing: 0) {
-            Color.clear.aspectRatio(16.0 / 9.0, contentMode: .fit)
+            Color.clear.frame(height: HeroBanner.featureHeight(width: containerWidth, margin: metrics.pageMargin, isPhoneLandscape: isPhoneLandscape))
             Color.clear.frame(height: 130)
         }
         .frame(maxWidth: .infinity)
