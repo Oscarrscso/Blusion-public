@@ -257,7 +257,8 @@ public final class HomeViewModel {
         let local = await services.progress.all()
         continueWatching = LibraryViewModel.continueWatching(from: local)
         continueEntries = ContinueWatchingEntry.merge(local: local, remote: traktPlayback)
-        guard !refreshingPlayback else { return }
+        // Ghost mode reads nothing from Trakt.
+        guard !GhostMode.isOn, !refreshingPlayback else { return }
         refreshingPlayback = true
         defer { refreshingPlayback = false }
         guard await services.traktAccount.isSignedIn() else {
@@ -391,7 +392,10 @@ public final class HomeViewModel {
             return RowResult(id: id, state: .loaded([]), issue: issue)
         }
         do {
+            // A title sent twice would give two cards one identity, which the rows and the spotlight are keyed by.
+            var seen = Set<String>()
             let items = try await content.items(for: row.source, limit: row.limit, cacheTTL: row.cacheTTL)
+                .filter { seen.insert($0.identity).inserted }
             return RowResult(id: id, state: .loaded(seed.map(items.shuffled(seed:)) ?? items), issue: nil)
         } catch let error as WidgetSourceError {
             guard case .addon(let addonError) = error else { return RowResult(id: id, state: .loaded([]), issue: error) }

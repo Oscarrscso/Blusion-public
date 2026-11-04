@@ -108,8 +108,10 @@ public final class DownloadManager {
             }
             try await persist()
             // Records saved before artwork was cached get theirs now, and one that failed offline is tried again at the next launch.
-            for item in items where item.artworkPath == nil && !deleting.contains(item.id) {
-                Task { await cacheArtwork(item.id, request: item.request) }
+            // A picture whose file has gone is fetched again too.
+            for item in items where !deleting.contains(item.id) {
+                let cached = artworkURL(for: item).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+                if !cached { Task { await cacheArtwork(item.id, request: item.request) } }
             }
             listener = Task { [weak self] in
                 for await event in adapter.events { await self?.handle(event) }
@@ -153,6 +155,8 @@ public final class DownloadManager {
         for item in items where item.request.identity == request.identity {
             if let old = try? await credential(item.id), old.identity.matches(ranked.stream), item.pendingDeletion != true {
                 streamDownloads[ranked.id] = item.id
+                // Asking again for a release that failed or was paused starts it again.
+                if [.paused, .failed].contains(item.state) { await resume(item.id) }
                 return true
             }
         }
@@ -456,7 +460,9 @@ public final class DownloadManager {
                 for item in items where active[item.id] == nil {
                     for file in files where DownloadFiles.valid(file.lastPathComponent, for: item.id) {
                         let name = file.lastPathComponent
-                        if name.contains(".incoming-") || (item.mediaPath == nil && name != item.id.uuidString + ".partial") {
+                        // An unfinished download keeps its partial file and its card's picture.
+                        let kept = [item.id.uuidString + ".partial", item.id.uuidString + ".artwork"]
+                        if name.contains(".incoming-") || (item.mediaPath == nil && !kept.contains(name)) {
                             try? FileManager.default.removeItem(at: file)
                         }
                     }

@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import StremioKit
 
-/// Discover: pick a catalog and genre, scroll, and `skip`-paginate.
+/// Discover: combine every installed catalog, filter and sort titles, and paginate each source.
 @MainActor
 @Observable
 public final class DiscoverViewModel {
@@ -15,16 +15,17 @@ public final class DiscoverViewModel {
     }
 
     public private(set) var sources: [CatalogSource] = []
-    public private(set) var selectedSource: CatalogSource?
-    /// The content type of `selectedSource`; nil until a source is selected.
+    /// Nil combines all content types.
     public private(set) var selectedType: String?
     public private(set) var selectedGenre: String?
-    /// True when the type control is on "All": the catalog menu then lists the sources of every type.
-    public private(set) var showsAllTypes = false
+    public var showsAllTypes: Bool { selectedType == nil }
     public private(set) var items: [MetaPreview] = []
     public private(set) var state: State = .idle
     public private(set) var canLoadMore = false
     public var isOffline: Bool { state == .failed(.offline) }
+    public var sort: CatalogListSort = .original
+    public var minimumRating: Double?
+
     /// The release-year span the Year menu chose, inclusive bounds. Titles outside it are hidden from `visibleItems`; nothing is fetched again.
     public var minimumYear: Int?
     public var maximumYear: Int?
@@ -49,30 +50,22 @@ public final class DiscoverViewModel {
     private let services: AppServices
     private var cursors: [Cursor] = []
     private var generation = 0
-    /// Raw items received so far: the protocol's `skip` counts items the addon sent, not items left after de-duplication.
-    private var receivedCount = 0
 
     public init(services: AppServices) {
         self.services = services
     }
 
     public var genres: [String] {
-        guard showsAllTypes else { return selectedSource?.catalog.genreOptions ?? [] }
         var all: [String] = []
-        for genre in mixSources.flatMap(\.catalog.genreOptions) where !all.contains(genre) { all.append(genre) }
+        for genre in visibleSources.flatMap(\.catalog.genreOptions) where !all.contains(genre) { all.append(genre) }
         return all
     }
     public var hasSources: Bool { !sources.isEmpty }
 
-    /// The loaded titles inside the year span, in catalogue order. As in the Library, a title with no known year is hidden while a span is set.
+    /// Sort and filter the loaded titles using the same rules as a catalog's See All page.
     public var visibleItems: [MetaPreview] {
-        guard minimumYear != nil || maximumYear != nil else { return items }
-        return items.filter { item in
-            guard let year = LibraryFiltering.year(from: item.releaseInfo) else { return false }
-            if let minimumYear, year < minimumYear { return false }
-            if let maximumYear, year > maximumYear { return false }
-            return true
-        }
+        CatalogListFiltering.apply(CatalogListFilter(sort: sort, minimumYear: minimumYear,
+                                                    maximumYear: maximumYear, minimumRating: minimumRating), to: items)
     }
 
     /// Distinct content types of `sources`: by `ContentTypeName.sortRank`, then by first appearance.
@@ -85,77 +78,32 @@ public final class DiscoverViewModel {
         }.map(\.element)
     }
 
-    /// The catalogs the "All" mix reads: the selected one and its counterpart of the other type (same addon and name when there is
-    /// one, else the same name, else the type's first catalog), movies first.
-    var mixSources: [CatalogSource] {
-        guard let selected = selectedSource else { return [] }
-        return ["movie", "series"].compactMap { type in
-            if selected.type.lowercased() == type { return selected }
-            let ofType = sources.filter { $0.type.lowercased() == type }
-            let name = selected.title.lowercased()
-            return ofType.first { $0.addon.id == selected.addon.id && $0.title.lowercased() == name }
-                ?? ofType.first { $0.title.lowercased() == name }
-                ?? ofType.first
-        }
-    }
-
-    /// The sources of the selected type; on "All" the movie catalogs (each one brings its series counterpart); every source when no
-    /// type is selected.
+    /// Every catalog of the selected type, or every installed catalog on All.
     public var visibleSources: [CatalogSource] {
-        if showsAllTypes {
-            let movies = sources.filter { $0.type.lowercased() == "movie" }
-            return movies.isEmpty ? sources : movies
-        }
         guard let selectedType else { return sources }
         return sources.filter { $0.type == selectedType }
     }
 
-    /// Refreshes the catalog list, keeping the current selection when it still exists.
-    /// Otherwise the first type (by `types`) and its first source are selected.
     public func loadSources() async {
-        sources = await services.browse.catalogSources()
+        let refreshed = await services.browse.catalogSources()
         guard !Task.isCancelled else { return }
-        if let current = selectedSource, sources.contains(current) {
-            // Leaving the tab cancels its task; resume the unfinished first page when it returns.
-            if state == .idle || state == .loadingFirstPage { await reload() }
-            return
-        }
-        guard let type = types.first, let first = sources.first(where: { $0.type == type }) else {
-            selectedSource = nil
-            selectedType = nil
-            items = []
-            state = .idle
-            return
-        }
-        await select(source: first)
+        let changed = refreshed != sources
+        sources = refreshed
+        if let selectedType, !types.contains(selectedType) { self.selectedType = nil }
+        if let genre = selectedGenre, !genres.contains(genre) { selectedGenre = nil }
+        if changed || state == .idle || state == .loadingFirstPage { await reload() }
     }
 
-    /// Switches to a content type: selects that type's first source and reloads. Unknown types change nothing.
+    /// Type choices narrow the catalogs being combined; they never select an individual catalog.
     public func select(type: String) async {
-        showsAllTypes = false
-        guard let first = sources.first(where: { $0.type == type }) else { return }
-        await select(source: first)
-    }
-
-    /// Switches to "All": movies and series of the selected catalog, mixed into one grid.
-    public func selectAllTypes() async {
-        showsAllTypes = true
-        if let selected = selectedSource, selected.type.lowercased() != "movie",
-           let movie = sources.first(where: { $0.type.lowercased() == "movie" && $0.title.lowercased() == selected.title.lowercased() }) {
-            selectedSource = movie
-            selectedType = movie.type
-        } else if selectedSource == nil, let first = sources.first {
-            selectedSource = first
-            selectedType = first.type
-        }
+        guard types.contains(type) else { return }
+        selectedType = type
         if let genre = selectedGenre, !genres.contains(genre) { selectedGenre = nil }
         await reload()
     }
 
-    public func select(source: CatalogSource) async {
-        selectedSource = source
-        selectedType = source.type
-        if let genre = selectedGenre, !source.catalog.genreOptions.contains(genre) { selectedGenre = nil }
+    public func selectAllTypes() async {
+        selectedType = nil
         await reload()
     }
 
@@ -166,55 +114,33 @@ public final class DiscoverViewModel {
     }
 
     public func reload() async {
-        guard !Task.isCancelled, let source = selectedSource else { return }
+        guard !Task.isCancelled else { return }
         generation += 1
         let current = generation
         items = []
-        receivedCount = 0
         canLoadMore = false
-        state = .loadingFirstPage
-        if showsAllTypes {
-            cursors = mixSources.map { mixed in
-                Cursor(source: mixed, hasMore: selectedGenre.map { mixed.catalog.genreOptions.contains($0) } ?? true)
-            }
-            await loadMixedPage(generation: current)
+        cursors = visibleSources.map { source in
+            Cursor(source: source, hasMore: selectedGenre.map { genre in
+                source.catalog.genreOptions.isEmpty || source.catalog.genreOptions.contains(genre)
+            } ?? true)
+        }
+        guard !sources.isEmpty else {
+            state = .idle
             return
         }
-        do {
-            let page = try await services.browse.page(source, genre: selectedGenre, skip: 0)
-            guard current == generation else { return }
-            append(page, source: source)
-            state = .loaded
-        } catch {
-            guard current == generation else { return }
-            let error = AddonError.from(error)
-            state = Task.isCancelled || error == .cancelled ? .idle : .failed(error)
-        }
+        state = .loadingFirstPage
+        await loadMixedPage(generation: current)
     }
 
-    /// Call when the last item scrolls into view. Does nothing while a load is running or after an empty page.
+    /// Each catalog keeps its own raw skip count, independently of duplicate or filtered titles.
     public func loadMore() async {
-        guard canLoadMore, state == .loaded, let source = selectedSource else { return }
+        guard canLoadMore, state == .loaded else { return }
         let current = generation
         state = .loadingMore
-        if showsAllTypes {
-            await loadMixedPage(generation: current)
-            return
-        }
-        do {
-            let page = try await services.browse.page(source, genre: selectedGenre, skip: receivedCount)
-            guard current == generation else { return }
-            append(page, source: source)
-            state = .loaded
-        } catch {
-            guard current == generation else { return }
-            // Keep what we have; the user can scroll again to retry.
-            state = .loaded
-        }
+        await loadMixedPage(generation: current)
     }
 
-    /// Reads the next page of every catalog in the mix at once and interleaves them (movie, series, movie, ...), so neither type
-    /// buries the other. A catalog that fails is skipped; the mix only fails when none answers.
+    /// Reads a page from every catalog and interleaves their titles, removing duplicates across sources. A catalog that fails is skipped; the mix only fails when none answers.
     private func loadMixedPage(generation current: Int) async {
         let browse = services.browse
         let genre = selectedGenre
@@ -245,19 +171,18 @@ public final class DiscoverViewModel {
             cursors[index].received += page.count
             cursors[index].hasMore = !page.isEmpty && cursors[index].source.catalog.supportsSkip
         }
-        var known = Set(items.map(\.id))
-        let ordered = pages.keys.sorted().map { pages[$0] ?? [] }
+        var known = Set(items.map(\.identity))
+        let ordered = pages.keys.sorted().map { index in
+            let page = pages[index] ?? []
+            // Addons without a genre parameter are filtered locally; skip still counts the complete page above.
+            guard let genre, cursors[index].source.catalog.extra(named: "genre") == nil else { return page }
+            return page.filter { $0.genres.contains { $0.localizedCaseInsensitiveCompare(genre) == .orderedSame } }
+        }
         for position in 0..<(ordered.map(\.count).max() ?? 0) {
-            for page in ordered where position < page.count && known.insert(page[position].id).inserted { items.append(page[position]) }
+            for page in ordered where position < page.count && known.insert(page[position].identity).inserted { items.append(page[position]) }
         }
         canLoadMore = cursors.contains(where: \.hasMore)
         state = .loaded
     }
 
-    private func append(_ page: [MetaPreview], source: CatalogSource) {
-        receivedCount += page.count
-        let known = Set(items.map(\.id))
-        items.append(contentsOf: page.filter { !known.contains($0.id) })
-        canLoadMore = !page.isEmpty && source.catalog.supportsSkip
-    }
 }

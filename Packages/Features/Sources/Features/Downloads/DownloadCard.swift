@@ -7,6 +7,7 @@ import PlayerKit
 /// progress, speed and controls, with the details under them. The card's own background is a soft blur of the same artwork, tinted so the
 /// text reads; the thumbnail is drawn as it is. Tapping the card opens its title, while the download controls act independently.
 struct DownloadCard: View {
+    @Environment(\.layoutMetrics) private var metrics
     let item: DownloadItem
     let manager: DownloadManager
     let progress: WatchProgress?
@@ -61,12 +62,12 @@ struct DownloadCard: View {
         .padding(Theme.Spacing.m)
         .background {
             NavigationLink(value: titlePreview) {
-                backdrop.contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                backdrop.contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityHidden(true)
         }
-        .glassHairline(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .glassHairline(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
         .accessibilityIdentifier("download.\(item.id.uuidString)")
     }
 
@@ -199,7 +200,7 @@ struct DownloadCard: View {
                 .blur(radius: 44, opaque: true)
             Color.black.opacity(0.5)
         }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
         .accessibilityHidden(true)
     }
 }

@@ -46,8 +46,8 @@ public struct WatchProgress: Sendable, Codable, Equatable, Identifiable {
 
     public var fraction: Double { duration > 0 ? min(1, max(0, position / duration)) : 0 }
 
-    /// The series a watched episode belongs to (`tt1` for `tt1:1:2`).
-    public var seriesID: String? { type == "series" ? ContentID(contentID).baseID : nil }
+    /// The series a watched episode belongs to (`tt1` for `tt1:1:2`, `kitsu:1` for `kitsu:1:5`).
+    public var seriesID: String? { type == "series" ? ContentID.seriesID(of: contentID, season: season, episode: episode) : nil }
 }
 
 public struct ProgressPolicy: Sendable, Equatable {

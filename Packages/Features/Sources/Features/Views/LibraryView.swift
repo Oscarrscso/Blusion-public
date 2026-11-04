@@ -285,48 +285,4 @@ struct LibraryView: View {
 
 }
 
-/// The minimum rating, shown out of 100. Each title is rated by its best available score, so the menu names no site.
-struct RatingPicker: View {
-    @Binding var threshold: Double?
-
-    var body: some View {
-        Picker("At least", selection: $threshold) {
-            Text("Any").tag(Double?.none)
-            ForEach([5.0, 6, 7, 8, 9, 10], id: \.self) { value in
-                Text(LibraryFiltering.minimumRatingText(value)).tag(Double?.some(value))
-            }
-        }
-        .accessibilityIdentifier("library.filter.rating.threshold")
-    }
-}
-
-/// Release years in ten-year spans, "1920 - 1929" up to "2020 - 2029", shared by the Library and Discover. Choosing a span sets both ends
-/// of the year filter to it; "Any" clears it. `identifier` names the spans: each is "<identifier>.<start year>".
-struct ReleaseYearOptions: View {
-    @Binding var minimumYear: Int?
-    @Binding var maximumYear: Int?
-    let identifier: String
-    private static let starts = Array(stride(from: 1920, through: 2020, by: 10))
-
-    var body: some View {
-        Button { setSpan(nil) } label: {
-            choice("Any", isOn: minimumYear == nil && maximumYear == nil)
-        }
-        ForEach(Self.starts, id: \.self) { start in
-            Button { setSpan(start) } label: {
-                choice("\(start) - \(start + 9)", isOn: minimumYear == start && maximumYear == start + 9)
-            }
-            .accessibilityIdentifier("\(identifier).\(start)")
-        }
-    }
-
-    private func setSpan(_ start: Int?) {
-        minimumYear = start
-        maximumYear = start.map { $0 + 9 }
-    }
-
-    @ViewBuilder private func choice(_ title: String, isOn: Bool) -> some View {
-        if isOn { Label(title, systemImage: "checkmark") } else { Text(title) }
-    }
-}
 #endif

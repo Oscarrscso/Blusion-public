@@ -7,6 +7,7 @@ import UIKit
 /// The player's episode picker: the series' seasons and episodes in a glass panel that drops from the Episodes button, in the same style
 /// as the options panel. A tap reads that episode's streams and hands the player a plan for it, as Up Next does at the end of an episode.
 struct PlayerEpisodePicker: View {
+    @Environment(\.layoutMetrics) private var metrics
     /// Reads the chosen episode's streams and returns the plan to play, or nil when none can be played.
     let prepare: (StreamRequest) async -> PlaybackPlan?
     /// The plan is ready: the player moves to it.
@@ -49,8 +50,8 @@ struct PlayerEpisodePicker: View {
                 }
             }
         }
-        .clipShape(.rect(cornerRadius: 24))
-        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
+        .clipShape(.rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
         .foregroundStyle(.white)
         .tint(.white)
         .task { await model.load() }
@@ -77,11 +78,11 @@ struct PlayerEpisodePicker: View {
                     .accessibilityAddTraits(.isHeader)
             }
             Spacer(minLength: 12)
-            Button(action: onClose) {
+            Button { Haptics.play(.playerControls); onClose() } label: {
                 Image(systemName: "xmark").frame(width: 32, height: 32)
             }
             .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
             #if !targetEnvironment(macCatalyst)
             .keyboardShortcut(.escape, modifiers: [])
             #endif
@@ -112,7 +113,7 @@ struct PlayerEpisodePicker: View {
                     }
                 }
             }
-            .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
+            .background(.white.opacity(0.065), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
         }
     }
 
@@ -146,7 +147,7 @@ struct PlayerEpisodePicker: View {
                 ArtworkImage(url: video.thumbnail, title: video.title, maxPixelSize: nil)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .frame(width: 96, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 8 * metrics.cornerScale(for: .playerControls), style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         if let number = video.episode {

@@ -154,7 +154,8 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
     }
 
     private enum Keys: String, CodingKey {
-        case id, title, name, season, episode, number, released, firstAired, thumbnail, overview, description, imdbRating, rating
+        case id, title, name, season, episode, number, released, firstAired, thumbnail, overview, description, imdbRating, rating,
+             ratingSource
     }
 
     public init(from decoder: Decoder) throws {
@@ -167,7 +168,8 @@ public struct Video: Sendable, Equatable, Hashable, Codable, Identifiable {
                   released: container.string(.released) ?? container.string(.firstAired),
                   thumbnail: container.url(.thumbnail),
                   overview: container.string(.overview) ?? container.string(.description),
-                  rating: container.double(.imdbRating) ?? container.double(.rating))
+                  rating: container.double(.imdbRating) ?? container.double(.rating),
+                  ratingSource: container.string(.ratingSource).flatMap(RatingSource.init(rawValue:)))
     }
 }
 

@@ -31,6 +31,7 @@ struct DownloadProgressGlyph: View {
 }
 
 struct NativeDownloadButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let manager: DownloadManager?
     let item: DownloadItem?
     var isLoading = false
@@ -65,15 +66,15 @@ struct NativeDownloadButton: View {
             DownloadProgressGlyph(item: item, isLoading: isLoading, colour: glass == nil ? .white : .white.opacity(0.6),
                                   progressColour: progressColour)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Circle())
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         Group {
             if matchesStream {
-                button.buttonStyle(.plain).background(Theme.surfaceStrong, in: Circle())
+                button.buttonStyle(.plain).background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             } else if let glass {
                 button.buttonStyle(.plain)
                     .frame(width: size, height: size)
-                    .glassEffect(glass, in: .circle)
+                    .glassEffect(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             } else {
                 button.glassCircleButton()
             }

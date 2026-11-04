@@ -7,7 +7,6 @@ struct DiscoverView: View {
     @State private var model: DiscoverViewModel
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
-    @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(AppRouter.self) private var router
     let onOpenAddons: () -> Void
     /// The id of the page's content, which its scroll goes back to when its tab's item is tapped.
@@ -88,9 +87,7 @@ struct DiscoverView: View {
     /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
-    /// The filter block the Library shares (see `BrowseFilterBar`): the type control, shown for Movies and Series when both exist,
-    /// then the Year, Catalog and Genre menus, then a chip for the year span and one for the genre. Clearing them all reloads only
-    /// for the genre, since the year span filters what is already loaded.
+    /// Discover supplies the controls; BrowseFilterBar owns their layout on both platforms.
     private var filters: some View {
         @Bindable var model = model
         // Movies and Series only: the other catalogue types stay out of the type control.
@@ -105,6 +102,11 @@ struct DiscoverView: View {
         if let genre = model.selectedGenre {
             chips.append(ActiveFilterChip(id: "genre", label: genre) { Task { await model.select(genre: nil) } })
         }
+        if let rating = model.minimumRating {
+            chips.append(ActiveFilterChip(id: "rating", label: "Rating \(LibraryFiltering.minimumRatingText(rating))") {
+                model.minimumRating = nil
+            })
+        }
         return BrowseFilterBar(kinds: types.count > 1 ? .init(titles: ["All", "Movies", "Series"], selection: Binding {
             model.showsAllTypes ? 0 : model.selectedType?.lowercased() == "series" ? 2 : 1
         } set: { index in
@@ -115,27 +117,14 @@ struct DiscoverView: View {
         }, identifier: "discover.filter.type") : nil, chips: chips, identifier: "discover", clearAll: {
             model.minimumYear = nil
             model.maximumYear = nil
+            model.minimumRating = nil
             if model.selectedGenre != nil { Task { await model.select(genre: nil) } }
         }) {
-            Menu {
-                ReleaseYearOptions(minimumYear: $model.minimumYear, maximumYear: $model.maximumYear, identifier: "discover.filter.year")
-            } label: {
-                FilterMenuLabel("Year", systemImage: "calendar", isActive: model.minimumYear != nil || model.maximumYear != nil,
-                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
-            }
-            .accessibilityIdentifier("discover.filter.year")
-            Menu {
-                ForEach(model.visibleSources) { source in
-                    Button("\(source.title) · \(source.addon.name)") { Task { await model.select(source: source) } }
-                }
-            } label: {
-                FilterMenuLabel(model.selectedSource?.title ?? "Catalog", systemImage: "square.stack",
-                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
-            }
-            .accessibilityIdentifier("discover.catalogMenu")
             if !model.genres.isEmpty {
                 Menu {
-                    Button("All genres") { Task { await model.select(genre: nil) } }
+                    Button { Task { await model.select(genre: nil) } } label: {
+                        if model.selectedGenre == nil { Label("All genres", systemImage: "checkmark") } else { Text("All genres") }
+                    }
                     ForEach(model.genres, id: \.self) { genre in
                         Button {
                             Task { await model.select(genre: genre) }
@@ -144,15 +133,44 @@ struct DiscoverView: View {
                         }
                     }
                 } label: {
-                    FilterMenuLabel(model.selectedGenre ?? "Genre", systemImage: "tag", isActive: model.selectedGenre != nil,
+                    FilterMenuLabel("Genre", systemImage: "tag", isActive: model.selectedGenre != nil,
                                     minHeight: BrowseFilterBar<EmptyView>.menuHeight)
                 }
                 .accessibilityIdentifier("discover.genreMenu")
             }
+            Menu {
+                Picker("Sort by", selection: $model.sort) {
+                    ForEach(CatalogListSort.allCases.filter { $0 != .shuffle }) {
+                        Label($0.title, systemImage: $0.systemImage).tag($0)
+                    }
+                }
+            } label: {
+                FilterMenuLabel(model.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.sort != .original,
+                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+            }
+            .accessibilityLabel("Sort by \(model.sort.title)")
+            .accessibilityIdentifier("discover.sort")
+            Menu {
+                ReleaseYearOptions(minimumYear: $model.minimumYear, maximumYear: $model.maximumYear,
+                                   identifier: "discover.filter.year")
+            } label: {
+                FilterMenuLabel("Year", systemImage: "calendar", isActive: model.minimumYear != nil || model.maximumYear != nil,
+                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+            }
+            .accessibilityIdentifier("discover.filter.year")
+            Menu {
+                RatingPicker(threshold: $model.minimumRating)
+            } label: {
+                FilterMenuLabel("Rating", systemImage: "star.fill", isActive: model.minimumRating != nil,
+                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+            }
+            .accessibilityIdentifier("discover.filter.rating")
         }
         .onChange(of: model.selectedGenre) { _, _ in Haptics.play(.choices) }
-        .onChange(of: model.selectedSource) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.selectedType) { _, _ in Haptics.play(.choices) }
         .onChange(of: model.minimumYear) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.minimumRating) { _, _ in Haptics.play(.choices) }
+        .onChange(of: model.sort) { _, _ in Haptics.play(.choices) }
     }
 
     @ViewBuilder
@@ -168,8 +186,8 @@ struct DiscoverView: View {
     @ViewBuilder
     private var resultsStatus: some View {
         if model.visibleItems.isEmpty, !model.items.isEmpty {
-            // Every title loaded so far is outside the year span: keep reading until one fits, or the catalogue ends.
-            EmptyStateView("No titles match", systemImage: "line.3.horizontal.decrease.circle", message: "Try another year.")
+            // Keep reading when the loaded titles do not match the local filters.
+            EmptyStateView("No titles match", systemImage: "line.3.horizontal.decrease.circle", message: "Try removing a filter.")
                 .task(id: model.items.count) { if model.canLoadMore { await model.loadMore() } }
         }
         switch model.state {
@@ -184,7 +202,7 @@ struct DiscoverView: View {
                     .padding(.horizontal, metrics.pageMargin)
             }
         case .loaded:
-            if model.items.isEmpty { EmptyStateView("Nothing here yet", systemImage: "film", message: "Try another category or genre.") }
+            if model.items.isEmpty { EmptyStateView("Nothing here yet", systemImage: "film", message: "Try another genre or remove a filter.") }
         case .loadingMore:
             Spinner().frame(maxWidth: .infinity)
         }

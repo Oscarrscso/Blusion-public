@@ -46,7 +46,9 @@ struct HeroBannerSection: View {
             HeroBannerPlaceholder()
                 .modifier(OptionalContextMenu(menu: menu))
         case .loaded(let items) where !items.isEmpty:
+            // Keyed by the featured title, so a reload that features another title doesn't keep the last one's looked-up picture.
             HeroBanner(items: items, row: row, menu: menu)
+                .id(items[0].identity)
         case .loaded:
             Group {
                 if let issue = section.issue {
@@ -101,7 +103,7 @@ struct HeroBanner: View {
         }
         .environment(\.colorScheme, .dark)
         .background { tray }
-        .clipShape(RoundedRectangle(cornerRadius: HeroBanner.cornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous))
         .padding(.horizontal, metrics.pageMargin)
     }
 
@@ -157,7 +159,7 @@ private struct BannerFeature: View {
             .clipped()
             // Marked before the fade, so the zoom carries a solid picture. The fade is see-through at the bottom, and there the zoom
             // showed its own black instead of the tray behind the banner, until the zoom ended.
-            .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: HeroBanner.cornerRadius)
+            .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork))
             .mask {
                 LinearGradient(stops: [.init(color: .black, location: 0.8), .init(color: .black.opacity(0), location: 1)],
                                startPoint: .top, endPoint: .bottom)
@@ -173,9 +175,9 @@ private struct BannerFeature: View {
             }
             .contentShape(Rectangle())
             #if targetEnvironment(macCatalyst)
-            .heroPointerHighlight(cornerRadius: HeroBanner.cornerRadius)
+            .heroPointerHighlight(cornerRadius: HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork))
             #else
-            .pointerInteraction(cornerRadius: HeroBanner.cornerRadius)
+            .pointerInteraction(cornerRadius: HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork))
             #endif
             .onTapGesture(perform: openTitle)
             .accessibilityElement(children: .ignore)
@@ -226,7 +228,7 @@ struct HeroBannerPlaceholder: View {
         .frame(maxWidth: .infinity)
         .background { Rectangle().fill(Theme.surface) }
         .shimmering()
-        .clipShape(RoundedRectangle(cornerRadius: HeroBanner.cornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous))
         .padding(.horizontal, metrics.pageMargin)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")

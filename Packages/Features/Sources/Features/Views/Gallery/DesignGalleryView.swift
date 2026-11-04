@@ -193,7 +193,7 @@ struct DesignGalleryView: View {
                         Theme.placeholder.frame(width: 80, height: 40)
                         RatingBadge(9.0).padding(Theme.Spacing.s)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .artwork), style: .continuous))
                 }
             }
             block("Metadata line: nil parts are skipped") {
@@ -246,7 +246,7 @@ struct DesignGalleryView: View {
                 .padding(.bottom, 7)
         }
         .frame(width: metrics.posterWidth, height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.poster, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.poster * metrics.cornerScale(for: .artwork), style: .continuous))
     }
 
     // MARK: - States

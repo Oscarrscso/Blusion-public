@@ -4,6 +4,7 @@ import SwiftUI
 
 /// The system's segmented control for media types and quality filters.
 struct QualitySelector: View {
+    @Environment(\.layoutMetrics) private var metrics
     let titles: [String]
     @Binding var selection: Int
     var symbols: [String] = []
@@ -20,6 +21,7 @@ struct QualitySelector: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .frame(width: showsTitles ? nil : CGFloat(titles.count * 44))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .filters), style: .continuous))
         .accessibilityIdentifier(accessibilityID)
         .onChange(of: selection) { _, _ in Haptics.play(.choices) }
     }

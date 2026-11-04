@@ -7,6 +7,7 @@ import UIKit
 /// The Settings root: one row per area, each with a one-line summary of its current state. The areas are pages of their own below,
 /// all reading and writing the one `SettingsViewModel` the root owns.
 struct SettingsView: View {
+    @Environment(\.layoutMetrics) private var metrics
     @State private var model: SettingsViewModel
     @State private var datasetStatus: IMDbDatasetStatus?
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
@@ -35,7 +36,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             if ghostIsOn {
                 Section {
                     HStack(spacing: Theme.Spacing.m) {
@@ -212,7 +213,7 @@ struct SettingsView: View {
             }
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
-            .glassEffect(.regular, in: .capsule)
+            .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .settingsRows)))
             .opacity(min(1, (pull - 24) / 30))
             .padding(.top, Theme.Spacing.s)
             .allowsHitTesting(false)
@@ -298,6 +299,32 @@ struct SettingsRow: View {
     }
 }
 
+/// A native list with app-owned row backgrounds, so its corners can be adjusted independently.
+struct SettingsList<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @Environment(\.layoutMetrics) private var metrics
+
+    var body: some View {
+        List {
+            content()
+                .listRowBackground(SettingsRowBackground())
+                .listRowSeparator(.hidden)
+        }
+        .listStyle(.grouped)
+        .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
+        .listRowSpacing(4)
+    }
+}
+
+struct SettingsRowBackground: View {
+    @Environment(\.layoutMetrics) private var metrics
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .settingsRows), style: .continuous)
+            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+    }
+}
+
 /// The look every Settings page shares with the Widgets page.
 extension View {
     func settingsPage(_ title: String) -> some View {
@@ -314,9 +341,10 @@ extension View {
 private struct PlaybackSettingsPage: View {
     let model: SettingsViewModel
     @State private var infuseInstalled = true
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Picker("Play with", selection: Binding(get: { model.settings.playerPreference }, set: { value in
                     Task { await model.setPlayerPreference(value) }
@@ -365,8 +393,10 @@ private struct PlaybackSettingsPage: View {
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
         .settingsPage("Playback")
-        .task {
-            if let url = URL(string: "infuse://") { infuseInstalled = UIApplication.shared.canOpenURL(url) }
+        // Checked again on return to the app: Get Infuse leaves it for the App Store.
+        .task(id: scenePhase) {
+            guard scenePhase == .active, let url = URL(string: "infuse://") else { return }
+            infuseInstalled = UIApplication.shared.canOpenURL(url)
         }
     }
 }
@@ -375,7 +405,7 @@ private struct LazyLoadSettingsPage: View {
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack {
@@ -410,7 +440,7 @@ private struct ReviewServicesPage: View {
     private var limit: Int { SettingsViewModel.omdbDailyLimit }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 SecureField("OMDb API Key", text: $model.omdbAPIKeyText)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -461,7 +491,7 @@ private struct IMDbRatingsPage: View {
     let status: IMDbDatasetStatus?
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 if let status {
                     LabeledContent {
@@ -505,7 +535,7 @@ private struct AccountsSettingsPage: View {
     let model: SettingsViewModel
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Picker("Continue refresh", selection: Binding(get: { model.settings.continueWatchingRefreshSeconds ?? 300 }, set: { value in
                     Task { await model.setContinueWatchingRefreshSeconds(value) }
@@ -525,7 +555,7 @@ private struct ServerSettingsPage: View {
     @Bindable var model: SettingsViewModel
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 TextField("http://192.168.1.10:11470", text: $model.serverURLText)
                     .textInputAutocapitalization(.never)
@@ -572,7 +602,7 @@ private struct FallbackSettingsPage: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Toggle("Use the fallback player", isOn: Binding(get: { model.settings.fallbackEngineEnabled },
                                         set: { value in Haptics.play(.choices); Task { await model.setFallbackEngineEnabled(value) } }))
@@ -607,7 +637,7 @@ private struct DataSettingsPage: View {
     @State private var pendingScope: DataResetService.Scope?
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 ForEach(DataResetService.Scope.allCases, id: \.self) { scope in
                     Button(scope.title, role: .destructive) { pendingScope = scope }
@@ -654,7 +684,7 @@ private struct ImageCacheSettingsPage: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Picker("Disk cache size", selection: $megabytes) {
                     ForEach(ImageCachePolicy.diskSizeOptions, id: \.self) { Text(Self.sizeName($0)).tag($0) }
@@ -698,6 +728,7 @@ private struct ImageCacheSettingsPage: View {
 /// How fast each addon answers, and what Auto Pick waits for. The test runs only when asked: every request is a real lookup. The addons
 /// stay in the user's own order, which also orders Home's rows.
 private struct AddonSpeedSettingsPage: View {
+    @Environment(\.layoutMetrics) private var metrics
     @State private var model: AddonSpeedViewModel
     /// Tells Settings the choice changed, so its row's summary follows.
     let onChange: () -> Void
@@ -709,7 +740,7 @@ private struct AddonSpeedSettingsPage: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Button {
                     Task { await model.test() }
@@ -737,7 +768,7 @@ private struct AddonSpeedSettingsPage: View {
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, Theme.Spacing.s)
                                 .padding(.vertical, 3)
-                                .background(.tint.opacity(0.25), in: Capsule())
+                                .background(.tint.opacity(0.25), in: ScaledCapsule(scale: metrics.cornerScale(for: .settingsRows)))
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -782,7 +813,7 @@ private struct AboutSettingsPage: View {
     var aetherEngineLinked = false
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 LabeledContent("Version", value: SettingsViewModel.appVersion)
                 NavigationLink("Acknowledgements") { AcknowledgementsView(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked) }

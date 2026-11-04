@@ -51,7 +51,8 @@ public final class TitleActions {
     public func setSeriesWatched(_ watched: Bool, for item: MetaPreview) async {
         guard Self.itemType(of: item) == "series" else { return }
         let detail = await services.browse.detail(for: item).detail
-        let videos = watched ? detail.episodesCountingAsWatched() : detail.videos
+        // The same episodes both ways, as the title page marks them: specials keep their own marks.
+        let videos = detail.episodesCountingAsWatched()
         let type = detail.type.isEmpty ? "series" : detail.type
         if watched {
             await services.progress.save(videos.map { video in

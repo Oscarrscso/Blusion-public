@@ -352,7 +352,7 @@ struct RowPlaceholder: View {
             case .title(let title):
                 SectionHeader(title).padding(.horizontal, metrics.pageMargin)
             case .bar:
-                Capsule()
+                ScaledCapsule(scale: metrics.cornerScale(for: .artwork))
                     .fill(Theme.surfaceStrong)
                     .frame(width: 150, height: 20)
                     .padding(.horizontal, metrics.pageMargin)
@@ -363,14 +363,14 @@ struct RowPlaceholder: View {
                 HStack(alignment: .top, spacing: Theme.cardSpacing) {
                     ForEach(0..<6, id: \.self) { _ in
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            RoundedRectangle(cornerRadius: displayedAspect.cornerRadius, style: .continuous)
+                            RoundedRectangle(cornerRadius: displayedAspect.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
                                 .fill(Theme.surfaceStrong)
                                 .frame(width: width, height: width / displayedAspect.ratio)
                                 .mediaArtwork(cornerRadius: displayedAspect.cornerRadius)
                             if !landscape {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Capsule().fill(Theme.surfaceStrong).frame(width: width * 0.75, height: 10)
-                                    Capsule().fill(Theme.surfaceStrong).frame(width: width * 0.4, height: 8)
+                                    ScaledCapsule(scale: metrics.cornerScale(for: .artwork)).fill(Theme.surfaceStrong).frame(width: width * 0.75, height: 10)
+                                    ScaledCapsule(scale: metrics.cornerScale(for: .artwork)).fill(Theme.surfaceStrong).frame(width: width * 0.4, height: 8)
                                 }
                                 .frame(height: 34, alignment: .top)
                             }

@@ -69,7 +69,6 @@ struct ArtworkImage: View {
     @Environment(\.artworkOrder) private var artworkOrder
     @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
     @Environment(\.appAppearance) private var appearance
-    @State private var isVisible = false
 
     @State private var hasFinishedLoading = false
     @State private var image: UIImage?
@@ -153,9 +152,9 @@ struct ArtworkImage: View {
             .loadingCardSpinner(showsLoadingSpinner && url != nil && image == nil && placeholderImage == nil && !hasFinishedLoading)
             .accessibilityHidden(true)
             // Stretching changes only the frame; it must not restart the download, decode or fade.
-            .onScrollVisibility { isVisible = $0 }
-            .task(id: isVisible && sectionIsVisible ? [url, fallbackURL] : []) {
-                guard isVisible && sectionIsVisible else { return }
+            // Lazy containers create nearby cards before they enter the viewport. Fill them now, including from the Far buffer.
+            .task(id: sectionIsVisible ? [url, fallbackURL] : []) {
+                guard sectionIsVisible else { return }
                 await load()
             }
             // Promote an existing queued request when its row scrolls on screen, without restarting its download.
@@ -168,8 +167,8 @@ struct ArtworkImage: View {
                 }
             }
             .onChange(of: showsFallback, initial: true) { _, fellBack in usesFallback?.wrappedValue = fellBack }
-            .task(id: image == nil && isVisible && sectionIsVisible ? placeholderURL : nil) {
-                guard isVisible && sectionIsVisible, image == nil, let placeholderURL else { return }
+            .task(id: image == nil && sectionIsVisible ? placeholderURL : nil) {
+                guard sectionIsVisible, image == nil, let placeholderURL else { return }
                 let preview = try? await ImagePipeline.shared.image(for: placeholderURL, maxPixelSize: maxPixelSize == nil ? nil : 600,
                                                                     priority: artworkPriority, order: artworkOrder)
                 guard !Task.isCancelled, image == nil else { return }

@@ -21,17 +21,15 @@ public actor IMDbRatingsDatabase {
     /// The rating and vote count of a title, or nil when the dataset has no such title (or there is no dataset yet).
     public func rating(for imdbID: String) -> IMDbRating? {
         guard LetterboxdRatings.isIMDbID(imdbID), let statement = lookupStatement() else { return nil }
-        defer { sqlite3_reset(statement) }
         sqlite3_bind_text(statement, 1, imdbID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        switch sqlite3_step(statement) {
-        case SQLITE_ROW:
-            return IMDbRating(imdbID: imdbID, rating: sqlite3_column_double(statement, 0), votes: Int(sqlite3_column_int64(statement, 1)))
-        case SQLITE_DONE:
-            return nil
-        case let code:
-            discardIfDamaged(code)
-            return nil
-        }
+        let code = sqlite3_step(statement)
+        let rating = code == SQLITE_ROW
+            ? IMDbRating(imdbID: imdbID, rating: sqlite3_column_double(statement, 0), votes: Int(sqlite3_column_int64(statement, 1)))
+            : nil
+        // Reset before a damaged file is discarded: discarding closes the connection and finalizes this statement.
+        sqlite3_reset(statement)
+        if code != SQLITE_ROW && code != SQLITE_DONE { discardIfDamaged(code) }
+        return rating
     }
 
     /// Value stored beside the ratings when the file was built, e.g. `row_count`.

@@ -1,5 +1,6 @@
 #if canImport(AVFoundation)
 import AVFoundation
+import CoreMedia
 #endif
 import Foundation
 import StremioKit
@@ -176,6 +177,8 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     public func seek(to position: TimeInterval) async {
         let target = max(0, position)
+        // A seek back from the end leaves it, so Play continues from there instead of replaying from the start.
+        if hasEnded, target < (state.duration ?? .infinity) { hasEnded = false }
         update { $0.position = target }
         await backend.seek(to: target)
     }
@@ -385,5 +388,16 @@ extension FallbackEngine: PictureOverlayHosting {
     public func hostPictureOverlay(_ layer: CALayer?) { (backend as? PictureOverlayHosting)?.hostPictureOverlay(layer) }
     public var pictureGravity: AVLayerVideoGravity { (backend as? PictureOverlayHosting)?.pictureGravity ?? .resizeAspect }
     public var pictureIsHDR: Bool { (backend as? PictureOverlayHosting)?.pictureIsHDR ?? false }
+}
+
+/// Picture in Picture for a backend that has a layer to give (AetherEngine). The transport is the engine's own, so its state stays right
+/// when the window plays, pauses or skips. mpv has no layer, so its window stays unavailable.
+extension FallbackEngine: PictureInPictureProviding {
+    public var pictureInPictureLayer: CALayer? { (backend as? PictureInPictureBacking)?.pictureInPictureLayer }
+    public func pictureInPictureTimeRange() -> CMTimeRange { (backend as? PictureInPictureBacking)?.pictureInPictureTimeRange() ?? .invalid }
+    public var isPictureInPicturePaused: Bool { !state.isPlaying }
+    public func setPictureInPicturePlaying(_ playing: Bool) { if playing { play() } else { pause() } }
+    public func skipPictureInPicture(by seconds: Double) async { await seek(to: max(0, state.position + seconds)) }
+    public func setPictureInPictureActive(_ active: Bool) { (backend as? PictureInPictureBacking)?.setPictureInPictureActive(active) }
 }
 #endif

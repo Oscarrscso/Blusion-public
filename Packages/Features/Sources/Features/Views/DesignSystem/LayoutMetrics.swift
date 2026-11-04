@@ -45,8 +45,18 @@ struct LayoutMetrics: Equatable, Sendable {
     var heroMaxHeight: CGFloat
     /// Appearance's card size: scales the widths that are not stored above (landscape posters, Continue cards, wide grids' columns).
     var cardScale: CGFloat = 1
-    /// Appearance's corners, as a share of each artwork's own radius (see `mediaArtwork(cornerRadius:)`).
+    /// Appearance's corners, as a share of each artwork, surface and control's own radius.
     var cornerScale: CGFloat = 1
+    var cornerOverrides: [String: Double] = [:]
+    var includesCircularButtons = false
+
+    func cornerScale(for group: AppearancePreferences.CornerGroup) -> CGFloat {
+        cornerOverrides[group.rawValue].map { CGFloat($0) } ?? cornerScale
+    }
+
+    func circularButtonScale(for group: AppearancePreferences.CornerGroup) -> CGFloat {
+        includesCircularButtons ? cornerScale(for: group) : 1
+    }
     /// Poster columns of a grid on a phone held upright (Appearance's Columns).
     var phonePosterColumns: Int = 3
     /// Appearance's Spotlight height, as a share of the spotlight's own on Home.
@@ -66,7 +76,7 @@ struct LayoutMetrics: Equatable, Sendable {
 
     var continueCardWidth: CGFloat { ((isRegular ? 256 : 210) * cardScale).rounded() }
 
-    /// These metrics as Settings → Appearance asks: cards scaled by the card size, gaps by the spacing, artwork corners by the corners,
+    /// These metrics as Settings → Appearance asks: cards scaled by the card size, gaps by the spacing, all corners by the corners,
     /// the phone's poster grid at the chosen number of columns, and Home's spotlight at its height. The defaults change nothing.
     func customised(by appearance: AppearancePreferences) -> LayoutMetrics {
         var metrics = self
@@ -82,6 +92,8 @@ struct LayoutMetrics: Equatable, Sendable {
         metrics.cardSpacing = max(2, (cardSpacing * gaps).rounded())
         metrics.controlSpacing = max(2, (controlSpacing * gaps).rounded())
         metrics.cornerScale = CGFloat(appearance.cornerScale)
+        metrics.cornerOverrides = appearance.cornerOverrides
+        metrics.includesCircularButtons = appearance.includesCircularButtons
         metrics.phonePosterColumns = appearance.phoneGridColumns
         metrics.heroScale = CGFloat(appearance.heroScale)
         return metrics
@@ -225,5 +237,7 @@ extension EnvironmentValues {
 @MainActor @Observable
 final class HomeScrollState {
     var isScrolling = false
+    /// Only the carousel observes overscroll, so stretching it never rebuilds Home's shelves.
+    var heroPull: CGFloat = 0
 }
 #endif

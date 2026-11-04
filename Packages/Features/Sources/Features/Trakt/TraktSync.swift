@@ -249,6 +249,7 @@ public actor TraktSync {
     /// of this file's length, and the position sent from here comes back with a later date.
     /// A local runtime takes precedence, and a pause cannot clear a watched mark; only history sync does that.
     public func storeRemotePlayback(_ items: [TraktPlaybackItem]) async {
+        guard !GhostMode.isOn else { return }
         for item in items {
             let previous = await progress.progress(for: item.id)
             guard let duration = [previous?.duration, item.duration].compactMap({ $0 }).first(where: { $0.isFinite && $0 > 0 }) else { continue }
@@ -477,6 +478,7 @@ public actor TraktSync {
         let saves = due.filter { $0.kind == .save }
         if let count = try await deliver(saves, { try await self.account.addToWatchlist(saves.map(\.preview)) }) {
             summary.savedSent += count
+            state.syncedSaved.formUnion(saves.map(\.identity))
             sent = true
         }
         let unsaves = due.filter { $0.kind == .unsave }
@@ -491,6 +493,8 @@ public actor TraktSync {
         finish(watches.filter { state.syncedWatched.contains($0.identity) })
         if let count = try await deliver(fresh, { try await self.account.addToHistory(fresh.map(\.watchedItem)) }) {
             summary.watchedSent += count
+            // Trakt has them now, so undoing and redoing one before the next pull sends nothing, not a second play.
+            state.syncedWatched.formUnion(fresh.map(\.identity))
             sent = true
         }
         let unwatches = due.filter { $0.kind == .unwatched }

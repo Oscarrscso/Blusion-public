@@ -61,13 +61,14 @@ extension View {
 
 /// The hairline that frames a card for its look, drawn inside the card's edge and never hit by a tap.
 private struct StreamLookEdgeLine<Style: ShapeStyle>: View {
+    @Environment(\.layoutMetrics) private var metrics
     let style: Style
     var isEmphasised = false
     /// How wide an edge is drawn for the card the arrow keys are on, brighter too: plainly more than a thicker hairline.
     static var emphasisedWidth: CGFloat { 3 }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
             .strokeBorder(style, lineWidth: isEmphasised ? Self.emphasisedWidth : 1.5)
             #if targetEnvironment(macCatalyst)
             .opacity(isEmphasised ? 1 : 0.3)

@@ -349,8 +349,8 @@ public struct StreamQuality: Sendable, Equatable {
         take(.dtsHD, #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .:\-]?x)\b"#)
         take(.dts, #"\bdts\b"#)
         take(.trueHD, #"\btrue[ .\-]?hd\b"#)
-        take(.eac3, #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+)(?=\W|$)"#)
-        take(.ac3, #"\b(ac[ .\-]?3|dd5[ .]1|dd2[ .]0|dolby[ .\-]?digital)\b"#)
+        take(.eac3, #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+(\d\.\d)?)(?=\W|$)"#)
+        take(.ac3, #"\b(ac[ .\-]?3|dd[ .]?5[ .]1|dd[ .]?2[ .]0|dolby[ .\-]?digital)\b"#)
         take(.aac, #"\baac(\d\.\d)?\b"#)
         take(.flac, #"\bflac\b"#)
         take(.opus, #"\bopus\b"#)
@@ -400,8 +400,8 @@ public struct StreamQuality: Sendable, Equatable {
     private static let bitDepthPattern = #"\b(8|10|12)[ .\-]?bits?\b"#
     private static let highBitDepthPattern = #"\bhi10p?\b"#
     private static let bitratePattern = #"([0-9]+(?:\.[0-9]+)?)\s*(?:mbps|mb/s|mbit/s)\b"#
-    /// A channel layout: the front channels, then the LFE channel, so "5.1" reads as 5 and 1. Not followed by a digit or a size unit.
-    private static let channelLayoutPattern = #"(?<!\d)([1-9])\.([01])(?!\d|\s?(?:gb|gib|mb|mib)\b)"#
+    /// A channel layout: the front channels, then the LFE channel, so "5.1" reads as 5 and 1. Not followed by a digit, a size unit or a bitrate unit.
+    private static let channelLayoutPattern = #"(?<!\d)([1-9])\.([01])(?!\d|\s?(?:gb|gib|mb|mib)\b|\s?(?:[kmg]bps|[kmg]b/s|[kmg]bit/s))"#
     private static let seedersPattern = #"(?:👤|👥|🌱|\bseed(?:s|ers)?:|\bs:)\s*(\d{1,3}(?:,\d{3})+|\d+)"#
     private static let seedersLabelledPattern = #"\bseeders?\s*[:=]?\s*(\d{1,3}(?:,\d{3})+|\d+)"#
     private static let seedersCountedPattern = #"(\d{1,3}(?:,\d{3})+|\d+)\s*seeders?\b"#
@@ -426,8 +426,8 @@ public struct StreamQuality: Sendable, Equatable {
             #"\b(dts[ .\-]?hd([ .\-]?ma)?|dts[ .:\-]?x)\b"#,
             #"\bdts\b"#,
             #"\btrue[ .\-]?hd\b"#,
-            #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+)(?=\W|$)"#,
-            #"\b(ac[ .\-]?3|dd5[ .]1|dd2[ .]0|dolby[ .\-]?digital)\b"#,
+            #"\b(e[ .\-]?ac[ .\-]?3|ddp(\d\.\d)?|dd\+(\d\.\d)?)(?=\W|$)"#,
+            #"\b(ac[ .\-]?3|dd[ .]?5[ .]1|dd[ .]?2[ .]0|dolby[ .\-]?digital)\b"#,
             #"\baac(\d\.\d)?\b"#,
             #"\bflac\b"#,
             #"\bopus\b"#,

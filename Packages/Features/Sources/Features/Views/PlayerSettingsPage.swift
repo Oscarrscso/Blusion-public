@@ -17,7 +17,7 @@ struct PlayerSettingsPage: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Picker("Language", selection: Binding(get: { model.settings.subtitleLanguage }, set: { value in
                     Haptics.play(.choices)

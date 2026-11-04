@@ -5,6 +5,7 @@ import SwiftUI
 /// The player's stream selector: all playable streams in the current plan in a compact glass panel that drops from the top bar,
 /// paired with `PlayerEpisodePicker`. Each row states file size and cache status honestly, using unknown labels when unavailable.
 struct PlayerStreamPicker: View {
+    @Environment(\.layoutMetrics) private var metrics
     let candidates: [PlaybackCandidate]
     let currentIndex: Int
     let onSelect: (Int) -> Void
@@ -25,7 +26,7 @@ struct PlayerStreamPicker: View {
                             }
                         }
                     }
-                    .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
+                    .background(.white.opacity(0.065), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(12)
                 }
@@ -39,8 +40,8 @@ struct PlayerStreamPicker: View {
                 }
             }
         }
-        .clipShape(.rect(cornerRadius: 24))
-        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
+        .clipShape(.rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
         .foregroundStyle(.white)
         .tint(.white)
         .accessibilityElement(children: .contain)
@@ -54,11 +55,11 @@ struct PlayerStreamPicker: View {
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 12)
-            Button(action: onClose) {
+            Button { Haptics.play(.playerControls); onClose() } label: {
                 Image(systemName: "xmark").frame(width: 32, height: 32)
             }
             .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
             #if !targetEnvironment(macCatalyst)
             .keyboardShortcut(.escape, modifiers: [])
             #endif

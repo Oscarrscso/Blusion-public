@@ -5,6 +5,7 @@ import StremioKit
 /// A capsule that names a failing addon without hiding the rest of the screen. The failure is said by the icon and the text,
 /// not by a coloured block.
 struct ErrorChip: View {
+    @Environment(\.layoutMetrics) private var metrics
     let text: String
 
     var body: some View {
@@ -19,7 +20,7 @@ struct ErrorChip: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Theme.surfaceStrong, in: Capsule())
+        .background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
         .accessibilityElement(children: .combine)
     }
 }

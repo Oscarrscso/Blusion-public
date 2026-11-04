@@ -159,6 +159,8 @@ struct CatalogListView: View {
                     Button("Shuffle Again", systemImage: "shuffle") { model.reshuffle() }
                         .accessibilityIdentifier("catalogList.sort.reshuffle")
                 }
+                Divider()
+                RatingPicker(threshold: $model.filter.minimumRating)
             } label: {
                 menuLabel(model.filter.sort.title, systemImage: model.filter.sort == .shuffle ? "shuffle" : "arrow.up.arrow.down",
                           isActive: model.filter.sort != .original)
@@ -166,44 +168,13 @@ struct CatalogListView: View {
             .accessibilityLabel("Sort by \(model.filter.sort.title)")
             .accessibilityIdentifier("catalogList.sort")
             Menu {
-                Button { model.filter.minimumYear = nil; model.filter.maximumYear = nil } label: {
-                    choice("Any Time", isOn: model.filter.minimumYear == nil && model.filter.maximumYear == nil)
-                }
-                Section {
-                    ForEach(CatalogListRecent.allCases) { recent in
-                        let range = recent.years()
-                        Button {
-                            model.filter.minimumYear = range.lowerBound
-                            model.filter.maximumYear = range.upperBound
-                        } label: {
-                            choice(recent.title, isOn: model.filter.minimumYear == range.lowerBound && model.filter.maximumYear == range.upperBound)
-                        }
-                        .accessibilityIdentifier("catalogList.filter.year.recent.\(recent.rawValue)")
-                    }
-                }
-                Section("Decades") {
-                    ForEach(Array(stride(from: 2020, through: 1920, by: -10)), id: \.self) { start in
-                        Button {
-                            model.filter.minimumYear = start
-                            model.filter.maximumYear = start + 9
-                        } label: {
-                            choice("\(start)s", isOn: model.filter.minimumYear == start && model.filter.maximumYear == start + 9)
-                        }
-                        .accessibilityIdentifier("catalogList.filter.year.\(start)")
-                    }
-                }
+                ReleaseYearOptions(minimumYear: $model.filter.minimumYear, maximumYear: $model.filter.maximumYear,
+                                   identifier: "catalogList.filter.year")
             } label: {
                 menuLabel(model.filter.yearLabel() ?? "Any Time", systemImage: "calendar",
                           isActive: model.filter.minimumYear != nil || model.filter.maximumYear != nil)
             }
             .accessibilityIdentifier("catalogList.filter.year")
-            Menu {
-                RatingPicker(threshold: $model.filter.minimumRating)
-            } label: {
-                menuLabel(model.filter.minimumRating.map(LibraryFiltering.minimumRatingText) ?? "Rating", systemImage: "star.fill",
-                          isActive: model.filter.minimumRating != nil)
-            }
-            .accessibilityIdentifier("catalogList.filter.rating")
         }
         .onChange(of: model.filter) { _, _ in Haptics.play(.choices) }
         .task(id: model.filter) { await model.fillForFilter() }
@@ -212,10 +183,6 @@ struct CatalogListView: View {
 
     private func menuLabel(_ title: String, systemImage: String, isActive: Bool) -> some View {
         FilterMenuLabel(title, systemImage: systemImage, isActive: isActive, minHeight: BrowseFilterBar<EmptyView>.menuHeight)
-    }
-
-    @ViewBuilder private func choice(_ title: String, isOn: Bool) -> some View {
-        if isOn { Label(title, systemImage: "checkmark") } else { Text(title) }
     }
 
     /// Nothing loaded yet: placeholders while it loads, the failure with a retry, or the empty state when the addon had nothing.

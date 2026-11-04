@@ -10,6 +10,9 @@ public actor AddonRegistry {
     private let client: AddonClient
     private let logger: AddonLogger
     private var subscribers: [UUID: AsyncStream<[InstalledAddon]>.Continuation] = [:]
+    /// Records whose URL the Keychain couldn't read at load (locked before first unlock). Saved back unchanged so a
+    /// later save doesn't drop them.
+    private var unreadable: [AddonRecord] = []
 
     public init(store: any AddonStore, secrets: any SecretStore, client: AddonClient, logger: AddonLogger = .silent) {
         self.store = store
@@ -27,8 +30,15 @@ public actor AddonRegistry {
         let records: [AddonRecord]
         do { records = try await store.loadAll() } catch { throw RegistryError.storage("load") }
         var loaded: [InstalledAddon] = []
+        var unreadable: [AddonRecord] = []
         for record in records.sorted(by: { $0.order < $1.order }) {
-            guard let text = try? await secrets.get(Self.secretKey(record.id)),
+            let stored: String?
+            do { stored = try await secrets.get(Self.secretKey(record.id)) } catch {
+                logger.log(.warning, "keeping stored addon \(record.id.uuidString): its URL could not be read")
+                unreadable.append(record)
+                continue
+            }
+            guard let text = stored,
                   let location = try? AddonURLNormaliser.normalise(text),
                   let manifest = try? JSONDecoder().decode(Manifest.self, from: record.manifestData) else {
                 logger.log(.warning, "skipping stored addon \(record.id.uuidString): missing URL or manifest")
@@ -38,6 +48,7 @@ public actor AddonRegistry {
                                          isEnabled: record.isEnabled, installedAt: record.installedAt, customName: record.customName))
         }
         addons = loaded
+        self.unreadable = unreadable
         publish()
     }
 
@@ -52,6 +63,8 @@ public actor AddonRegistry {
 
         let manifest: Manifest
         do { manifest = try await client.fetchManifest(at: location) } catch { throw RegistryError.manifest(AddonError.from(error)) }
+        // Checked again: another install of the same URL may have finished while the manifest loaded.
+        if addons.contains(where: { $0.manifestURL == location.manifestURL }) { throw RegistryError.alreadyInstalled }
 
         let addon = InstalledAddon(manifestURL: location.manifestURL, baseURL: location.baseURL, manifest: manifest)
         do {
@@ -74,7 +87,7 @@ public actor AddonRegistry {
         guard let index = addons.firstIndex(where: { $0.id == id }) else { throw RegistryError.notFound }
         let removed = addons.remove(at: index)
         do { try await persist() } catch {
-            addons.insert(removed, at: index)
+            addons.insert(removed, at: min(index, addons.count))
             throw error
         }
         try? await secrets.remove(Self.secretKey(id))
@@ -87,7 +100,7 @@ public actor AddonRegistry {
         let previous = addons[index].isEnabled
         addons[index].isEnabled = enabled
         do { try await persist() } catch {
-            addons[index].isEnabled = previous
+            if let index = addons.firstIndex(where: { $0.id == id }) { addons[index].isEnabled = previous }
             throw error
         }
         publish()
@@ -100,7 +113,7 @@ public actor AddonRegistry {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         addons[index].customName = (trimmed?.isEmpty ?? true) ? nil : trimmed
         do { try await persist() } catch {
-            addons[index].customName = previous
+            if let index = addons.firstIndex(where: { $0.id == id }) { addons[index].customName = previous }
             throw error
         }
         publish()
@@ -189,9 +202,14 @@ public actor AddonRegistry {
     private func persist() async throws {
         let encoder = JSONEncoder()
         do {
-            let records = try addons.enumerated().map { index, addon in
+            var records = try addons.enumerated().map { index, addon in
                 AddonRecord(id: addon.id, manifestData: try encoder.encode(addon.manifest), isEnabled: addon.isEnabled, order: index,
                             installedAt: addon.installedAt, customName: addon.customName)
+            }
+            for (offset, record) in unreadable.enumerated() {
+                var kept = record
+                kept.order = records.count + offset
+                records.append(kept)
             }
             try await store.save(records)
         } catch { throw RegistryError.storage("save") }

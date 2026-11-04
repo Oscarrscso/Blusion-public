@@ -17,6 +17,7 @@ struct SwipeLevel: Equatable {
 }
 
 struct SwipeLevelIndicator: View {
+    @Environment(\.layoutMetrics) private var metrics
     let level: SwipeLevel
 
     var body: some View {
@@ -26,7 +27,7 @@ struct SwipeLevelIndicator: View {
             ProgressView(value: level.value).tint(.white).frame(width: 140)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
         .foregroundStyle(.white)
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(.top, 40)
@@ -86,6 +87,7 @@ enum SubtitleFileTypes {
 
 /// Search results from OpenSubtitles.com for this title, matched to the stream's hash when it is known. A tap downloads and selects one.
 struct OpenSubtitlesSheet: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: PlayerViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -99,8 +101,7 @@ struct OpenSubtitlesSheet: View {
                     Button {
                         Haptics.play(.playerControls)
                         Task {
-                            await model.downloadOpenSubtitle(result)
-                            if case .external = model.subtitleChoice { dismiss() }
+                            if await model.downloadOpenSubtitle(result) { dismiss() }
                         }
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
@@ -134,7 +135,7 @@ struct OpenSubtitlesSheet: View {
 
     private func tag(_ text: String, _ colour: Color) -> some View {
         Text(text).font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 2)
-            .background(colour.opacity(0.2), in: .capsule).foregroundStyle(colour)
+            .background(colour.opacity(0.2), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls))).foregroundStyle(colour)
     }
 }
 #endif

@@ -170,7 +170,7 @@ public final class StreamPickerViewModel {
             }
         }
         let deadline = timeout.map { ContinuousClock.now.advanced(by: $0) }
-        while isLoading, !(stopsForWaitTarget && automaticChoiceIsReady()), deadline.map({ ContinuousClock.now < $0 }) ?? true,
+        while isLoading, !(stopsForWaitTarget && automaticStartIsReady()), deadline.map({ ContinuousClock.now < $0 }) ?? true,
               !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
@@ -418,6 +418,13 @@ public final class StreamPickerViewModel {
 
     /// True once Auto Pick may choose: every addon has answered, or the addon it waits for has a stream it can start and the settle window has
     /// passed since, so the others still have their time to answer. Until then the first stream to arrive is not taken as the best.
+    /// With a session to resume, the start is its own stream, which any addon may offer: ready once one does, not when the wait target
+    /// answers.
+    private func automaticStartIsReady() -> Bool {
+        if resumeSnapshot != nil { return !isLoading || matchedResumeStream() != nil }
+        return automaticChoiceIsReady()
+    }
+
     private func automaticChoiceIsReady() -> Bool {
         guard isLoading else { return true }
         guard waitTarget != nil, let waitTargetAnsweredAt else { return false }

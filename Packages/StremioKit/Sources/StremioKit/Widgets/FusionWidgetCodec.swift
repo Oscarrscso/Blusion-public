@@ -118,7 +118,9 @@ public enum FusionWidgetCodec {
             var presentation = Read.presentation(object["presentation"])
             presentation.showsRank = numbered
             return RowConfiguration(source: source, presentation: presentation,
-                                    limit: Read.integer(object["limit"]) ?? 20, cacheTTL: Read.integer(object["cacheTTL"]) ?? 3600)
+                                    limit: Read.integer(object["limit"]) ?? 20, cacheTTL: Read.integer(object["cacheTTL"]) ?? 3600,
+                                    shuffle: Read.decoded(WidgetShuffle.self, object["blusionShuffle"]),
+                                    randomSource: Read.decoded(RandomSource.self, object["blusionRandomSource"]))
         }
 
         mutating func collection(_ object: [String: Any]) -> [CollectionItem]? {
@@ -232,6 +234,12 @@ public enum FusionWidgetCodec {
 
     /// Fail-soft readers for JSON values: numbers may arrive as strings, flags as text, and anything else is nil.
     private enum Read {
+        /// A Blusion value written as JSON by `jsonObject`, or nil.
+        static func decoded<Value: Decodable>(_ type: Value.Type, _ value: Any?) -> Value? {
+            guard let value, let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]) else { return nil }
+            return try? JSONDecoder().decode(type, from: data)
+        }
+
         static func text(_ value: Any?) -> String? {
             let raw: String
             switch value {
@@ -354,6 +362,14 @@ public enum FusionWidgetCodec {
         object["cacheTTL"] = row.cacheTTL
         object["presentation"] = presentation
         object["dataSource"] = encodeSource(row.source)
+        // Blusion's own keys, written only when set, so an exported widget imports back with its shuffle and random source.
+        if let shuffle = row.shuffle, let value = jsonObject(shuffle) { object["blusionShuffle"] = value }
+        if let random = row.randomSource, let value = jsonObject(random) { object["blusionRandomSource"] = value }
+    }
+
+    private static func jsonObject(_ value: some Encodable) -> Any? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
     private static func encodeTile(_ tile: CollectionItem) -> [String: Any] {

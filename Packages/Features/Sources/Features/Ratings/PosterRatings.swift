@@ -114,8 +114,11 @@ public final class PosterRatingsStore {
     @ObservationIgnored private var cacheTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var cachePriorities: Set<String> = []
     @ObservationIgnored private var nextLookupAt: [String: Date] = [:]
-    /// An explicit refresh bypasses disk freshness once per lookup; nextLookupAt then prevents repeated requests.
-    @ObservationIgnored private var ignoresCachedFreshness = false
+    /// An explicit refresh bypasses disk freshness for the titles on screen, which ask again at once; nextLookupAt then prevents
+    /// repeated requests. It lapses shortly after, so titles opened later read their cache as usual instead of spending OMDb's allowance.
+    @ObservationIgnored private var ignoresCachedFreshnessUntil: Date?
+    private var ignoresCachedFreshness: Bool { ignoresCachedFreshnessUntil.map { now() < $0 } ?? false }
+    private static let refreshWindow: TimeInterval = 30
     @ObservationIgnored private var episodeTasks: [String: Task<[Int: Double], Never>] = [:]
     @ObservationIgnored private var episodeRetryAfter: [String: Date] = [:]
     @ObservationIgnored private var episodeDatasetScores: [String: EpisodeDatasetLookup] = [:]
@@ -248,7 +251,7 @@ public final class PosterRatingsStore {
         await cancelLookups()
         self.omdb = omdb
         self.tmdb = tmdb
-        ignoresCachedFreshness = refreshCache
+        ignoresCachedFreshnessUntil = refreshCache ? now().addingTimeInterval(Self.refreshWindow) : nil
         omdbPausedUntil = nil
         omdbError = nil
         reviewServiceIssue = nil
@@ -256,6 +259,11 @@ public final class PosterRatingsStore {
             if tmdb == nil {
                 entry.tmdb = nil
                 entry.tmdbURL = nil
+            }
+            // OMDb's scores go with its key, as TMDb's do.
+            if omdb == nil {
+                entry.rottenTomatoes = nil
+                entry.metacritic = nil
             }
         }
         isClearing = false
@@ -265,7 +273,7 @@ public final class PosterRatingsStore {
     /// Recheck visible titles, including old empty answers and failed requests. Keep good scores on screen and on disk.
     public func refresh() async {
         await cancelLookups()
-        ignoresCachedFreshness = true
+        ignoresCachedFreshnessUntil = now().addingTimeInterval(Self.refreshWindow)
         omdbPausedUntil = nil
         omdbError = nil
         reviewServiceIssue = nil

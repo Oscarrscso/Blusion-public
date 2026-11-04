@@ -118,28 +118,28 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
             if let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
                 await store(trimmed, for: key)
             } else {
-                await remove(key)
+                await clear(key)
             }
         }
         if let server = settings.streamingServerURL?.trimmingCharacters(in: .whitespacesAndNewlines), !server.isEmpty {
             await store(server, for: Keys.serverSecret)
         } else {
-            await remove(Keys.serverSecret)
+            await clear(Keys.serverSecret)
         }
         if let traktClientID = settings.traktClientID?.trimmingCharacters(in: .whitespacesAndNewlines), !traktClientID.isEmpty {
             await store(traktClientID, for: Keys.traktClientSecret)
         } else {
-            await remove(Keys.traktClientSecret)
+            await clear(Keys.traktClientSecret)
         }
         if let tmdb = settings.tmdbReadToken?.trimmingCharacters(in: .whitespacesAndNewlines), !tmdb.isEmpty {
             await store(tmdb, for: Keys.tmdbReadToken)
         } else {
-            await remove(Keys.tmdbReadToken)
+            await clear(Keys.tmdbReadToken)
         }
         if let omdb = settings.omdbAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !omdb.isEmpty {
             await store(omdb, for: Keys.omdbAPIKey)
         } else {
-            await remove(Keys.omdbAPIKey)
+            await clear(Keys.omdbAPIKey)
         }
     }
 
@@ -163,5 +163,12 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         do { try await secrets.remove(key) } catch {
             logger.log(.error, "secret \(key) could not be removed: \(error)")
         }
+    }
+
+    /// Removes a secret the settings left empty. One the Keychain can't read right now (locked before first unlock)
+    /// only loaded as empty, so it is kept rather than deleted.
+    private func clear(_ key: String) async {
+        do { _ = try await secrets.get(key) } catch { return }
+        await remove(key)
     }
 }

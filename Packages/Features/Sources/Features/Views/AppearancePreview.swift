@@ -9,8 +9,9 @@ import StremioKit
 /// Each part of Appearance shows the part of the app it changes: cards and text on most pages, the spotlight on Home's, an episode and
 /// the sections' order on Title Pages', and a moving dot on Motion & Navigation's.
 struct AppearancePreview: View {
+    @Environment(\.layoutMetrics) private var metrics
     enum Kind {
-        case cards, home, titlePage, motion
+        case cards, corners, home, titlePage, motion
     }
 
     let appearance: AppearancePreferences
@@ -21,9 +22,9 @@ struct AppearancePreview: View {
             .padding(.vertical, Theme.Spacing.l)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(appearance.pageBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.customised(by: appearance).cornerScale(for: .settingsPreview), style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.customised(by: appearance).cornerScale(for: .settingsPreview), style: .continuous)
                     .strokeBorder(Theme.separator, lineWidth: 1)
                     .allowsHitTesting(false)
             }
@@ -37,10 +38,12 @@ private struct AppearancePreviewContent: View {
     let kind: AppearancePreview.Kind
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.appAppearance) private var appearance
+    @Environment(PosterRatingsStore.self) private var ratingsStore: PosterRatingsStore?
 
     var body: some View {
         switch kind {
         case .cards: cards
+        case .corners: corners
         case .home: home
         case .titlePage: titlePage
         case .motion: MotionPreview()
@@ -78,6 +81,7 @@ private struct AppearancePreviewContent: View {
                 .lineLimit(2)
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.xs)
+            actionButtons
             accentControls
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.xs)
@@ -107,7 +111,7 @@ private struct AppearancePreviewContent: View {
     }
 
     private func poster(_ index: Int) -> some View {
-        MediaCard(item: Samples.items[index % Samples.items.count], showsRating: false)
+        MediaCard(item: Samples.items[index % Samples.items.count])
     }
 
     /// The accent where the app uses it: a prominent button, a switch and a link. Shown, not used.
@@ -123,6 +127,75 @@ private struct AppearancePreviewContent: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private var actionButtons: some View {
+        GlassEffectContainer(spacing: TitleHero.actionGap) {
+            HStack(spacing: TitleHero.actionGap) {
+                Button {} label: { Label("Play", systemImage: "play.fill") }
+                    .buttonStyle(PrimaryActionButtonStyle(height: CircleActionButton.diameter))
+                CircleActionButton(title: "Save", systemImage: "bookmark", exactSize: true) {}
+                CircleActionButton(title: "Watched", systemImage: "eye", exactSize: true) {}
+                CircleActionButton(title: "Trailer", systemImage: "play.rectangle", exactSize: true) {}
+            }
+        }
+        .allowsHitTesting(false)
+        .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    private var corners: some View {
+        VStack(alignment: .leading, spacing: metrics.headerSpacing) {
+            actionButtons
+            shelf { ForEach(0..<3, id: \.self) { poster($0) } }
+            BrowseFilterBar(kinds: nil, chips: [], identifier: "settings.appearance.preview.cornerFilters", clearAll: {}) {
+                FilterMenuLabel("Sort", systemImage: "arrow.up.arrow.down")
+                FilterMenuLabel("Genre", systemImage: "tag")
+            }
+            .allowsHitTesting(false)
+            if let review = Samples.review {
+                shelf {
+                    ReviewCard(review: review, isExpanded: false, foldedWidth: metrics.reviewCardWidth,
+                               expandedWidth: metrics.reviewCardWidth, onToggle: {})
+                }
+                .allowsHitTesting(false)
+            }
+            HStack {
+                Label("Auto Pick", systemImage: "sparkles")
+                Spacer()
+                Image(systemName: "chevron.down")
+            }
+            .padding()
+            .glassCardSurface()
+            .padding(.horizontal, Theme.Spacing.l)
+            HStack {
+                Button {} label: { Image(systemName: "backward.end.fill") }
+                    .glassCircleButton(group: .playerControls)
+                Spacer()
+                Button {} label: { Image(systemName: "play.fill") }
+                    .glassCircleButton(group: .playerControls)
+                Spacer()
+                Button {} label: { Image(systemName: "forward.end.fill") }
+                    .glassCircleButton(group: .playerControls)
+            }
+            .padding()
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
+            .padding(.horizontal, Theme.Spacing.l)
+            .allowsHitTesting(false)
+            VStack(spacing: 4) {
+                Toggle("Ratings on posters", isOn: .constant(ratingsStore?.isEnabled ?? false))
+                    .padding()
+                    .background(SettingsRowBackground())
+                HStack {
+                    SettingsRow(title: "Playback", summary: "Auto", systemImage: "play.circle")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(SettingsRowBackground())
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .allowsHitTesting(false)
+        }
     }
 
     // MARK: Home
@@ -144,6 +217,7 @@ private struct AppearancePreviewContent: View {
 
     private var titlePage: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            actionButtons
             Text(Samples.synopsis + " " + Samples.synopsisMore)
                 .font(Theme.Typography.body)
                 .foregroundStyle(.secondary)
@@ -158,7 +232,7 @@ private struct AppearancePreviewContent: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, Theme.Spacing.m)
                         .padding(.vertical, Theme.Spacing.xs + 2)
-                        .background(Theme.surface, in: Capsule())
+                        .background(Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -190,6 +264,9 @@ private enum Samples {
                     background: MetahubArtwork.background(imdbID: id),
                     logo: MetahubArtwork.logo(imdbID: id))
     }
+    static let review = try? JSONDecoder().decode(TMDbReview.self, from: Data("""
+        {"id":"appearance-preview","author":"Alex","content":"A beautiful film with a memorable story and an incredible soundtrack. The pacing never lets up, and the ending stays with you long after the credits roll.","author_details":{"rating":8}}
+        """.utf8))
     static let synopsis = "A team of explorers travels beyond the solar system to find a future for humanity."
     static let synopsisMore = "Their journey takes them through a wormhole and across worlds where time passes differently."
 
@@ -207,6 +284,7 @@ private struct SampleArtwork: View {
 
 /// Home's spotlight in miniature, at Appearance's height, with its page dots and, when Appearance turns its pages, turning them.
 private struct SpotlightPreview: View {
+    @Environment(\.layoutMetrics) private var metrics
     @Environment(\.appAppearance) private var appearance
     @State private var page = 0
 
@@ -224,7 +302,7 @@ private struct SpotlightPreview: View {
             if appearance.showsPageDots {
                 HStack(spacing: 6) {
                     ForEach(0..<3, id: \.self) { index in
-                        Capsule()
+                        ScaledCapsule(scale: metrics.cornerScale(for: .filters))
                             .fill(.white.opacity(index == page ? 0.95 : 0.35))
                             .frame(width: index == page ? 16 : 6, height: 6)
                     }
@@ -294,6 +372,7 @@ private struct EpisodePreview: View {
 
 /// A dot that crosses a track with the app's own animation, at Appearance's speed, each time Play Animation is pressed.
 private struct MotionPreview: View {
+    @Environment(\.layoutMetrics) private var metrics
     @State private var moved = false
 
     var body: some View {
@@ -303,7 +382,7 @@ private struct MotionPreview: View {
                 .frame(width: 26, height: 26)
                 .frame(maxWidth: .infinity, alignment: moved ? .trailing : .leading)
                 .padding(5)
-                .background(Theme.surface, in: Capsule())
+                .background(Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
                 .accessibilityHidden(true)
             Button {
                 Haptics.play(.buttons)

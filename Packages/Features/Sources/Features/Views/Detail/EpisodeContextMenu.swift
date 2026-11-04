@@ -86,9 +86,9 @@ struct EpisodeContextMenu<Content: View, Preview: View>: UIViewControllerReprese
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .scrollBounceBehavior(.basedOnSize)
             }
-            .clipShape(RoundedRectangle(cornerRadius: owner.previewCornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: owner.previewCornerRadius * owner.environment.layoutMetrics.cornerScale(for: .panels), style: .continuous))
             // The panel's outline stays on its visible bounds, outside the scrolling content.
-            .glassHairline(RoundedRectangle(cornerRadius: owner.previewCornerRadius, style: .continuous))
+            .glassHairline(RoundedRectangle(cornerRadius: owner.previewCornerRadius * owner.environment.layoutMetrics.cornerScale(for: .panels), style: .continuous))
             .environment(\.self, owner.environment))
             controller.preferredContentSize = fittedSize
             controller.view.backgroundColor = .secondarySystemBackground

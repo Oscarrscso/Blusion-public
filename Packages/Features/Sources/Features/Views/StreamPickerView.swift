@@ -205,7 +205,7 @@ struct StreamPickerView: View {
         row
             .overlay {
                 if !hasEdge, keyboardRow == KeyboardRow(addon: addon, stream: stream) {
-                    RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
                         .stroke(Color.white.opacity(0.8), lineWidth: 2)
                         .allowsHitTesting(false)
                 }
@@ -364,7 +364,8 @@ struct StreamPickerView: View {
                     finishAutomaticStart(started: false)
                 }
             }
-            .onChange(of: isReady && !awaitsAutomaticStart && !model.autoPlaysBestStream, initial: true) { _, ready in
+            // Empty results must reach the title page even when Auto Pick keeps the selector hidden.
+            .onChange(of: isReady && !awaitsAutomaticStart && (!model.autoPlaysBestStream || model.addonSections.isEmpty), initial: true) { _, ready in
                 guard ready else { return }
                 onReady?(!model.addonSections.isEmpty)
             }
@@ -941,7 +942,7 @@ struct StreamPickerView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
-                .background(Theme.surfaceStrong, in: Capsule())
+                .background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.cornerScale(for: .panels)))
         }
         .padding(.top, Theme.Spacing.s)
         .padding(.leading, Theme.Spacing.xs)
@@ -1054,10 +1055,10 @@ struct StreamPickerView: View {
         }
         .cardSurface(cornerRadius: StreamCardMetrics.cornerRadius)
         .streamLookGlow(look)
-        .clipShape(RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous))
         .overlay {
             if isRecommended {
-                RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
                     .strokeBorder(Theme.brandGradient, lineWidth: isKeyboardFocused ? 3 : 1.5)
                     .brightness(isKeyboardFocused ? 0.3 : 0)
                     .allowsHitTesting(false)

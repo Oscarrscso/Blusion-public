@@ -39,6 +39,7 @@ extension StreamProvider {
 /// A web release's streaming service: its logo in a box of the service's colour, set to the left of the release name. VoiceOver reads
 /// the service's name.
 struct StreamProviderBox: View {
+    @Environment(\.layoutMetrics) private var metrics
     let provider: StreamProvider
     /// The box's size. The logo is fitted inside a margin within it, so a wide wordmark and a square icon both sit in the box.
     @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = StreamCardMetrics.providerBox.width
@@ -53,7 +54,7 @@ struct StreamProviderBox: View {
                    maxHeight: (height - StreamCardMetrics.logoInset.height) * provider.logoScale)
             .foregroundStyle(provider.markInk)
             .frame(width: width, height: height)
-            .background(provider.tint, in: RoundedRectangle(cornerRadius: StreamCardMetrics.providerBoxRadius, style: .continuous))
+            .background(provider.tint, in: RoundedRectangle(cornerRadius: StreamCardMetrics.providerBoxRadius * metrics.cornerScale(for: .panels), style: .continuous))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(provider.name)
     }
@@ -61,6 +62,7 @@ struct StreamProviderBox: View {
 
 /// A disc's box, in the place a service's box takes: the Blu-ray mark, or the Ultra HD Blu-ray mark for a 4K REMUX, on the disc's own colour.
 struct StreamDiscBox: View {
+    @Environment(\.layoutMetrics) private var metrics
     let is4K: Bool
     /// The box's size, as the service's box has it. The mark is fitted inside a margin within it.
     @ScaledMetric(relativeTo: .subheadline) private var width: CGFloat = StreamCardMetrics.providerBox.width
@@ -81,7 +83,7 @@ struct StreamDiscBox: View {
             .accessibilityLabel(is4K ? "4K Blu-ray" : "Blu-ray")
     }
 
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: StreamCardMetrics.providerBoxRadius, style: .continuous) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: StreamCardMetrics.providerBoxRadius * metrics.cornerScale(for: .panels), style: .continuous) }
     private static let blue = Color(red: 0.05, green: 0.27, blue: 0.55)
 }
 #endif

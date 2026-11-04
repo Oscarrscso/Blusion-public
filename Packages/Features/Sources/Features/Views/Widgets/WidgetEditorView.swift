@@ -149,6 +149,7 @@ struct WidgetEditorView: View {
         } set: { text in
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 titleIsCustom = false
+                widget.title = ""   // a cleared title is saved cleared
             } else {
                 titleIsCustom = true
                 widget.title = text

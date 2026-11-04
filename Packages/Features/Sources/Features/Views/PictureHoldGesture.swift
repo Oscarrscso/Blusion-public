@@ -3,6 +3,38 @@ import SwiftUI
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
+/// Recognise each tap immediately. UIKit's tap count distinguishes a second tap without delaying the first.
+struct PictureTapGesture: UIGestureRecognizerRepresentable {
+    let tapped: (CGPoint, Int) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> PictureHoldGesture.Coordinator {
+        PictureHoldGesture.Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> PictureTapRecognizer {
+        let recognizer = PictureTapRecognizer()
+        recognizer.delegate = context.coordinator
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: PictureTapRecognizer, context: Context) {}
+
+    func handleUIGestureRecognizerAction(_ recognizer: PictureTapRecognizer, context: Context) {
+        guard recognizer.state == .ended else { return }
+        tapped(context.converter.localLocation, recognizer.tapCount)
+    }
+}
+
+final class PictureTapRecognizer: UITapGestureRecognizer {
+    private(set) var tapCount = 1
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        tapCount = touches.first?.tapCount ?? 1
+        super.touchesEnded(touches, with: event)
+    }
+}
+
 /// The press-and-hold on the picture, as UIKit's long press reads it: `began` once the finger has rested for `minimumDuration` without
 /// moving more than `SpeedHoldRules.holdTolerance`, `moved` for each move the held finger makes, and `ended` when it lifts, is taken by
 /// the system, or moved too far before the hold began (the press then fails). UIKit times the press itself, as it does for the poster

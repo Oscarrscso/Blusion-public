@@ -398,9 +398,13 @@ enum AISearchGrounding {
 
     /// The text with each named title, person or studio taken out as whole words.
     private static func remove(_ phrases: [String], from text: String) -> String {
-        // A curly and a straight apostrophe are the same letter here ("Ocean’s Eleven").
-        var rest = text.replacingOccurrences(of: "\u{2019}", with: "'")
-        for phrase in phrases.map({ $0.replacingOccurrences(of: "\u{2019}", with: "'") })
+        // A curly and a straight apostrophe are the same letter here ("Ocean’s Eleven"), and accents are dropped from both sides, as the
+        // matching that found the phrase drops them ("Penélope Cruz" in "penelope cruz films"). The rest is only read for its words.
+        func folded(_ value: String) -> String {
+            value.replacingOccurrences(of: "\u{2019}", with: "'").folding(options: [.diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        }
+        var rest = folded(text)
+        for phrase in phrases.map(folded)
             where !phrase.trimmingCharacters(in: .whitespaces).isEmpty {
             let pattern = "(?<![[:alnum:]])" + NSRegularExpression.escapedPattern(for: phrase) + "(?![[:alnum:]])"
             rest = rest.replacingOccurrences(of: pattern, with: " ", options: [.regularExpression, .caseInsensitive])

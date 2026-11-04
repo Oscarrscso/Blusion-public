@@ -419,7 +419,12 @@ public final class WidgetBuilderModel {
 
     /// Sets the movie-or-series choice of a TMDB list.
     public func setKind(_ kind: TMDbDiscoverQuery.Kind) {
-        updateQuery { $0.kind = kind }
+        updateQuery { query in
+            // Genre ids differ between movies and series.
+            query.genres = TMDbDiscoverQuery.convertingGenres(query.genres, from: query.kind, to: kind)
+            query.excludedGenres = TMDbDiscoverQuery.convertingGenres(query.excludedGenres, from: query.kind, to: kind)
+            query.kind = kind
+        }
     }
 
     /// Sets the ordering of a TMDB list. A trending ordering drops the filters a trending list cannot use.
@@ -549,7 +554,8 @@ public final class WidgetBuilderModel {
         guard let query else { return }
         switch field {
         case .genres:
-            guard loadedOptions[field] != query.kind.rawValue else { return }
+            // The message is shared by the fields, so one already loaded clears another's.
+            guard loadedOptions[field] != query.kind.rawValue else { optionsMessage = nil; return }
             genreOptions = []
             await perform {
                 genreOptions = try await lookups.genres(query.kind)
@@ -558,7 +564,7 @@ public final class WidgetBuilderModel {
         case .providers:
             let region = query.region ?? deviceRegion
             let key = "\(query.kind.rawValue)/\(region)"
-            guard loadedOptions[field] != key else { return }
+            guard loadedOptions[field] != key else { optionsMessage = nil; return }
             providerOptions = []
             await perform {
                 providerOptions = try await lookups.providers(query.kind, region)
@@ -581,6 +587,8 @@ public final class WidgetBuilderModel {
         do {
             try await work()
         } catch {
+            // A panel closed while it loaded cancels the load; that isn't TMDB failing.
+            guard !Task.isCancelled, !(error is CancellationError) else { return }
             optionsMessage = Self.unreachableMessage
         }
     }

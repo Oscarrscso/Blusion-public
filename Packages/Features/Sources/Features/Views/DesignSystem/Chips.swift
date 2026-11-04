@@ -5,6 +5,7 @@ import SwiftUI
 /// A filter chip: the system's Liquid Glass button as a capsule, and the selected one its prominent form in white with dark text
 /// (the same inversion as the TV app's category filters). Semibold in both states, so selecting never shifts the neighbours.
 struct GlassChip: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let systemImage: String?
     let isSelected: Bool
@@ -34,7 +35,8 @@ struct GlassChip: View {
                 button.buttonStyle(.glass)
             }
         }
-        .buttonBorderShape(.capsule)
+        .buttonBorderShape(metrics.cornerScale(for: .filters) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .filters)))
+        .clipShape(RoundedRectangle(cornerRadius: (isCompact ? 16 : fillsWidth && isTall ? 25 : 22) * metrics.cornerScale(for: .filters), style: .continuous))
         .controlSize(isCompact ? .small : fillsWidth && isTall ? .large : .regular)
         .pointerFeedback()
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -100,6 +102,7 @@ struct ChipRow<Content: View>: View {
 /// A small non-interactive label such as "4K", "HDR", "Dolby Vision" or "Watched". `.quality` is the TV app's capability glyph:
 /// grey text in a thin outline.
 struct Badge: View {
+    @Environment(\.layoutMetrics) private var metrics
     enum Style {
         case neutral, accent, quality, warning
     }
@@ -146,9 +149,9 @@ struct Badge: View {
     @ViewBuilder
     private var surface: some View {
         switch style {
-        case .neutral, .warning: Capsule().fill(Color.white.opacity(0.14))
-        case .accent: Capsule().fill(Theme.brandGradient)
-        case .quality: RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Color.white.opacity(0.38), lineWidth: 1)
+        case .neutral, .warning: ScaledCapsule(scale: metrics.cornerScale(for: .filters)).fill(Color.white.opacity(0.14))
+        case .accent: ScaledCapsule(scale: metrics.cornerScale(for: .filters)).fill(Theme.brandGradient)
+        case .quality: RoundedRectangle(cornerRadius: 4 * metrics.cornerScale(for: .filters), style: .continuous).strokeBorder(Color.white.opacity(0.38), lineWidth: 1)
         }
     }
 }

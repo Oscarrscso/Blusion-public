@@ -40,12 +40,17 @@ private struct SavedHUDModifier: ViewModifier {
                     withAnimation(.easeOut(duration: 0.25)) { isShowing = false }
                 }
             }
-            .onDisappear { hideTask?.cancel() }
+            // The hide is cancelled with the view, so the badge goes too rather than greeting the page when it comes back.
+            .onDisappear {
+                hideTask?.cancel()
+                isShowing = false
+            }
     }
 }
 
 /// The badge itself: a large tick and a small label on a rounded glass square, like the system's HUD. It never takes a tap.
 private struct SavedHUDBadge: View {
+    @Environment(\.layoutMetrics) private var metrics
     let message: String
 
     var body: some View {
@@ -59,7 +64,7 @@ private struct SavedHUDBadge: View {
         .padding(.horizontal, 30)
         .padding(.vertical, 24)
         .frame(minWidth: 150, minHeight: 150)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .glassEffect(.regular, in: .rect(cornerRadius: 24 * metrics.cornerScale(for: .panels)))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

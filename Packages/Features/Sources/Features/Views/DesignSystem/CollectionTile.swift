@@ -61,7 +61,9 @@ struct CollectionTile: View {
     @ViewBuilder
     private var face: some View {
         if let imageURL {
-            ArtworkImage(url: imageURL, title: title, maxPixelSize: min((resolvedWidth * displayScale).rounded(.up), 1200))
+            // The longer edge: a poster-shaped tile is taller than it is wide.
+            let longestEdge = max(resolvedWidth, resolvedWidth / aspect.ratio)
+            ArtworkImage(url: imageURL, title: title, maxPixelSize: min((longestEdge * displayScale).rounded(.up), 1200))
         } else {
             let look = TileLook.look(for: title)
             ZStack {

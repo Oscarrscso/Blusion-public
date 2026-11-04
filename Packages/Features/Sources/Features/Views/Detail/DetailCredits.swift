@@ -48,7 +48,7 @@ struct DetailCredits: View {
                     ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
                         ForEach(0..<6, id: \.self) { index in
                             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                                RoundedRectangle(cornerRadius: Theme.Radius.poster)
+                                RoundedRectangle(cornerRadius: Theme.Radius.poster * metrics.cornerScale(for: .artwork))
                                     .fill(Theme.placeholder)
                                     .frame(width: width, height: width * 1.5)
                                     .loadingCardSpinner()
@@ -104,6 +104,7 @@ struct DetailCredits: View {
 
 /// The compact coloured glass control for Cast and the other credit groups. Picking one shows its people.
 private struct CreditGroupMenu: View {
+    @Environment(\.layoutMetrics) private var metrics
     let groups: [TitleCreditGroup]
     let shown: TitleCreditGroup
     let playColourHex: String?
@@ -159,9 +160,9 @@ private struct CreditGroupMenu: View {
         .padding(.horizontal, 12)
         .frame(height: 28)
         // The tint belongs to the glass inside the label, just like Sort and AI, so it travels with the system menu animation.
-        .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: .capsule)
+        .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
         .animation(.smooth(duration: 0.3), value: playColourHex)
-        .contentShape(Capsule())
+        .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
         .pointerFeedback()
     }
 }

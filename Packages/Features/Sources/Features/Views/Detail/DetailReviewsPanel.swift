@@ -34,6 +34,7 @@ struct DetailRatings: View {
 /// buttons above it, and stays until it is closed or another rating is tapped. Another rating's site loads behind the open one, which stays
 /// on screen until the new one has loaded.
 struct DetailReviewsPanel: View {
+    @Environment(\.layoutMetrics) private var metrics
     let reviews: DetailViewModel.OpenedReviews
     /// The site kept on screen while `reviews` loads behind it. Nil when `reviews` is the one on screen, or is the first to open.
     var shown: DetailViewModel.OpenedReviews?
@@ -144,8 +145,8 @@ struct DetailReviewsPanel: View {
             }
             .accessibilityIdentifier("detail.reviewsWeb")
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .reviews), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .reviews), style: .continuous))
         .frame(maxWidth: .infinity)
         .detailLoadingTransition(showsSkeleton)
         .id(Self.scrollID)

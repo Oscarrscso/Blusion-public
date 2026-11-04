@@ -215,6 +215,25 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
     // MARK: - Cards
 
+    public enum CornerGroup: String, Sendable, Codable, CaseIterable, Identifiable {
+        case artwork, playButton, actionButtons, filters, reviews, panels, playerControls, settingsPreview, settingsRows
+
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .artwork: "Artwork"
+            case .playButton: "Play Button"
+            case .actionButtons: "Action Buttons"
+            case .filters: "Filters & Badges"
+            case .reviews: "Reviews"
+            case .panels: "Panels"
+            case .playerControls: "Player Controls"
+            case .settingsPreview: "Settings Preview"
+            case .settingsRows: "Settings Rows"
+            }
+        }
+    }
+
     /// The hairline just inside every poster, card and still.
     public enum Outline: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
         case off, faint, standard, strong
@@ -477,6 +496,13 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var cardScale: Double = 1
     /// The roundness of posters, cards, tiles and stills, as a share of their own radius (`cornerScaleRange`). Zero is square.
     public var cornerScale: Double = 1
+    /// Missing entries follow the global corner scale; overrides are absolute, not multiplied by it.
+    public var cornerOverrides: [String: Double] = [:]
+    public var includesCircularButtons = false
+
+    public func cornerScale(for group: CornerGroup) -> Double {
+        cornerOverrides[group.rawValue] ?? cornerScale
+    }
     /// The gaps between cards and between shelves, as a share of the layout's own (`spacingScaleRange`).
     public var spacingScale: Double = 1
     /// Poster columns of a grid (Library, Discover, See All) on a phone held upright.
@@ -602,6 +628,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         // Card size, corners and spacing were fixed steps saved by name; a save from then reads the step's value.
         cardScale = clamp(read(.cardSize, legacy(.legacyCardScale, Self.legacyCardScales) ?? 1), Self.cardScaleRange, 1)
         cornerScale = clamp(read(.cornerScale, legacy(.legacyCorners, Self.legacyCornerScales) ?? 1), Self.cornerScaleRange, 1)
+        cornerOverrides = read(.cornerOverrides, cornerOverrides).filter { key, value in
+            CornerGroup(rawValue: key) != nil && value.isFinite
+        }.mapValues { min(max($0, Self.cornerScaleRange.lowerBound), Self.cornerScaleRange.upperBound) }
+        includesCircularButtons = read(.includesCircularButtons, includesCircularButtons)
         spacingScale = clamp(read(.spacing, legacy(.legacyDensity, Self.legacySpacingScales) ?? 1), Self.spacingScaleRange, 1)
         phoneGridColumns = min(max(read(.phoneGridColumns, phoneGridColumns), Self.phoneGridColumnRange.lowerBound),
                                Self.phoneGridColumnRange.upperBound)
@@ -662,6 +692,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
         try container.encode(cardScale, forKey: .cardSize)
         try container.encode(cornerScale, forKey: .cornerScale)
+        try container.encode(cornerOverrides, forKey: .cornerOverrides)
+        try container.encode(includesCircularButtons, forKey: .includesCircularButtons)
         try container.encode(spacingScale, forKey: .spacing)
         try container.encode(phoneGridColumns, forKey: .phoneGridColumns)
         try container.encode(showsPosterTitles, forKey: .showsPosterTitles)
@@ -700,6 +732,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         case accent, customAccent, background, customBackground, tintStrength
         case textSize, font, boldText, italicText, fontWidth, letterSpacing, lineSpacing, headingFont, headingWeight, headingSize,
              uppercaseHeadings
+        case cornerOverrides, includesCircularButtons
         case cardSize, cornerScale, spacing, phoneGridColumns, showsPosterTitles, captionLines, showsCaptionDetails, outline, artworkTone,
              progressColour, progressThickness, showsTimeLeft
         case heroScale, heroAutoAdvance, showsPageDots
@@ -726,6 +759,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             && lhs.headingSize == rhs.headingSize && lhs.uppercaseHeadings == rhs.uppercaseHeadings
         let sizes: Bool = lhs.cardScale == rhs.cardScale && lhs.cornerScale == rhs.cornerScale && lhs.spacingScale == rhs.spacingScale
             && lhs.phoneGridColumns == rhs.phoneGridColumns
+            && lhs.cornerOverrides == rhs.cornerOverrides && lhs.includesCircularButtons == rhs.includesCircularButtons
         let captions: Bool = lhs.showsPosterTitles == rhs.showsPosterTitles && lhs.captionLines == rhs.captionLines
             && lhs.showsCaptionDetails == rhs.showsCaptionDetails
         let artwork: Bool = lhs.outline == rhs.outline && lhs.artworkTone == rhs.artworkTone
@@ -771,7 +805,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
     /// The parts of Settings → Appearance, each with a page of its own and its own Restore Defaults.
     public enum Section: String, Sendable, CaseIterable, Identifiable {
-        case colour, text, cards, home, titlePages, motion
+        case colour, text, cards, corners, home, titlePages, motion
 
         public var id: String { rawValue }
     }
@@ -801,7 +835,6 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.uppercaseHeadings = defaults.uppercaseHeadings
         case .cards:
             result.cardScale = defaults.cardScale
-            result.cornerScale = defaults.cornerScale
             result.spacingScale = defaults.spacingScale
             result.phoneGridColumns = defaults.phoneGridColumns
             result.showsPosterTitles = defaults.showsPosterTitles
@@ -812,6 +845,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.progressColour = defaults.progressColour
             result.progressThickness = defaults.progressThickness
             result.showsTimeLeft = defaults.showsTimeLeft
+        case .corners:
+            result.cornerScale = defaults.cornerScale
+            result.cornerOverrides = defaults.cornerOverrides
+            result.includesCircularButtons = defaults.includesCircularButtons
         case .home:
             result.heroScale = defaults.heroScale
             result.heroAutoAdvance = defaults.heroAutoAdvance
@@ -918,12 +955,20 @@ public struct AppearanceLooks: Sendable, Equatable, RawRepresentable {
     /// Adds `appearance` under `name`, trimmed, or replaces the look already saved under that name. An empty name is "Look N".
     public mutating func save(_ appearance: AppearancePreferences, as name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = trimmed.isEmpty ? "Look \(looks.count + 1)" : String(trimmed.prefix(40))
+        let title = trimmed.isEmpty ? unusedLookName() : String(trimmed.prefix(40))
         if let index = looks.firstIndex(where: { $0.name.caseInsensitiveCompare(title) == .orderedSame }) {
             looks[index].appearance = appearance
         } else if looks.count < Self.limit {
             looks.append(AppearanceLook(name: title, appearance: appearance))
         }
+    }
+
+    /// "Look N" from the count up, skipping a name still in use: after a deletion the count's own name can belong to a saved look,
+    /// which an empty name must not replace.
+    private func unusedLookName() -> String {
+        var number = looks.count + 1
+        while looks.contains(where: { $0.name.caseInsensitiveCompare("Look \(number)") == .orderedSame }) { number += 1 }
+        return "Look \(number)"
     }
 
     public static func reset(in defaults: UserDefaults = .standard) {

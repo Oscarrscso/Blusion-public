@@ -63,6 +63,8 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
         case playerControls
         /// Choices inside the player: tabs, subtitle, audio and video options, speed steps and zoom.
         case playerOptions
+        /// Scrubbing, brightness and volume steps, and releasing a speed hold.
+        case playerGestures
         /// A shelf card's edge passing the screen's edge as a shelf scrolls.
         case shelves
         /// The Home banner turning to another page.
@@ -83,6 +85,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
             case .sliders: "Sliders"
             case .playerControls: "Player controls"
             case .playerOptions: "Player options"
+            case .playerGestures: "Player gestures"
             case .shelves: "Poster shelves"
             case .banner: "Home banner"
             case .reviews: "Reviews"
@@ -99,6 +102,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
             case .sliders: "slider.horizontal.3"
             case .playerControls: "play.rectangle"
             case .playerOptions: "list.bullet.rectangle"
+            case .playerGestures: "hand.draw"
             case .shelves: "rectangle.3.group"
             case .banner: "photo.stack"
             case .reviews: "text.quote"
@@ -109,8 +113,11 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
         /// What the place plays before the listener touches it: the feels the app used before places existed.
         public var defaultFeel: Feel {
             switch self {
-            case .buttons, .titles, .navigation, .playerControls: .light
-            case .choices, .sliders, .playerOptions: .tick
+            case .buttons, .titles, .navigation: .light
+            case .playerControls: .heavy
+            case .playerOptions: .medium
+            case .playerGestures: .rigid
+            case .choices, .sliders: .tick
             case .shelves, .reviews: .soft
             case .banner: .rigid
             case .saved: .success
@@ -120,6 +127,8 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
         /// How hard an impact lands here by default, and where the strength slider starts when a tick is changed to an impact.
         public var defaultStrength: Double {
             switch self {
+            case .playerControls: 1.0
+            case .playerOptions, .playerGestures: 0.8
             case .banner: 0.8
             case .reviews: 0.3
             default: 0.5
@@ -130,7 +139,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
         /// it is offered single taps only: a run of notification patterns would blur into a buzz.
         public var feels: [Feel] {
             switch self {
-            case .shelves, .sliders, .reviews: Feel.taps
+            case .shelves, .sliders, .reviews, .playerGestures: Feel.taps
             default: Feel.taps + Feel.patterns
             }
         }

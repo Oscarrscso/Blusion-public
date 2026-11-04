@@ -53,6 +53,16 @@ public final class AetherSession {
     /// Shows `layer` over the picture, placed and sized with it (AI super resolution's scaled frames); nil removes it. Subtitles stay
     /// above it.
     public func hostPictureOverlay(_ layer: CALayer?) { host.hostPictureOverlay(layer) }
+    /// The layer Picture in Picture shows: the native route's AVPlayerLayer, or the software route's sample-buffer layer. nil before a load
+    /// has one. It changes with the session, so readers ask again.
+    public var pictureInPictureLayer: CALayer? {
+        if let native = engine.nativePlayerLayer { return native }
+        return engine.softwarePiPSource?.layer
+    }
+    /// The software route's playable range, for the window's timeline. Invalid when nothing plays.
+    public func pictureInPictureTimeRange() -> CMTimeRange { engine.softwarePiPSource?.timeRange() ?? .invalid }
+    /// The window is open or closed. AetherEngine draws subtitles into the picture while it is open.
+    public func setPictureInPictureActive(_ active: Bool) { engine.pictureInPictureActive = active }
     /// How the picture is drawn into its frame, for a layer drawn over it.
     public var pictureGravity: AVLayerVideoGravity { host.currentGravity }
     /// The stream is HDR or Dolby Vision (not what reaches the display).
@@ -128,6 +138,7 @@ public final class AetherSession {
             autoplay: false
         )
         loadOptions.dolbyVisionHandling = options.dolbyVision ? .automatic : .baseLayerOnly
+        let loadedDolbyVision = options.dolbyVision
         // Both remuxed AVPlayer and FEL's compressed-packet reader fill independently of playback.
         loadOptions.forwardBufferSegments = 30 // About two minutes; bounded by bytes and free disk.
         loadOptions.sessionCacheByteBudget = 2_147_483_648
@@ -145,6 +156,8 @@ public final class AetherSession {
                 try await self.engine.load(url: url, startPosition: startPosition > 0 ? startPosition : nil, options: loadOptions)
                 guard !Task.isCancelled, generation == self.generation else { return }
                 self.didLoad()
+                // A change made while loading missed the load's options.
+                if self.options.dolbyVision != loadedDolbyVision { self.reloadForDolbyVision(self.options.dolbyVision) }
             } catch {
                 guard !Task.isCancelled, generation == self.generation else { return }
                 self.continuation.yield(.failed(self.failure(thrown: error)))
@@ -257,6 +270,10 @@ public final class AetherSession {
         guard options.dolbyVision != enabled else { return }
         options.dolbyVision = enabled
         guard isLoaded else { return }
+        reloadForDolbyVision(enabled)
+    }
+
+    private func reloadForDolbyVision(_ enabled: Bool) {
         let generation = generation
         Task { [weak self] in
             guard let self, generation == self.generation else { return }

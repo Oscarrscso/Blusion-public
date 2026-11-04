@@ -5,6 +5,7 @@ import SwiftUI
 /// A slider with a few fixed stops, drawn in Liquid Glass: a glass track and a glass thumb that follows the finger and settles on the
 /// nearest stop. `value` runs from 1 to `stops`. It is one adjustable element for VoiceOver.
 struct GlassSlider: View {
+    @Environment(\.layoutMetrics) private var metrics
     @Binding var value: Int
     let stops: Int
     private let thumb: CGFloat = 32
@@ -16,10 +17,10 @@ struct GlassSlider: View {
             let travel = max(1, geometry.size.width - thumb)
             let fraction = dragFraction ?? CGFloat(value - 1) / CGFloat(max(1, stops - 1))
             ZStack(alignment: .leading) {
-                Capsule()
+                ScaledCapsule(scale: metrics.cornerScale(for: .filters))
                     .fill(.clear)
                     .frame(height: track)
-                    .glassEffect(.regular, in: .capsule)
+                    .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
                 HStack(spacing: 0) {
                     ForEach(0..<stops, id: \.self) { index in
                         if index > 0 { Spacer(minLength: 0) }
@@ -31,7 +32,7 @@ struct GlassSlider: View {
                 Circle()
                     .fill(.clear)
                     .frame(width: thumb, height: thumb)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     .offset(x: travel * fraction)
             }
             .frame(height: thumb)

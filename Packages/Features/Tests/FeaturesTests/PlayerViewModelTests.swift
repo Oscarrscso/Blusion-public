@@ -443,9 +443,9 @@ import StremioKitTestSupport
         await model.close()
     }
 
-    /// A hold begins at 2×; dragging up steps it to 3× and 4×, dragging back steps it down, and letting go returns the film to the speed it
-    /// was at, exactly. Each step is one engine call, and a finger moving within one step makes none.
-    @Test func holdStepsUpAndDownAndReturnsToTheSpeedBeforeLetGo() async throws {
+    /// A hold begins at 2×; dragging up steps it to 3× and 4×, dragging back down keeps the speed it reached, and letting go returns the film
+    /// to the speed it was at, exactly. Each step is one engine call, and a finger moving within one step makes none.
+    @Test func holdStepsUpAndHoldsWhereTheFingerLeavesItBeforeLetGo() async throws {
         let engines = Engines(["a": .plays(duration: 200)])
         let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
         await model.start()
@@ -454,14 +454,36 @@ import StremioKitTestSupport
         #expect(model.beginHeldSpeed())
         #expect(model.heldSpeed == PlayerViewModel.HeldSpeed(restoreRate: 1.25, rate: 2))
         #expect(model.state.rate == 2, "the badge reads the speed the engine reports")
-        let steps: [(Double, Float)] = [(-40, 3), (-80, 4), (-200, 4), (-40, 3), (-20, 2), (0, 2)]
+        let steps: [(Double, Float)] = [(-40, 3), (-80, 4), (-200, 4), (-40, 4), (-20, 4), (0, 4)]
         for (displacement, expected) in steps {
-            model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum))
+            model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum, current: model.heldSpeed?.rate))
             #expect(model.heldSpeed?.rate == expected, "\(displacement) points from the hold's start")
         }
         model.endHeldSpeed()
         #expect(model.heldSpeed == nil)
-        #expect(engines.made["a"]?.rates == [1.25, 2, 3, 4, 3, 2, 1.25])
+        #expect(engines.made["a"]?.rates == [1.25, 2, 3, 4, 1.25])
+        await model.close()
+    }
+
+    /// A drag down locks the hold: the speed stays after the finger lifts, takes no further steps, and a speed chosen meanwhile is what
+    /// it returns to. Ending the hold, as a pause or a hold dragged down from the lock does, returns the film to the speed it was at.
+    @Test func aLockedHoldKeepsItsSpeedUntilEnded() async throws {
+        let engines = Engines(["a": .plays(duration: 200)])
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate("a")]), services: try await services(engines: engines))
+        await model.start()
+        try await waitUntil { model.isPlaying }
+        model.setRate(1.25)
+        #expect(model.beginHeldSpeed())
+        model.setHeldSpeed(3)
+        model.lockHeldSpeed()
+        #expect(model.heldSpeed == PlayerViewModel.HeldSpeed(restoreRate: 1.25, rate: 3, isLocked: true))
+        model.setHeldSpeed(4)
+        #expect(model.heldSpeed?.rate == 3, "a locked hold takes no further steps")
+        model.setRate(1.5)
+        #expect(model.heldSpeed == PlayerViewModel.HeldSpeed(restoreRate: 1.5, rate: 3, isLocked: true))
+        model.endHeldSpeed()
+        #expect(model.heldSpeed == nil)
+        #expect(engines.made["a"]?.rates == [1.25, 2, 3, 1.5])
         await model.close()
     }
 

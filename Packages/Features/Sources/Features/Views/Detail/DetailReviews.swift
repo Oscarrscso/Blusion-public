@@ -52,6 +52,7 @@ struct DetailReviews: View {
                 .buttonStyle(.plain)
                 .pointerFeedback()
                 .padding(.leading, Theme.Spacing.s)
+                .buttonBorderShape(.roundedRectangle(radius: 12 * metrics.circularButtonScale(for: .actionButtons)))
                 .accessibilityLabel("Sort TMDb reviews")
                 .accessibilityValue(reviewSort.rawValue)
                 .accessibilityIdentifier("detail.reviews.sort")
@@ -113,7 +114,7 @@ struct DetailReviews: View {
                                 }
                                 .padding(ReviewCard.padding)
                                 .frame(width: metrics.episodeWidth)
-                                .cardSurface()
+                                .cardSurface(group: .reviews)
                                 .reportsShelfEdge(id: index)
                                 .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("Loading review")
@@ -171,13 +172,15 @@ struct DetailReviews: View {
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: .circle)
-            .contentShape(Circle())
+            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+            .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
+            .clipShape(RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
     }
 
     /// The AI button reveals this panel and starts summarisation only when requested.
     private func aiSummaryPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .reviews), style: .continuous)
         return VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
                 Image(systemName: "sparkles")
@@ -254,7 +257,8 @@ struct DetailReviews: View {
             if let criticised {
                 summaryOpinion("Criticised", text: criticised, symbol: "minus.circle", tint: .red)
             }
-            if praised != nil || criticised != nil {
+            // Notes such as "Based on 1 TMDb review." follow a verdict that stands alone too.
+            if praised != nil || criticised != nil || overall != nil {
                 ForEach(other.indices, id: \.self) { index in
                     Text(other[index])
                         .font(.caption)
@@ -451,7 +455,8 @@ private enum ReviewTextMarkup {
 /// One TMDb review. Folded, every card is the same height: the text keeps six lines whether or not it fills them. A tap opens or
 /// folds it, and only a review that runs past those lines folds. Links in the text are drawn as links in both states, and a tap on one
 /// opens it only once the card is expanded; folded, the tap expands the card as any other tap on the text does.
-private struct ReviewCard: View {
+struct ReviewCard: View {
+    @Environment(\.layoutMetrics) private var metrics
     let review: TMDbReview
     let isExpanded: Bool
     /// The card's outer width folded and expanded. The text is laid out at the inner width of each and never re-wraps while the card animates.
@@ -513,9 +518,9 @@ private struct ReviewCard: View {
             }
         }
         .padding(Self.padding)
-        .cardSurface()
+        .cardSurface(group: .reviews)
         // Fixed-width text never draws outside the card while it grows or shrinks.
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .reviews), style: .continuous))
     }
 
     /// A tap on a link opens it and leaves the card as it is. Any other tap on the text folds or opens the card, as a tap on the header does.

@@ -407,7 +407,14 @@ public final class PlayerViewModel {
     /// The stream playing now, as its addon listed it (the options panel's Info).
     public var currentCandidate: PlaybackCandidate? { coordinator?.current }
     public var hasNextEpisode: Bool { !plan.isOffline && plan.request.nextRequest != nil }
-    public var canPictureInPicture: Bool { coordinator?.current?.route.isNative == true }
+    /// AVPlayer and AetherEngine play in a layer Picture in Picture can take. mpv has none, so its window never becomes possible.
+    public var canPictureInPicture: Bool {
+        guard let route = coordinator?.current?.route else { return false }
+        switch route {
+        case .native, .fallback: return true
+        default: return false
+        }
+    }
     public var volume: Float { coordinator?.volume ?? 1 }
     public var isMuted: Bool { coordinator?.isMuted ?? false }
     public var capabilities: EngineCapabilities { coordinator?.capabilities ?? [] }
@@ -464,7 +471,7 @@ public final class PlayerViewModel {
     public func setRate(_ rate: Float) {
         if let held = heldSpeed {
             // A speed chosen during a hold is the one the hold returns to; the speed held now stays as it is.
-            heldSpeed = HeldSpeed(restoreRate: rate, rate: held.rate)
+            heldSpeed = HeldSpeed(restoreRate: rate, rate: held.rate, isLocked: held.isLocked)
         } else {
             coordinator?.setRate(rate)
         }
@@ -477,6 +484,8 @@ public final class PlayerViewModel {
         public let restoreRate: Float
         /// Never above `heldSpeedMaximum`: the speed the engine is asked for, which is also what the badge shows.
         public let rate: Float
+        /// Set by a drag down: the speed stays after the finger lifts, until `endHeldSpeed` returns the film to `restoreRate`.
+        public var isLocked = false
     }
 
     /// Set from `beginHeldSpeed` until `endHeldSpeed`; nil otherwise.
@@ -497,13 +506,20 @@ public final class PlayerViewModel {
     }
 
     /// Moves the held speed to a step. Only a change of step reaches the engine: a finger moving within one step makes no call.
+    /// A locked hold keeps its speed.
     public func setHeldSpeed(_ rate: Float) {
-        guard let held = heldSpeed, let coordinator else { return }
+        guard let held = heldSpeed, !held.isLocked, let coordinator else { return }
         guard rate.isFinite else { return }
         let target = min(max(SpeedHoldRules.startRate, rate), heldSpeedMaximum)
         guard target != held.rate else { return }
         heldSpeed = HeldSpeed(restoreRate: held.restoreRate, rate: target)
         coordinator.setRate(target)
+    }
+
+    /// A drag down locks the hold at the speed it has: the film keeps that speed after the finger lifts, until `endHeldSpeed`.
+    public func lockHeldSpeed() {
+        guard let held = heldSpeed, !held.isLocked else { return }
+        heldSpeed = HeldSpeed(restoreRate: held.restoreRate, rate: held.rate, isLocked: true)
     }
 
     /// Ends the hold and returns to the speed it began at. Idempotent: a lift, a cancelled touch, leaving the app, the end of the film
@@ -901,11 +917,13 @@ public final class PlayerViewModel {
             coordinator?.selectEmbeddedSubtitleTrack(id: nil)
             subtitleStatus = nil
             subtitleChoice = .off
+            syncEngineSubtitleDelay()
         case .embedded(let id):
             clearOverlay()
             coordinator?.selectEmbeddedSubtitleTrack(id: id)
             subtitleStatus = nil
             subtitleChoice = .embedded(id)
+            syncEngineSubtitleDelay()
         case .external(let id):
             guard let option = subtitleOptions.first(where: { $0.id == id }) else { return }
             // An engine that draws subtitle files draws them all: full ASS styling, pictures, its HDR brightness and its timing.
@@ -948,6 +966,7 @@ public final class PlayerViewModel {
                     subtitleChoice = .external(id)
                     engineDrawnOptionID = id
                     await coordinator?.reopenInFallbackEngine()
+                    guard generation == subtitleGeneration else { return }   // another choice was made during the reopen
                     if capabilities.contains(.engineSubtitles) {
                         coordinator?.addEngineSubtitle(engineSubtitle(for: option))
                         subtitleStatus = nil
@@ -1113,9 +1132,11 @@ public final class PlayerViewModel {
     }
 
     /// Downloads one result; it joins the list and is selected.
-    public func downloadOpenSubtitle(_ result: OpenSubtitlesResult) async {
-        guard !plan.isOffline else { return }
-        guard let client = openSubtitles() else { return }
+    /// True when the downloaded file is the subtitle now shown.
+    @discardableResult
+    public func downloadOpenSubtitle(_ result: OpenSubtitlesResult) async -> Bool {
+        guard !plan.isOffline else { return false }
+        guard let client = openSubtitles() else { return false }
         openSubtitlesStatus = "Downloading…"
         do {
             let download = try await client.download(result)
@@ -1128,8 +1149,11 @@ public final class PlayerViewModel {
             subtitleOptions = SubtitleService.merge(subtitleOptions, [option])
             openSubtitlesStatus = download.remaining.map { "\($0) downloads left today." }
             await selectSubtitle(.external(option.id))
+            if case .external(let id) = subtitleChoice { return id == option.id }
+            return false
         } catch {
             openSubtitlesStatus = Self.message(error as? OpenSubtitlesError)
+            return false
         }
     }
 

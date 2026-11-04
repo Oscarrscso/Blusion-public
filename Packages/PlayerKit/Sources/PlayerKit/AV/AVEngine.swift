@@ -92,6 +92,7 @@ public final class AVEngine: PlaybackEngine {
             update { $0.status = .paused }
             Task {
                 await self.seek(to: 0)
+                guard self.wantsPlay else { return }   // paused during the seek
                 self.player.play()
                 self.refreshStatus()
             }
@@ -109,6 +110,11 @@ public final class AVEngine: PlaybackEngine {
     }
 
     public func seek(to position: TimeInterval) async {
+        // A seek back from the end leaves it, so Play continues from there instead of replaying from the start.
+        if state.status == .ended, position < (state.duration ?? .infinity) {
+            update { $0.status = .paused }
+            refreshStatus()
+        }
         let time = CMTime(seconds: max(0, position), preferredTimescale: 600)
         _ = await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         update { $0.position = max(0, position) }
@@ -386,7 +392,10 @@ public final class AVEngine: PlaybackEngine {
         guard let item = playerItem, isItemReady else { return }
         let position = time.seconds
         guard position.isFinite else { return }
-        let buffered = item.loadedTimeRanges.last.map { $0.timeRangeValue.end.seconds } ?? 0
+        // The range at the playhead: after a seek, a later disjoint range says nothing about what plays next.
+        let buffered = item.loadedTimeRanges.map(\.timeRangeValue).first {
+            $0.start.seconds <= position + 0.1 && $0.end.seconds > position
+        }?.end.seconds ?? position
         update {
             $0.position = max(0, position)
             if buffered.isFinite { $0.bufferedUntil = buffered }
@@ -604,6 +613,8 @@ public final class AVEngine: PlaybackEngine {
         switch type {
         case .began:
             wasPlayingBeforeInterruption = wantsPlay
+            // Not wanted until the interruption ends with a resume, or the paused player reads as buffering and is reloaded as stalled.
+            wantsPlay = false
             update { if $0.status == .playing || $0.status == .buffering { $0.status = .paused } }
         case .ended:
             if wasPlayingBeforeInterruption, options?.contains(.shouldResume) == true { play() }

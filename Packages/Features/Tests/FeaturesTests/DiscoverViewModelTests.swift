@@ -11,116 +11,119 @@ import StremioKitTestSupport
         return AppServices(registry: AddonRegistry(store: InMemoryAddonStore(), secrets: InMemorySecretStore(), client: client), client: client)
     }
 
-    @Test func selectsTheFirstCatalogAndLoadsItsFirstPage() async throws {
+    @Test func combinesEveryCatalogAndRemovesDuplicates() async throws {
         let server = try MockServer.shared()
         let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
+        _ = try await services.registry.install(from: server.catalogManifestURL(token: "one").absoluteString)
+        _ = try await services.registry.install(from: server.catalogManifestURL(token: "two").absoluteString)
         let model = DiscoverViewModel(services: services)
         await model.loadSources()
-        #expect(model.hasSources)
-        #expect(model.selectedSource?.catalog.id == "mock-movies")
-        #expect(model.items.count == 20)
-        #expect(model.state == .loaded)
-        #expect(model.genres == ["Action", "Drama", "Comedy"])
-        #expect(model.canLoadMore)
-    }
-
-    @Test func allTypesKeepsTheSourceAndOffersEveryCatalog() async throws {
-        let server = try MockServer.shared()
-        let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
-        let model = DiscoverViewModel(services: services)
-        await model.loadSources()
-        let source = model.selectedSource
-        await model.selectAllTypes()
-        #expect(model.showsAllTypes)
-        #expect(model.selectedSource == source)
-        #expect(model.mixSources.contains { $0 == source })
-        if let type = model.types.first {
-            await model.select(type: type)
-            #expect(!model.showsAllTypes)
+        var expected = Set<String>()
+        for source in model.sources {
+            let page = try await services.browse.page(source)
+            expected.formUnion(page.map(\.identity))
         }
+        #expect(model.showsAllTypes)
+        #expect(model.visibleSources == model.sources)
+        #expect(Set(model.items.map(\.identity)) == expected)
+        #expect(model.items.count == expected.count)
+        #expect(model.state == .loaded)
     }
 
     @Test func nothingInstalledMeansNoSources() async throws {
         let model = DiscoverViewModel(services: services(try MockServer.shared()))
         await model.loadSources()
         #expect(!model.hasSources)
-        #expect(model.selectedSource == nil)
         #expect(model.items.isEmpty)
         await model.reload()
         await model.loadMore()
         #expect(model.state == .idle)
-    }
-
-    @Test func skipPaginationAppendsUntilTheCatalogIsExhausted() async throws {
-        let server = try MockServer.shared()
-        let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
-        let model = DiscoverViewModel(services: services)
-        await model.loadSources()
-        await model.loadMore()
-        #expect(model.items.count == 40)
-        await model.loadMore()
-        #expect(model.items.count == 45)
-        #expect(model.canLoadMore, "a short page is not proof of the end; only an empty one is")
-        await model.loadMore()
-        #expect(model.items.count == 45)
         #expect(!model.canLoadMore)
-        let ids = model.items.map(\.id)
-        #expect(Set(ids).count == ids.count, "no duplicates across pages")
-        await model.loadMore()   // no-op after the end
-        #expect(model.items.count == 45)
     }
 
-    @Test func genreFilterResetsAndRepaginates() async throws {
+    @Test func eachCatalogPaginatesWithoutRepeatingTitles() async throws {
         let server = try MockServer.shared()
         let services = services(server)
         _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
         let model = DiscoverViewModel(services: services)
         await model.loadSources()
-        await model.loadMore()
+        var expected = Set(model.items.map(\.identity))
+        for skip in [20, 40, 60] {
+            for source in model.sources where source.catalog.supportsSkip {
+                let page = try await services.browse.page(source, skip: skip)
+                expected.formUnion(page.map(\.identity))
+            }
+            await model.loadMore()
+        }
+        #expect(Set(model.items.map(\.identity)) == expected)
+        #expect(model.items.count == expected.count)
+        #expect(!model.canLoadMore)
+    }
+
+    @Test func genreFilterAppliesAcrossCatalogs() async throws {
+        let server = try MockServer.shared()
+        let services = services(server)
+        _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
+        let model = DiscoverViewModel(services: services)
+        await model.loadSources()
         await model.select(genre: "Drama")
         #expect(model.selectedGenre == "Drama")
-        #expect(!model.items.isEmpty && model.items.allSatisfy { $0.genres.contains("Drama") })
-        #expect(model.items.count < 40, "the previous pages were discarded")
+        #expect(!model.items.isEmpty)
+        #expect(model.items.allSatisfy { $0.genres.contains("Drama") })
         await model.select(genre: nil)
-        #expect(model.items.count == 20)
+        #expect(model.selectedGenre == nil)
     }
 
-    @Test func switchingCatalogsKeepsOnlyCompatibleGenres() async throws {
+    @Test func typesNarrowEveryCatalogAndAllRestoresThem() async throws {
         let server = try MockServer.shared()
         let services = services(server)
         _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
         let model = DiscoverViewModel(services: services)
         await model.loadSources()
-        await model.select(genre: "Action")
-        let top = try #require(model.sources.first { $0.catalog.id == "mock-top" })
-        await model.select(source: top)
-        #expect(model.selectedGenre == nil, "mock-top has no genre filter")
-        #expect(model.genres.isEmpty)
-        #expect(model.items.count == 4)
-        #expect(!model.canLoadMore, "mock-top does not support skip")
+        await model.select(type: "movie")
+        #expect(model.visibleSources.map(\.catalog.id) == ["mock-movies", "mock-top"])
+        #expect(model.items.allSatisfy { $0.type == "movie" })
+        await model.select(type: "series")
+        #expect(model.visibleSources.map(\.catalog.id) == ["mock-series"])
+        #expect(model.items.map(\.id) == ["mock:series1"])
+        await model.select(type: "unknown")
+        #expect(model.selectedType == "series")
+        await model.selectAllTypes()
+        #expect(model.visibleSources == model.sources)
+        #expect(model.items.contains { $0.type == "movie" })
+        #expect(model.items.contains { $0.type == "series" })
     }
 
-    @Test func aStaleResponseNeverOverwritesALaterSelection() async throws {
+    @Test func aStaleResponseCannotOverwriteANewerTypeChoice() async throws {
         let server = try MockServer.shared()
         let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL(flags: ["slow"], token: "slow").absoluteString)
-        _ = try await services.registry.install(from: server.catalogManifestURL(token: "fast").absoluteString)
+        _ = try await services.registry.install(from: server.catalogManifestURL(flags: ["slow"]).absoluteString)
         let model = DiscoverViewModel(services: services)
-        await model.loadSources()   // selects the slow addon's first catalog (and waits for it)
-        let slowTop = try #require(model.sources.first { $0.catalog.id == "mock-top" && $0.addon.name == "Mock Catalog" })
-        let fastMovies = try #require(model.sources.last { $0.catalog.id == "mock-movies" })
-        let pending = Task { await model.select(source: slowTop) }
+        await model.loadSources()
+        let pending = Task { await model.select(type: "movie") }
         try await Task.sleep(for: .milliseconds(150))
-        await model.select(source: fastMovies)
+        await model.select(type: "series")
         await pending.value
-        #expect(model.selectedSource == fastMovies)
-        #expect(model.items.count == 20, "the late slow answer was discarded")
+        #expect(model.selectedType == "series")
+        #expect(model.items.map(\.id) == ["mock:series1"])
     }
 
-    @Test func failuresAreReportedAndReloadRecovers() async throws {
+    @Test func refreshRemovesDisabledSourcesAndKeepsTheTypeChoice() async throws {
+        let server = try MockServer.shared()
+        let services = services(server)
+        _ = try await services.registry.install(from: server.catalogManifestURL(token: "one").absoluteString)
+        let second = try await services.registry.install(from: server.catalogManifestURL(token: "two").absoluteString)
+        let model = DiscoverViewModel(services: services)
+        await model.loadSources()
+        await model.select(type: "series")
+        try await services.registry.setEnabled(false, id: second.id)
+        await model.loadSources()
+        #expect(model.selectedType == "series")
+        #expect(model.sources.allSatisfy { $0.addon.id != second.id })
+        #expect(model.items.map(\.id) == ["mock:series1"])
+    }
+
+    @Test func failuresAreReported() async throws {
         let server = try MockServer.shared()
         let services = services(server)
         _ = try await services.registry.install(from: server.catalogManifestURL(flags: ["badjson"]).absoluteString)
@@ -128,57 +131,6 @@ import StremioKitTestSupport
         await model.loadSources()
         #expect(model.state == .failed(.invalidJSON))
         #expect(model.items.isEmpty)
-    }
-
-    @Test func typesFollowTheTabOrderAndSourcesFilterByType() async throws {
-        let server = try MockServer.shared()
-        let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL().absoluteString)
-        let model = DiscoverViewModel(services: services)
-        await model.loadSources()
-        #expect(model.types == ["movie", "series"])
-        #expect(model.selectedType == "movie")
-        #expect(model.visibleSources.map(\.catalog.id) == ["mock-movies", "mock-top"])
-        await model.select(type: "series")
-        #expect(model.selectedType == "series")
-        #expect(model.selectedSource?.catalog.id == "mock-series", "the type's first source is selected")
-        #expect(model.visibleSources.map(\.catalog.id) == ["mock-series"])
-        #expect(model.items.map(\.id) == ["mock:series1"])
-        await model.select(type: "anime")
-        #expect(model.selectedType == "series", "an unknown type changes nothing")
-    }
-
-    @Test func typesAreOrderedByRankThenFirstAppearance() async throws {
-        let manifest = Manifest(id: "order", name: "Order", version: "1", resources: [ResourceDescriptor(name: "catalog")],
-                                types: ["tv", "zeta", "alpha", "anime", "movie"],
-                                catalogs: [CatalogDescriptor(type: "tv", id: "t"), CatalogDescriptor(type: "zeta", id: "z"),
-                                           CatalogDescriptor(type: "alpha", id: "a"), CatalogDescriptor(type: "anime", id: "n"),
-                                           CatalogDescriptor(type: "movie", id: "m")])
-        let (registry, client) = try await makeStubbedRegistry(manifests: [manifest], transport: StubTransport(data: Data(#"{"metas":[]}"#.utf8)))
-        let model = DiscoverViewModel(services: AppServices(registry: registry, client: client))
-        await model.loadSources()
-        #expect(model.types == ["movie", "anime", "tv", "zeta", "alpha"], "by rank, then the order the types first appear in")
-        #expect(model.selectedType == "movie")
-    }
-
-    @Test func loadSourcesKeepsASelectionThatStillExistsAndFallsBackOtherwise() async throws {
-        let server = try MockServer.shared()
-        let services = services(server)
-        _ = try await services.registry.install(from: server.catalogManifestURL(token: "one").absoluteString)
-        let second = try await services.registry.install(from: server.catalogManifestURL(token: "two").absoluteString)
-        let model = DiscoverViewModel(services: services)
-        await model.loadSources()
-        let secondSeries = try #require(model.sources.first { $0.catalog.id == "mock-series" && $0.addon.id == second.id })
-        await model.select(source: secondSeries)
-        await model.loadSources()
-        #expect(model.selectedSource == secondSeries, "the selection survives a refresh")
-        #expect(model.selectedType == "series")
-
-        try await services.registry.setEnabled(false, id: second.id)
-        await model.loadSources()
-        #expect(model.selectedType == "movie", "the selected addon is gone, so the first type takes over")
-        #expect(model.selectedSource?.catalog.id == "mock-movies")
-        #expect(model.selectedSource?.addon.id != second.id)
     }
 
     @Test func yearSpanLabelWordsTheSpanLikeTheLibraryChips() throws {

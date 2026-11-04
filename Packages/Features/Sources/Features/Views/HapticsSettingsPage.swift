@@ -34,13 +34,12 @@ struct HapticsSettingsPage: View {
     private static let groups: [PlaceGroup] = [
         PlaceGroup(title: "Taps", places: [.buttons, .titles, .navigation]),
         PlaceGroup(title: "Choices", places: [.choices, .sliders]),
-        PlaceGroup(title: "Player", places: [.playerControls, .playerOptions]),
         PlaceGroup(title: "Motion", places: [.shelves, .banner, .reviews]),
         PlaceGroup(title: "Confirmations", places: [.saved]),
     ]
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 // Apply before previewing so the master switch takes effect immediately. On is the default, so it saves as nothing.
                 Toggle("Haptics", isOn: Binding(get: { draft.isOn }, set: { value in
@@ -53,6 +52,24 @@ struct HapticsSettingsPage: View {
             Group {
                 Section {
                     overallRow
+                }
+                Section("Player") {
+                    NavigationLink {
+                        SettingsList {
+                            ForEach([Place.playerControls, .playerOptions, .playerGestures]) { place in
+                                NavigationLink {
+                                    HapticPlacePage(place: place, model: model, draft: $draft)
+                                } label: {
+                                    SettingsRow(title: place.title, summary: summary(place), systemImage: place.systemImage)
+                                }
+                                .accessibilityIdentifier("settings.haptics.place.\(place.rawValue)")
+                            }
+                        }
+                        .settingsPage("Player haptics")
+                    } label: {
+                        SettingsRow(title: "Player haptics", summary: "", systemImage: "play.rectangle")
+                    }
+                    .accessibilityIdentifier("settings.haptics.player")
                 }
                 ForEach(Self.groups, id: \.title) { group in
                     Section(group.title) {
@@ -130,6 +147,7 @@ struct HapticsSettingsPage: View {
 /// One place's page: its switch, its feel, its strength, anything only it has (a shelf's spacing, a review's ticks), and a way to try it
 /// as it fires in the app.
 private struct HapticPlacePage: View {
+    @Environment(\.layoutMetrics) private var metrics
     let place: HapticPreferences.Place
     let model: SettingsViewModel
     @Binding var draft: HapticPreferences
@@ -141,7 +159,7 @@ private struct HapticPlacePage: View {
     @State private var sampleStop = 2.0
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 Toggle(place.title, isOn: Binding(get: { draft.plays(place) }, set: { value in
                     // On is the default, so turning a place back on saves nothing for it.
@@ -283,7 +301,7 @@ private struct HapticPlacePage: View {
                     ForEach(1...10, id: \.self) { number in
                         Text("Poster \(number)")
                             .frame(width: 100, height: 120)
-                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12 * metrics.cornerScale(for: .settingsRows)))
                             .reportsShelfEdge(id: number)
                     }
                 }
@@ -316,6 +334,7 @@ private struct HapticPlacePage: View {
         case .navigation: "Test tab change"
         case .playerControls: "Test player control"
         case .playerOptions: "Test option change"
+        case .playerGestures: "Test gesture step"
         case .banner: "Test page change"
         case .saved: "Test saved"
         case .choices, .sliders, .shelves, .reviews: "Test"

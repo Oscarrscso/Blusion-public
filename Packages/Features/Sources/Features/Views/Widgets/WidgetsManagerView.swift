@@ -11,6 +11,7 @@ import UIKit.UIGestureRecognizerSubclass
 private let dragLog = Logger(subsystem: "app.blusion.player", category: "widgets.drag")
 
 struct WidgetsManagerView: View {
+    @Environment(\.layoutMetrics) private var metrics
     let services: AppServices
     @State private var model: WidgetsManagerViewModel
     @State private var creating: NewWidgetRoute?
@@ -347,7 +348,7 @@ struct WidgetsManagerView: View {
                     WidgetCard(widget: widget, services: services, onDelete: deleteAction(for: widget),
                                onDuplicate: duplicateAction(for: widget))
                         .frame(width: layout.cardWidth, height: layout.cardHeight)
-                        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 28 * metrics.cornerScale(for: .panels), style: .continuous))
                         .opacity(drag?.id == id ? 0 : 1)
                         .position(layout.center(for: index))
                         .onTapGesture { tapped(id) }
@@ -477,7 +478,7 @@ struct WidgetsManagerView: View {
         } message: { pending in
             Text("This setup uses addons you don't have: \(pending.missingAddonHosts.joined(separator: ", ")).")
         }
-        .overlay { if model.isWorking { Spinner().padding().background(.regularMaterial, in: .capsule) } }
+        .overlay { if model.isWorking { Spinner().padding().background(.regularMaterial, in: ScaledCapsule(scale: metrics.cornerScale(for: .panels))) } }
         .savedHUD(trigger: model.saveRevision)
         .disabled(model.isWorking)
     }
@@ -741,6 +742,7 @@ private struct GridScrollAnchor: UIViewRepresentable {
 /// A widget as a card: a 2x2 collage of its own posters under a dark gradient, its name and style, and a delete button. Tapping the card
 /// opens the widget's settings, where every setting of it is.
 private struct WidgetCard: View {
+    @Environment(\.layoutMetrics) private var metrics
     let widget: HomeWidget
     let services: AppServices
     /// Nil for Continue Watching, which has no delete button: Home always shows it.
@@ -766,7 +768,7 @@ private struct WidgetCard: View {
             }
             .padding(16)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 28 * metrics.cornerScale(for: .panels), style: .continuous))
         .overlay(alignment: .bottomTrailing) {
             // Duplicate sits before Delete, the same size, so the card's two buttons read as one pair.
             HStack(spacing: 8) {
@@ -777,7 +779,7 @@ private struct WidgetCard: View {
                             .frame(width: Self.trashSize, height: Self.trashSize)
                     }
                     .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
+                    .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
                     .accessibilityLabel("Duplicate \(widget.title)")
                     .accessibilityIdentifier("widgets.menu.duplicate.\(widget.id)")
                 }
@@ -788,7 +790,7 @@ private struct WidgetCard: View {
                             .frame(width: Self.trashSize, height: Self.trashSize)
                     }
                     .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
+                    .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
                     .accessibilityLabel("Delete \(widget.title)")
                     .accessibilityIdentifier("widgets.menu.delete.\(widget.id)")
                 }
@@ -901,6 +903,7 @@ private enum NewWidgetRoute: Hashable, Identifiable {
 }
 /// A group of rows on the widgets page: an optional heading over rows on one rounded surface, as a settings list draws them.
 private struct WidgetsPageGroup<Content: View>: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String?
     @ViewBuilder let content: Content
 
@@ -916,7 +919,7 @@ private struct WidgetsPageGroup<Content: View>: View {
             }
             VStack(spacing: 0) { content }
                 .buttonStyle(.plain)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.surface, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .panels), style: .continuous))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

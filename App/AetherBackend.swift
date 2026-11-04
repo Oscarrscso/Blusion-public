@@ -242,4 +242,11 @@ extension AetherBackend: PictureOverlayHosting {
     public var pictureGravity: AVLayerVideoGravity { session.pictureGravity }
     public var pictureIsHDR: Bool { session.isHDRSource }
 }
+
+/// Picture in Picture takes AetherEngine's layer: its AVPlayerLayer on the native route, its sample-buffer layer on the software route.
+extension AetherBackend: PictureInPictureBacking {
+    public var pictureInPictureLayer: CALayer? { session.pictureInPictureLayer }
+    public func pictureInPictureTimeRange() -> CMTimeRange { session.pictureInPictureTimeRange() }
+    public func setPictureInPictureActive(_ active: Bool) { session.setPictureInPictureActive(active) }
+}
 #endif

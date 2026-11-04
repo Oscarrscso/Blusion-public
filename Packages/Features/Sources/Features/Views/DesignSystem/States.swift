@@ -146,7 +146,7 @@ struct SkeletonShelf: View {
             Text(" ")
                 .headingStyle()
                 .frame(width: 150)
-                .background { RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Theme.surface).padding(.vertical, 4) }
+                .background { RoundedRectangle(cornerRadius: 5 * metrics.cornerScale(for: .artwork), style: .continuous).fill(Theme.surface).padding(.vertical, 4) }
                 .padding(.horizontal, metrics.pageMargin)
                 .shimmering()
             SkeletonRow(aspect: aspect, size: size, showsTitle: showsTitle)
@@ -168,7 +168,7 @@ private struct SkeletonShapes: View {
     var body: some View {
         let width = size.width(for: aspect, metrics: metrics)
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            RoundedRectangle(cornerRadius: aspect.cornerRadius * metrics.cornerScale, style: .continuous)
+            RoundedRectangle(cornerRadius: aspect.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
                 .fill(Theme.surface)
                 .frame(width: width, height: width / aspect.ratio)
             if showsTitle ?? aspect.showsCaption(appearance) {
@@ -188,7 +188,7 @@ private struct SkeletonShapes: View {
             .font(font)
             .lineLimit(lines, reservesSpace: true)
             .frame(width: width)
-            .background { RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Theme.surface).padding(.vertical, 3) }
+            .background { RoundedRectangle(cornerRadius: 3 * metrics.cornerScale(for: .artwork), style: .continuous).fill(Theme.surface).padding(.vertical, 3) }
     }
 }
 

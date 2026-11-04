@@ -150,7 +150,7 @@ extension DescribedSearch {
             }
         }
         if words.contains(where: { ["funny", "hilarious", "comedic"].contains($0) }),
-           !search.genres.contains("Comedy") {
+           !search.genres.contains("Comedy"), !search.excludedGenres.contains("Comedy") {
             search.genres.append("Comedy")
         }
         for (index, word) in words.enumerated() {
@@ -161,7 +161,10 @@ extension DescribedSearch {
                 switch words[index - 1] {
                 case "before", "pre": search.latestYear = year - 1
                 case "after", "since", "post": search.earliestYear = year + (words[index - 1] == "after" ? 1 : 0)
-                case "from", "in": search.earliestYear = year; search.latestYear = year
+                case "from", "in", "between": search.earliestYear = year; search.latestYear = year
+                // "from 1990 to 2000": the second year ends the range the first began.
+                case "to", "until", "till", "through", "and":
+                    if let earliest = search.earliestYear, year >= earliest { search.latestYear = year }
                 default: break
                 }
             }

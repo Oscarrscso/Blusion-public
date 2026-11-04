@@ -692,6 +692,7 @@ private struct ValueSearch: View {
 /// A row of a list of choices: its title, an optional grey line under it, and a checkmark when it is the current choice or a chevron for a
 /// row that opens another screen. The whole row is the button.
 private struct ChoiceRow: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     var subtitle: String?
     var isSelected = false
@@ -725,7 +726,7 @@ private struct ChoiceRow: View {
             .frame(minHeight: 44)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(isSelected ? Theme.surface : Color.clear, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+            .background(isSelected ? Theme.surface : Color.clear, in: RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .panels), style: .continuous))
         }
         .buttonStyle(.plain)
         .pointerFeedback()

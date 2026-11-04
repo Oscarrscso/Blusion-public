@@ -129,10 +129,11 @@ public enum AutoStreamRanking {
             let rival = index == 0 ? ranked.dropFirst().first : chosen
             if let rival {
                 let gap = entry.qualityScore - rival.qualityScore
+                // Download need and resolution preference rank ahead of score, so the chosen release can score lower.
                 if index == 0 {
-                    reasons.append("chosen, \(amount(gap)) points ahead of \(rival.item.title)")
+                    reasons.append("chosen, \(amount(gap)) points \(gap < 0 ? "behind" : "ahead of") \(rival.item.title)")
                 } else {
-                    reasons.append("\(amount(-gap)) points behind \(chosen.item.title)")
+                    reasons.append("\(amount(gap)) points \(gap > 0 ? "ahead of" : "behind") \(chosen.item.title)")
                 }
                 if entry.needsDownload && !rival.needsDownload { reasons.append("must download before it plays") }
                 let pairs = zip(entry.contributions, rival.contributions).filter { pair in pair.0.points != pair.1.points }

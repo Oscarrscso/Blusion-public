@@ -507,7 +507,13 @@ public final class WidgetsManagerViewModel {
     /// The genres a catalog offers as a filter; empty when it has none or its addon is not installed.
     public func genres(for source: WidgetSource) -> [String] {
         guard case .addonCatalog(let reference) = source, let match = reference.resolve(in: installedAddons) else { return [] }
-        return match.catalog.genreOptions
+        return Self.unique(match.catalog.genreOptions)
+    }
+
+    /// The genres in the addon's order, each once: the pickers list them by name, and an addon can list one twice.
+    private static func unique(_ genres: [String]) -> [String] {
+        var seen = Set<String>()
+        return genres.filter { seen.insert($0).inserted }
     }
 
     // MARK: Making widgets
@@ -581,7 +587,7 @@ public final class WidgetsManagerViewModel {
                 let reference = AddonCatalogReference(manifestID: addon.manifest.id, host: addon.displayHost, catalogType: catalog.type,
                                                       catalogID: catalog.id)
                 let choice = CatalogChoice(reference: reference, title: DefaultWidgets.rowTitle(catalogName: catalog.name, type: catalog.type),
-                                           addonName: addon.name, genres: catalog.genreOptions)
+                                           addonName: addon.name, genres: unique(catalog.genreOptions))
                 if seen.insert(choice.id).inserted { choices.append(choice) }
             }
         }

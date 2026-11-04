@@ -27,6 +27,8 @@ public final class DetailViewModel {
     public private(set) var episodeRuntimes: [String: Int] = [:]
     /// Seasons TMDb has answered for, even with no runtimes, so they are not asked again on this page. A failed lookup is asked again.
     @ObservationIgnored private var runtimeSeasons: Set<Int> = []
+    /// Bumped by each read of the watched and saved state, so a read that returns after a later one can't put back older state.
+    @ObservationIgnored private var userStateGeneration = 0
     /// The season lookups on their way. The page owns them: a card that scrolls away does not call its season's lookup off.
     @ObservationIgnored private var runtimeTasks: [Int: Task<Void, Never>] = [:]
     /// Identities (`type/id`) of watched movies and episodes shown on this screen.
@@ -134,14 +136,20 @@ public final class DetailViewModel {
         #endif
     }
 
-    /// Runs the hero's load, and gives up after five seconds, so a slow picture never holds the page.
+    /// Runs the hero's load, and stops waiting for it after five seconds, so a slow picture never holds the page. The hero carries on.
     private func loadHero(_ hero: @escaping @MainActor @Sendable () async -> Void) async {
         let heroTask = Task { @MainActor in await hero() }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await heroTask.value }
-            group.addTask { try? await Task.sleep(for: .seconds(5)) }
-            await group.next()
-            group.cancelAll()
+        let timer = Task { try? await Task.sleep(for: .seconds(5)) }
+        // Not a task group: one waits for every child before it returns, and awaiting a task's value ignores cancellation, so the
+        // group would always wait for the whole hero.
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let first = ResumeOnce(continuation)
+                Task { await heroTask.value; first.resume() }
+                Task { await timer.value; first.resume() }
+            }
+        } onCancel: {
+            timer.cancel()
         }
     }
 
@@ -174,7 +182,7 @@ public final class DetailViewModel {
         guard !Task.isCancelled else { return }
         // Open at the same episode and season named by Play/Resume.
         if selectedSeason == nil {
-            selectedSeason = nextUp?.season ?? detail.seasons.first { $0 > 0 }
+            selectedSeason = nextUp?.season ?? detail.seasons.first { $0 > 0 } ?? detail.seasons.first
         }
         isLoading = false
         // The content is usable already. Keep the hero ahead of secondary lookups without holding the page's metadata back.
@@ -434,12 +442,14 @@ public final class DetailViewModel {
     /// Library membership, watched marks and saved progress, from the local stores. `afterUserChange` is for a change the user just made
     /// on this page, which the Save and Watched buttons tick for; any other read moves `loadRevision` along with the state, so they stay silent.
     public func refreshUserState(afterUserChange: Bool = false) async {
+        userStateGeneration += 1
+        let generation = userStateGeneration
         let identities = [movieIdentity] + detail.videos.map { episodeIdentity($0) }
         async let membership = services.library.contains(libraryIdentity)
         async let progress = services.progress.progress(for: identities)
         let records = await progress
         let isSaved = await membership
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, generation == userStateGeneration else { return }
         // A quiet revision must precede state changes, so loading watched/save state cannot tick a button.
         if !afterUserChange { loadRevision += 1 }
         isInLibrary = isSaved
@@ -671,8 +681,7 @@ public final class DetailViewModel {
         runtimeTasks.removeAll()
         for task in scoreTasks.values { task.cancel() }
         scoreTasks.removeAll()
-        reviewsLoadTimeout?.cancel()
-        reviewsLoadTimeout = nil
+        // The reviews' timeout is kept: it is the only thing that clears their spinner when the page never reports.
     }
 
     /// Leaving the page lets an unclaimed lookup go (after a short grace), Shuffle's included.
@@ -736,14 +745,18 @@ public final class DetailViewModel {
     private func findNextUp() -> Video? {
         guard isSeries else { return nil }
         let ordered = watchingOrder
+        // Moving on never rolls from the regular seasons into specials (as `nextVideo` doesn't); a special that was started resumes.
+        let regular = ordered.filter { $0.season != 0 }
         if let latest = ordered.filter({ savedProgress[episodeIdentity($0)] != nil }).max(by: { lastUpdate($0) < lastUpdate($1) }),
-           watchedIdentities.contains(episodeIdentity(latest)), let index = ordered.firstIndex(where: { $0.id == latest.id }),
-           let next = ordered.dropFirst(index + 1).first(where: { !watchedIdentities.contains(episodeIdentity($0)) }) {
+           watchedIdentities.contains(episodeIdentity(latest)), let index = regular.firstIndex(where: { $0.id == latest.id }),
+           let next = regular.dropFirst(index + 1).first(where: { !watchedIdentities.contains(episodeIdentity($0)) }) {
             return next
         }
         let unfinished = ordered.filter { isUnfinished(episodeIdentity($0)) }
         if let latest = unfinished.max(by: { lastUpdate($0) < lastUpdate($1) }) { return latest }
-        return ordered.first(where: { !watchedIdentities.contains(episodeIdentity($0)) }) ?? ordered.first
+        // A show of specials alone has only those to offer.
+        let offered = regular.isEmpty ? ordered : regular
+        return offered.first(where: { !watchedIdentities.contains(episodeIdentity($0)) }) ?? offered.first
     }
 
     /// "Resume" also means continuing a series at its next unstarted episode after earlier episodes were watched.
@@ -970,5 +983,21 @@ public final class DetailViewModel {
 
     private func lastUpdate(_ video: Video) -> Date {
         savedProgress[episodeIdentity(video)]?.updatedAt ?? .distantPast
+    }
+}
+
+/// Resumes a continuation once, for whichever of several racing tasks finishes first.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+
+    func resume() {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume()
     }
 }

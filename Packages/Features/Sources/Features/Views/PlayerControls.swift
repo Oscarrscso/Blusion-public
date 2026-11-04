@@ -12,6 +12,7 @@ struct PlayerControlActions {
 }
 
 struct PlayerControls: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: PlayerViewModel
     let infoModel: PlayerInfoModel
     let onClose: () -> Void
@@ -106,7 +107,8 @@ struct PlayerControls: View {
                 onClose()
             } label: {
                 Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                    .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .pointerInteraction(cornerRadius: 22)
             }
             #if !targetEnvironment(macCatalyst)
@@ -133,7 +135,10 @@ struct PlayerControls: View {
                         .accessibilityIdentifier("player.episodes")
                     }
                     if pipAvailable {
-                        Button(action: pipToggle) {
+                        Button {
+                            Haptics.play(.playerControls)
+                            pipToggle()
+                        } label: {
                             Image(systemName: "pip.enter").font(.body.weight(.semibold)).frame(width: 44, height: 44)
                                 .contentShape(.rect)
                                 .pointerInteraction(cornerRadius: 22)
@@ -165,7 +170,7 @@ struct PlayerControls: View {
                     }
                 }
                 .padding(.horizontal, 2)
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
             }
         }
         .buttonStyle(.plain)
@@ -179,7 +184,8 @@ struct PlayerControls: View {
         } label: {
             Image(systemName: Self.zoomSymbol(model.zoomMode)).font(.body.weight(.semibold)).frame(width: 44, height: 44)
                 .contentTransition(.symbolEffect(.replace))
-                .glassEffect(.regular.interactive(), in: .circle)
+                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                 .pointerInteraction(cornerRadius: 22)
         }
         .help("Zoom Mode: \(model.zoomMode.label)")
@@ -227,9 +233,10 @@ struct PlayerControls: View {
     private var transport: some View {
         GlassEffectContainer(spacing: 36) {
             HStack(spacing: 36) {
-                Button { Task { await model.skipBack() } } label: {
+                Button { Haptics.play(.playerControls); Task { await model.skipBack() } } label: {
                     Image(systemName: "gobackward.\(Int(model.skipBackSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                        .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 29)
                 }
                 #if !targetEnvironment(macCatalyst)
@@ -238,7 +245,7 @@ struct PlayerControls: View {
                 .help("Back \(Int(model.skipBackSeconds)) seconds (←)")
                 .accessibilityLabel("Back \(Int(model.skipBackSeconds)) seconds")
                 .accessibilityIdentifier("player.skipBack")
-                Button { model.togglePlayPause() } label: {
+                Button { Haptics.play(.playerControls); model.togglePlayPause() } label: {
                     ZStack {
                         if isStalled {
                             Spinner().controlSize(.large).transition(.opacity)
@@ -249,7 +256,8 @@ struct PlayerControls: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.2), value: isStalled)
-                    .frame(width: 80, height: 80).glassEffect(.regular.interactive(), in: .circle)
+                    .frame(width: 80, height: 80).glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                    .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .pointerInteraction(cornerRadius: 40)
                 }
                 #if !targetEnvironment(macCatalyst)
@@ -259,9 +267,10 @@ struct PlayerControls: View {
                 .accessibilityLabel(model.wantsPlayback ? "Pause" : "Play")
                 .accessibilityValue(isStalled ? "Loading" : "")
                 .accessibilityIdentifier("player.playPause")
-                Button { Task { await model.skipForward() } } label: {
+                Button { Haptics.play(.playerControls); Task { await model.skipForward() } } label: {
                     Image(systemName: "goforward.\(Int(model.skipForwardSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                        .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 29)
                 }
                 #if !targetEnvironment(macCatalyst)
@@ -303,11 +312,15 @@ struct PlayerControls: View {
             }
             Spacer(minLength: 0)
             if model.hasNextEpisode && model.hasFinished {
-                Button(action: onNextEpisode) {
+                Button {
+                    Haptics.play(.playerControls)
+                    onNextEpisode()
+                } label: {
                     Label("Next Episode", systemImage: "forward.end.fill").font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 16).frame(height: 40)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .pointerInteraction(cornerRadius: 20)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .pointerInteraction(cornerRadius: 20 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.plain)
                 .help("Next episode")
@@ -368,7 +381,7 @@ struct PlayerControls: View {
         }
         .font(.body.weight(.semibold))
         .padding(4)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
     }
 
     /// The menus this film has: Audio only with a choice to make in it, Chapters only with chapter markers.
@@ -390,7 +403,7 @@ struct PlayerControls: View {
     /// The player's own level, not the system's: iPhone's hardware buttons already change the system level, so iPhone has no
     /// control of its own here.
     private var volumeButton: some View {
-        Button { model.toggleMute() } label: {
+        Button { Haptics.play(.playerControls); model.toggleMute() } label: {
             Image(systemName: volumeSymbol).frame(width: 44, height: 44)
                 .contentShape(.rect)
                 .pointerInteraction(cornerRadius: 22)

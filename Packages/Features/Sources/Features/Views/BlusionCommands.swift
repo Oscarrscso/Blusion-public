@@ -17,12 +17,8 @@ public struct BlusionCommands: Commands {
             #if targetEnvironment(macCatalyst)
             Button("Settings") { router?.showSettings() }.keyboardShortcut("4")
             #endif
-            Button("Search") {
-                router?.open(.search)
-                #if targetEnvironment(macCatalyst)
-                router?.searchFocusRevision += 1
-                #endif
-            }.keyboardShortcut("f")
+            // As a tap on the Search tab: its first page, with the field focused, on every platform.
+            Button("Search") { router?.tapTab(.search) }.keyboardShortcut("f")
             #if targetEnvironment(macCatalyst)
             Divider()
             Button("Back") { router?.goBackOnTab() }.keyboardShortcut("[")

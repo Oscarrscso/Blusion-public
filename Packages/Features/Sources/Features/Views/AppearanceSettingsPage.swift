@@ -68,7 +68,7 @@ struct AppearanceSettingsPage: View {
     }
 
     var body: some View {
-        List {
+        SettingsList {
             Section {
                 AppearancePreview(appearance: appearance)
             }
@@ -94,6 +94,10 @@ struct AppearanceSettingsPage: View {
                     SettingsRow(title: "Cards", summary: appearance.cardsSummary, systemImage: "rectangle.portrait.on.rectangle.portrait")
                 }
                 .accessibilityIdentifier("settings.appearance.cards")
+                NavigationLink { AppearanceCornersPage() } label: {
+                    SettingsRow(title: "Corners", summary: "Global \(percent(appearance.cornerScale))", systemImage: "square.on.circle")
+                }
+                .accessibilityIdentifier("settings.appearance.corners")
                 NavigationLink { AppearanceHomePage() } label: {
                     SettingsRow(title: "Home", summary: appearance.homeSummary, systemImage: "play.house")
                 }
@@ -205,7 +209,7 @@ private struct AppearanceSectionPage<Content: View>: View {
 
     var body: some View {
         let controls = AppearanceControls(appearance: $appearance, draft: $draft, isSliding: $isSliding)
-        List {
+        SettingsList {
             Section {
                 AppearancePreview(appearance: draft ?? appearance, kind: preview)
             }
@@ -299,20 +303,29 @@ private struct AppearanceControls {
     /// preview as it goes and is saved when it ends; VoiceOver's and the keyboard's steps, which come without a drag, are saved at once.
     func slider(_ title: String, _ keyPath: WritableKeyPath<AppearancePreferences, Double>, in range: ClosedRange<Double>,
                 step: Double, low: String, high: String, id: String) -> some View {
+        slider(title, read: { $0[keyPath: keyPath] }, write: { $0[keyPath: keyPath] = $1 },
+               in: range, step: step, low: low, high: high, id: id)
+    }
+
+    func slider(_ title: String, read: @escaping (AppearancePreferences) -> Double,
+                write: @escaping (inout AppearancePreferences, Double) -> Void, in range: ClosedRange<Double>,
+                step: Double, low: String, high: String, id: String) -> some View {
         let appearance = appearance
         let draft = draft
         let isSliding = isSliding
-        let value = Binding<Double>(get: { (draft.wrappedValue ?? appearance.wrappedValue)[keyPath: keyPath] }, set: { newValue in
+        let value = Binding<Double>(get: { read(draft.wrappedValue ?? appearance.wrappedValue) }, set: { newValue in
             if isSliding.wrappedValue {
                 var look = draft.wrappedValue ?? appearance.wrappedValue
-                look[keyPath: keyPath] = newValue
+                write(&look, newValue)
                 draft.wrappedValue = look
-            } else if newValue != appearance.wrappedValue[keyPath: keyPath] {
+            } else if newValue != read(appearance.wrappedValue) {
                 Haptics.play(.sliders)
-                appearance.wrappedValue[keyPath: keyPath] = newValue
+                var look = appearance.wrappedValue
+                write(&look, newValue)
+                appearance.wrappedValue = look
             }
         })
-        let shown = percent(current[keyPath: keyPath])
+        let shown = percent(read(current))
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack {
                 Text(title)
@@ -414,8 +427,6 @@ private struct AppearanceCardsPage: View {
             Section("Size and Shape") {
                 controls.slider("Card size", \.cardScale, in: AppearancePreferences.cardScaleRange, step: 0.05,
                                 low: "rectangle.portrait", high: "rectangle.portrait", id: "cardSize")
-                controls.slider("Corners", \.cornerScale, in: AppearancePreferences.cornerScaleRange, step: 0.1,
-                                low: "square", high: "circle", id: "corners")
                 controls.slider("Spacing", \.spacingScale, in: AppearancePreferences.spacingScaleRange, step: 0.05,
                                 low: "arrow.down.right.and.arrow.up.left", high: "arrow.up.left.and.arrow.down.right", id: "spacing")
                 if isPhone {
@@ -450,6 +461,41 @@ private struct AppearanceCardsPage: View {
                 controls.segmented("Colour", \.progressColour, id: "progressColour")
                 controls.segmented("Thickness", \.progressThickness, id: "progressThickness")
                 controls.toggle("Time left", \.showsTimeLeft, id: "timeLeft")
+            }
+        }
+    }
+}
+
+private struct AppearanceCornersPage: View {
+    var body: some View {
+        AppearanceSectionPage(title: "Corners", section: .corners, preview: .corners) { controls in
+            Section("Global") {
+                controls.slider("Corners", \.cornerScale, in: AppearancePreferences.cornerScaleRange, step: 0.1,
+                                low: "square", high: "circle", id: "corners")
+                controls.toggle("Include circular buttons", \.includesCircularButtons, id: "circularCorners")
+            }
+            Section("Overrides") {
+                ForEach(AppearancePreferences.CornerGroup.allCases) { group in
+                    DisclosureGroup {
+                        Toggle("Use global", isOn: Binding(get: {
+                            controls.current.cornerOverrides[group.rawValue] == nil
+                        }, set: { follows in
+                            Haptics.play(.choices)
+                            var look = controls.appearance.wrappedValue
+                            look.cornerOverrides[group.rawValue] = follows ? nil : look.cornerScale(for: group)
+                            controls.appearance.wrappedValue = look
+                        }))
+                        if controls.current.cornerOverrides[group.rawValue] != nil {
+                            controls.slider("Corners", read: { $0.cornerScale(for: group) },
+                                            write: { $0.cornerOverrides[group.rawValue] = $1 },
+                                            in: AppearancePreferences.cornerScaleRange, step: 0.1,
+                                            low: "square", high: "circle", id: "corners.\(group.rawValue)")
+                        }
+                    } label: {
+                        LabeledContent(group.label, value: controls.current.cornerOverrides[group.rawValue]
+                            .map(percent) ?? "Global · \(percent(controls.current.cornerScale))")
+                    }
+                }
             }
         }
     }
@@ -541,7 +587,7 @@ extension AppearancePreferences {
     }
 
     var cardsSummary: String {
-        "Size \(percent(cardScale)) · Corners \(percent(cornerScale)) · Spacing \(percent(spacingScale))"
+        "Size \(percent(cardScale)) · Spacing \(percent(spacingScale))"
     }
 
     var homeSummary: String {

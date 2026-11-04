@@ -412,6 +412,7 @@ private struct MacPageNavigationOverlay: View {
 }
 
 private struct MacBackNavigation: ViewModifier {
+    @Environment(\.layoutMetrics) private var metrics
     @Environment(\.dismiss) private var dismiss
 
     func body(content: Content) -> some View {
@@ -421,7 +422,7 @@ private struct MacBackNavigation: ViewModifier {
                 Button("Back", systemImage: "chevron.backward") { dismiss() }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
+                    .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
                     .controlSize(.regular)
                     .padding(16)
                     .accessibilityIdentifier("mac.back")
@@ -459,6 +460,7 @@ private struct MacPageScroll: ViewModifier {
 /// relayout occurs.
 /// Slide selection is iPhone-only because the Mac uses native tab navigation instead of this compact bar.
 private struct LandscapeTabControls: View {
+    @Environment(\.layoutMetrics) private var metrics
     let router: AppRouter
     let collapsed: Bool
     let title: String
@@ -481,8 +483,11 @@ private struct LandscapeTabControls: View {
 
     /// Home and three tab icons, 44 points each, 12 apart.
     private static let panelContentWidth: CGFloat = 44 * 4 + 12 * 3
-    /// The panel's corners match Home's round end in the bottom-leading corner.
-    private static let panelShape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+    /// Every corner takes Home's radius, so Home sits flush in the bottom-leading corner and the panel's corners all match under any
+    /// corner setting. Home's 44-point shape can't round past 22 points, so neither does the panel.
+    private var panelShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 22 * min(metrics.circularButtonScale(for: .actionButtons), 1), style: .continuous)
+    }
     /// Collapsing shrinks the panel smoothly back into Home; expanding pops it out of Home on a soft spring.
     static func fade(collapsed: Bool) -> Animation {
         collapsed ? .smooth(duration: 0.3) : .spring(duration: 0.38, bounce: 0.18)
@@ -524,7 +529,7 @@ private struct LandscapeTabControls: View {
             .padding(.leading, 10)
             .padding(.trailing, 12)
             // The clearer, more see-through variant of Liquid Glass; it clears away with the rest when scrolled.
-            .glassEffect(.clear, in: Self.panelShape)
+            .glassEffect(.clear, in: panelShape)
             .opacity(collapsed ? 0 : 1)
             .scaleEffect(collapsed ? Self.tuckedScale : 1, anchor: .bottomLeading)
             .allowsHitTesting(!collapsed)
@@ -540,7 +545,8 @@ private struct LandscapeTabControls: View {
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(router.tab == .home ? appearance.selectionColour : .white)
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular, in: .circle)
+                    .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(collapsed ? currentTab.title : "Home")
@@ -589,6 +595,7 @@ private struct LandscapeTabControls: View {
 }
 
 public struct RootTabView: View {
+    @Environment(\.layoutMetrics) private var metrics
     private let services: AppServices
     private let initialQuery: String?
     private let initialRoute: LaunchRoute
@@ -782,7 +789,8 @@ public struct RootTabView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 21, weight: .medium))
                             .frame(width: 44, height: 44)
-                            .glassEffect(.regular.interactive(), in: .circle)
+                            .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                            .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
@@ -812,7 +820,8 @@ public struct RootTabView: View {
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                        .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Back")

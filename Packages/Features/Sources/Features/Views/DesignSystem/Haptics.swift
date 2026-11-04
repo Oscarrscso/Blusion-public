@@ -39,7 +39,7 @@ public enum Haptics {
 
     /// The haptic for `place`: its feel at its strength, or nothing when the place or haptics as a whole are off.
     ///
-    /// Once per gesture is the rule: a view that gives its own haptic must not also let a card's tap arrive (see `MediaCard` and the
+    /// Once per action is the rule (player scrubbing and level swipes also give spaced steps): a view that gives its own haptic must not also let a card's tap arrive (see `MediaCard` and the
     /// full-screen trailer's close button). Fire on the new value, never on a value read in from storage, so a screen that opens on
     /// saved settings stays silent.
     static func play(_ place: Place) {
@@ -166,6 +166,7 @@ extension View {
 /// height with that card's own animation, and no height is measured.
 /// `shrinksToFit` lets an expandable lazy shelf (reviews) recalculate its height as cards close; ordinary lazy shelves retain their maximum.
 struct ShelfScroll<Content: View>: View {
+    @Environment(\.layoutMetrics) private var metrics
     let margin: CGFloat
     let spacing: CGFloat
     let lazy: Bool
@@ -261,9 +262,9 @@ struct ShelfScroll<Content: View>: View {
             Image(systemName: systemName)
                 .font(.headline.weight(.semibold))
                 .frame(width: 40, height: 40)
-                .glassEffect(.regular, in: .circle)
+                .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 // Only the circle takes the click. The square's corners pass it to the card beneath, as they would with no chevron there.
-                .contentShape(Circle())
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

@@ -1,5 +1,6 @@
 #if canImport(UIKit) && canImport(AVKit)
 import AVKit
+import CoreMedia
 import PlayerKit
 import StremioKit
 import SwiftUI
@@ -186,33 +187,130 @@ final class PlayerLayerView: UIView {
     }
 }
 
-/// Picture in Picture for the AVPlayer engine. It starts only from `toggle()`, which only the PiP button calls (ADR-005: App Review rejects
-/// programmatic starts).
+/// Picture in Picture for the layer an engine draws: an AVPlayerLayer (the AVPlayer route, and AetherEngine's native route), or an
+/// AVSampleBufferDisplayLayer (AetherEngine's software route, driven through `PiPSampleBufferDelegate`). It starts from `toggle()`, which
+/// only the PiP button calls, or by itself when the app leaves the front while the picture plays (`canStartPictureInPictureAutomaticallyFromInline`,
+/// the system's own start rather than a programmatic one; ADR-005: App Review rejects programmatic starts).
 @MainActor
 @Observable
 final class PiPProxy {
     private(set) var isPossible = false
     private(set) var isActive = false
-    private var controller: AVPictureInPictureController?
-    private var observations: [NSKeyValueObservation] = []
+    @ObservationIgnored private var controller: AVPictureInPictureController?
+    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    /// The layer and engine the window should show. An open window keeps what it shows; these apply when it closes.
+    @ObservationIgnored private weak var wantedLayer: CALayer?
+    @ObservationIgnored private weak var wantedSource: (any PictureInPictureProviding)?
+    /// The layer and engine the controller was built on.
+    @ObservationIgnored private weak var boundLayer: CALayer?
+    @ObservationIgnored private weak var boundSource: (any PictureInPictureProviding)?
+    /// AVKit holds its playback delegate weakly, so the proxy keeps it for as long as the controller lives.
+    @ObservationIgnored private var sampleBufferDelegate: PiPSampleBufferDelegate?
 
-    func attach(to layer: AVPlayerLayer) {
-        guard AVPictureInPictureController.isPictureInPictureSupported(), controller == nil,
-              let controller = AVPictureInPictureController(playerLayer: layer) else { return }
-        self.controller = controller
+    /// Shows `layer` in the window. `source` is the engine behind a sample-buffer layer; an AVPlayerLayer needs none.
+    func attach(to layer: CALayer?, source: (any PictureInPictureProviding)? = nil) {
+        guard layer !== wantedLayer else { return }
+        wantedLayer = layer
+        wantedSource = source
+        rebind()
+    }
+
+    /// The engine has no layer to show (mpv, or its picture left the screen).
+    func detach() { attach(to: nil) }
+
+    /// The engine's playback changed (paused, played, or a new duration): AVKit reads the state again.
+    func playbackStateChanged() { controller?.invalidatePlaybackState() }
+
+    func toggle() {
+        guard let controller else { return }
+        if controller.isPictureInPictureActive { controller.stopPictureInPicture() } else { controller.startPictureInPicture() }
+    }
+
+    /// Builds the controller for the wanted layer, unless the window is open or the layer is already bound.
+    private func rebind() {
+        guard !isActive, wantedLayer !== boundLayer else { return }
+        unbind()
+        guard let layer = wantedLayer, AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        let made: AVPictureInPictureController?
+        if let playerLayer = layer as? AVPlayerLayer {
+            made = AVPictureInPictureController(playerLayer: playerLayer)
+        } else if let bufferLayer = layer as? AVSampleBufferDisplayLayer, let source = wantedSource {
+            let delegate = PiPSampleBufferDelegate(source: source)
+            sampleBufferDelegate = delegate
+            made = AVPictureInPictureController(contentSource: AVPictureInPictureController.ContentSource(
+                sampleBufferDisplayLayer: bufferLayer, playbackDelegate: delegate))
+        } else {
+            made = nil
+        }
+        guard let made else { return }
+        // Going home while the picture plays floats it in the window, with no tap: the system starts it, not the app.
+        made.canStartPictureInPictureAutomaticallyFromInline = true
+        controller = made
+        boundLayer = layer
+        boundSource = wantedSource
+        observe(made)
+    }
+
+    private func unbind() {
+        observations.removeAll()
+        controller = nil
+        sampleBufferDelegate = nil
+        boundLayer = nil
+        boundSource = nil
+        isPossible = false
+    }
+
+    private func observe(_ controller: AVPictureInPictureController) {
         observations.append(controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
             let possible = controller.isPictureInPicturePossible
             Task { @MainActor in self?.isPossible = possible }
         })
         observations.append(controller.observe(\.isPictureInPictureActive, options: [.initial, .new]) { [weak self] controller, _ in
             let active = controller.isPictureInPictureActive
-            Task { @MainActor in self?.isActive = active }
+            Task { @MainActor in self?.windowActivityChanged(active) }
         })
     }
 
-    func toggle() {
-        guard let controller else { return }
-        if controller.isPictureInPictureActive { controller.stopPictureInPicture() } else { controller.startPictureInPicture() }
+    /// The window opened or closed. The engine draws subtitles into the picture while it is open, and a layer that changed meanwhile
+    /// takes over when it closes.
+    private func windowActivityChanged(_ active: Bool) {
+        isActive = active
+        boundSource?.setPictureInPictureActive(active)
+        if !active { rebind() }
+    }
+}
+
+/// AVKit's playback answers for a sample-buffer layer, taken from the engine that draws it. AVKit calls them on the main thread.
+@MainActor
+final class PiPSampleBufferDelegate: NSObject, @preconcurrency AVPictureInPictureSampleBufferPlaybackDelegate {
+    private let source: any PictureInPictureProviding
+
+    init(source: any PictureInPictureProviding) {
+        self.source = source
+        super.init()
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {
+        source.setPictureInPicturePlaying(playing)
+    }
+
+    func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
+        source.pictureInPictureTimeRange()
+    }
+
+    func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
+        source.isPictureInPicturePaused
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime,
+                                    completion completionHandler: @escaping () -> Void) {
+        nonisolated(unsafe) let finish = completionHandler
+        Task {
+            await source.skipPictureInPicture(by: skipInterval.seconds)
+            finish()
+        }
     }
 }
 
@@ -226,6 +324,10 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
     var ambientMode = false
     var superResolution: SuperResolutionRenderer?
     var sampler: PictureSampler?
+    /// The first frame is on screen. A Picture in Picture layer can appear with it, so this is what updates the view to take it.
+    var pictureReady = false
+    /// Paused, so the Picture in Picture window's controls show it.
+    var paused = false
     var onFirstVideoFrame: () -> Void = {}
     #if DEBUG
     var onTestGeometry: ((String) -> Void)?
@@ -237,6 +339,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             && lhs.hdrBrightness == rhs.hdrBrightness
             && lhs.embeddedSubtitlesOn == rhs.embeddedSubtitlesOn && lhs.ambientMode == rhs.ambientMode
             && lhs.superResolution === rhs.superResolution && lhs.sampler === rhs.sampler
+            && lhs.pictureReady == rhs.pictureReady && lhs.paused == rhs.paused
     }
 
     func makeUIView(context: Context) -> PlayerLayerView {
@@ -258,8 +361,8 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             view.embed(nil)
             if view.playerLayer.player !== avEngine.player {
                 view.playerLayer.player = avEngine.player
-                pip.attach(to: view.playerLayer)
             }
+            pip.attach(to: view.playerLayer)
             view.watch(avEngine.player)
             view.layout = layout
             HDRBrightnessOverride.apply(hdrBrightness, to: view.playerLayer)
@@ -277,6 +380,11 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             view.layout = VideoLayout()
             view.embed(surface)
             surface.backgroundColor = ambientMode ? .clear : .black
+            // AetherEngine's own layer: its AVPlayerLayer on the native route, its sample-buffer layer on the software route. mpv has neither,
+            // so the window has nothing to show.
+            let pictureSource = engine as? any PictureInPictureProviding
+            pip.attach(to: pictureSource?.pictureInPictureLayer, source: pictureSource)
+            pip.playbackStateChanged()
             if let superResolution {
                 // AetherEngine: the scaled frames go over its picture, under its own subtitles, so its subtitles never block it. mpv has
                 // no AVPlayer to read frames from, and the renderer says so.
@@ -292,6 +400,7 @@ struct PlayerSurface: UIViewRepresentable, Equatable {
             view.playerLayer.player = nil
             view.watch(nil)
             view.embed(nil)
+            pip.detach()
             superResolution?.update(source: nil, wanted: false, displayScale: 1, gravity: .resizeAspect, embeddedSubtitlesOn: false)
             sampler?.update(source: nil, ambient: false)
         }

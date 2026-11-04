@@ -28,6 +28,8 @@ public final class LibraryViewModel {
     private var visibleSaved: [LibraryEntry] = []
     private var visibleWatched: [LibraryEntry] = []
     private var lastTraktPull = Date.distantPast
+    /// Bumped by each load, so one that read before a later change can't overwrite what the later load shows.
+    @ObservationIgnored private var loadGeneration = 0
     /// Where the scores from the rating sites other than IMDb come from. Nil until the view attaches it.
     @ObservationIgnored private var ratings: PosterRatingsStore?
     @ObservationIgnored private var filterTask: Task<Void, Never>?
@@ -62,8 +64,11 @@ public final class LibraryViewModel {
     }
 
     public func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         let all = await services.progress.all()
         let savedItems = await services.library.all()
+        guard generation == loadGeneration else { return }
         let savedByID = Dictionary(savedItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let recordsByTitle = Dictionary(grouping: all, by: Self.titleKey(of:))
 

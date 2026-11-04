@@ -155,7 +155,7 @@ struct SearchView: View {
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                 .padding(.horizontal, metrics.pageMargin)
                                 .contentShape(Rectangle())
-                                .pointerInteraction(cornerRadius: Theme.Radius.card)
+                                .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("search.recent.\(query)")
@@ -252,6 +252,7 @@ struct SearchView: View {
 
 /// One category on the Search page: its glyph in a small badge of its colour, its name, and a chevron.
 private struct CategoryRow: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
 
     var body: some View {
@@ -261,7 +262,7 @@ private struct CategoryRow: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
-                .background(accent.colour.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(accent.colour.gradient, in: RoundedRectangle(cornerRadius: 8 * metrics.cornerScale(for: .panels), style: .continuous))
                 .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline.weight(.semibold))

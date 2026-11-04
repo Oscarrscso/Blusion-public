@@ -6,6 +6,7 @@ import UIKit
 #endif
 
 struct AddonsView: View {
+    @Environment(\.layoutMetrics) private var metrics
     @State private var model: AddonsViewModel
     @Environment(AppRouter.self) private var router
     @Environment(\.openURL) private var openURL
@@ -141,11 +142,11 @@ struct AddonsView: View {
                             if let logo = addon.manifest.logo {
                                 ArtworkImage(url: logo, maxPixelSize: 132)
                                     .frame(width: 44, height: 44)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10 * metrics.cornerScale(for: .panels)))
                             } else {
                                 Image(systemName: "puzzlepiece.extension")
                                     .frame(width: 44, height: 44)
-                                    .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10))
+                                    .background(Theme.surfaceStrong, in: RoundedRectangle(cornerRadius: 10 * metrics.cornerScale(for: .panels)))
                             }
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(addon.name).font(.headline)
@@ -221,7 +222,8 @@ struct AddonDetailView: View {
                 LabeledContent("Resources", value: details.resources.joined(separator: ", "))
                 if !details.types.isEmpty { LabeledContent("Types", value: details.types.joined(separator: ", ")) }
                 if !details.idPrefixes.isEmpty { LabeledContent("Id prefixes", value: details.idPrefixes.joined(separator: ", ")) }
-                ForEach(details.catalogs, id: \.self) { Text($0) }
+                // By position: two catalogs can share a name and type.
+                ForEach(Array(details.catalogs.enumerated()), id: \.offset) { Text($0.element) }
             }
             Section("Manifest") {
                 Text(details.manifestJSON)

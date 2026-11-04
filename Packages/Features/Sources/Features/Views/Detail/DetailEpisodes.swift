@@ -153,7 +153,8 @@ struct DetailEpisodes: View {
             }
             .padding(.horizontal, 10)
             .frame(height: Self.secondaryControlHeight)
-            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: .capsule)
+            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
         }
         .buttonStyle(.plain)
         .frame(height: Self.secondaryControlHeight)
@@ -282,7 +283,7 @@ struct DetailEpisodes: View {
                     Text("No streams")
                         .font(.caption).foregroundStyle(.white)
                         .padding(Theme.Spacing.s)
-                        .background(.black.opacity(0.5), in: Capsule())
+                        .background(.black.opacity(0.5), in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
                         .padding(Theme.Spacing.s)
                 }
             }
@@ -307,7 +308,7 @@ struct DetailEpisodes: View {
                     episodeActions(video)
                 } preview: {
                     episodePreview(video, width: pageWidth - contentMargin * 2)
-                        .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius, style: .continuous))
+                        .glassHairline(RoundedRectangle(cornerRadius: Self.previewPanelRadius * metrics.cornerScale(for: .panels), style: .continuous))
                         .onAppear { isHoldingEpisode = true }
                         .onDisappear { isHoldingEpisode = false }
                 }
@@ -332,7 +333,7 @@ struct DetailEpisodes: View {
     private func landscapeEpisodeMenu(_ video: Video) -> UIMenu {
         let request = model.request(for: video)
         let watched = model.isWatched(video)
-        let downloaded = model.downloadManager?.item(for: request) != nil
+        let download = model.downloadManager?.item(for: request)
         // The palette's titles do not show in the landscape preview, so Watched and Download carry their captions in their images.
         // Each symbol fills while its state holds.
         let watchedAction = UIAction(title: "Watched",
@@ -343,11 +344,15 @@ struct DetailEpisodes: View {
                 await titleActions.refresh()
             }
         }
-        let downloadAction = UIAction(title: "Download",
-                                      image: Self.paletteItem(Self.paletteSymbol(downloaded ? "arrow.down.circle.fill" : "arrow.down.circle"),
-                                                              caption: "Download", mode: .alwaysTemplate)) { _ in
-            // A UIAction is not on the main actor, so the haptic has to come back to it.
-            Task { @MainActor in Haptics.play(.buttons); await model.download(request) }
+        let downloadAction = UIAction(title: download == nil ? "Download" : "Delete",
+                                      image: Self.paletteItem(Self.paletteSymbol(download == nil ? "arrow.down.circle" : "trash"),
+                                                              caption: download == nil ? "Download" : "Delete", mode: .alwaysTemplate),
+                                      attributes: download == nil ? [] : .destructive) { _ in
+            Task { @MainActor in
+                Haptics.play(.buttons)
+                if let download { await model.downloadManager?.delete(download.id) }
+                else { await model.download(request) }
+            }
         }
         let imdbMode: UIImage.RenderingMode = ratings?.showsColouredLogos == true ? .alwaysOriginal : .alwaysTemplate
         let imdbAction = UIAction(title: "IMDb", image: Self.paletteItem(Self.menuIMDbLogo(), caption: nil, mode: imdbMode)) { _ in
@@ -404,7 +409,7 @@ struct DetailEpisodes: View {
     private func episodeActions(_ video: Video) -> some View {
         let request = model.request(for: video)
         let watched = model.isWatched(video)
-        let downloaded = model.downloadManager?.item(for: request) != nil
+        let download = model.downloadManager?.item(for: request)
         // The palette holds Watched and Download with their labels, and the IMDb mark alone. Each symbol fills while its state holds.
         ControlGroup {
             Button("Watched", systemImage: watched ? "checkmark.circle.fill" : "checkmark.circle") {
@@ -413,9 +418,16 @@ struct DetailEpisodes: View {
                     await titleActions.refresh()
                 }
             }
-            Button("Download", systemImage: downloaded ? "arrow.down.circle.fill" : "arrow.down.circle") {
-                Haptics.play(.buttons)
-                Task { await model.download(request) }
+            if let download {
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    Haptics.play(.buttons)
+                    Task { await model.downloadManager?.delete(download.id) }
+                }
+            } else {
+                Button("Download", systemImage: "arrow.down.circle") {
+                    Haptics.play(.buttons)
+                    Task { await model.download(request) }
+                }
             }
             Button {
                 guard let ratings else { return }
@@ -443,9 +455,10 @@ struct DetailEpisodes: View {
                    showsWholeOverview: showsWholeOverview,
                    isShortWidth: !model.matchesEpisodeWidthToText && !showsWholeOverview, airsLater: airsLater,
                    isLoadingStreams: isLoadingStreams || model.downloadManager?.loadingRequests.contains(model.request(for: video).identity) == true,
-                   stillRadius: stillRadius)
+                   stillRadius: stillRadius,
+                   isDownloaded: model.downloadManager?.item(for: model.request(for: video))?.state == .complete)
             .overlay(alignment: .topTrailing) {
-                if let item = model.downloadManager?.item(for: model.request(for: video)) {
+                if let item = model.downloadManager?.item(for: model.request(for: video)), item.state != .complete {
                     DownloadProgressGlyph(item: item)
                         .frame(width: 44, height: 44)
                         .background(Theme.surfaceStrong, in: Circle())
@@ -480,6 +493,7 @@ enum EpisodeIMDbReviews {
 
 /// One episode's sharp 16:9 artwork continues downward into a diffused background behind its independently sized information stack.
 private struct EpisodeRow: View {
+    @Environment(\.layoutMetrics) private var metrics
     let video: Video
     let fraction: Double?
     let watched: Bool
@@ -508,6 +522,7 @@ private struct EpisodeRow: View {
     var isLoadingStreams = false
     /// The still's corner radius. The menu's preview gives it one that follows its panel's, which is rounder than a card's.
     var stillRadius: CGFloat = Theme.Radius.card
+    var isDownloaded = false
     @Environment(\.appAppearance) private var appearance
 
     private var hasProgress: Bool {
@@ -542,7 +557,19 @@ private struct EpisodeRow: View {
         .frame(width: width, alignment: .topLeading)
         .background { still }
         .overlay(alignment: .topTrailing) {
-            if watched { checkmark.padding(overlayInset) }
+            HStack(spacing: 2) {
+                if watched { checkmark }
+                if isDownloaded {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(.black.opacity(0.6), in: Circle())
+                        .padding(Theme.Spacing.xs)
+                        .accessibilityLabel("Downloaded")
+                }
+            }
+            .padding(overlayInset)
         }
         .overlay {
             if isLoadingStreams {
@@ -669,10 +696,10 @@ private struct EpisodeRow: View {
                     // The bar takes the width the row has to spare, so the score it leads into sits at the text's trailing margin.
                     HStack(spacing: 4) {
                         Image(systemName: "play.fill").font(.system(size: 7, weight: .semibold))
-                        Capsule()
+                        ScaledCapsule(scale: metrics.cornerScale(for: .filters))
                             .fill(.white.opacity(0.3))
                             .overlay(alignment: .leading) {
-                                Capsule().fill(.white).scaleEffect(x: fraction, y: 1, anchor: .leading)
+                                ScaledCapsule(scale: metrics.cornerScale(for: .filters)).fill(.white).scaleEffect(x: fraction, y: 1, anchor: .leading)
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 2)

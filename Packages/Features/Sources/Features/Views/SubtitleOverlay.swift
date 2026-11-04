@@ -7,6 +7,7 @@ import UIKit
 /// The app's own subtitle drawing (for engines that do not draw subtitle files): styled text cues placed by their alignment or position,
 /// and PGS pictures placed in the video frame. The viewer's `SubtitleStyle` sets the size, colour, background and height.
 struct SubtitleOverlay: View {
+    @Environment(\.layoutMetrics) private var metrics
     let cues: [SubtitleCue]
     let bitmap: BitmapSubtitleCue?
     let style: SubtitleStyle
@@ -57,7 +58,7 @@ struct SubtitleOverlay: View {
             .padding(.horizontal, style.background == .box ? 8 : 0)
             .padding(.vertical, style.background == .box ? 2 : 0)
             .background {
-                if style.background == .box { RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.6)) }
+                if style.background == .box { RoundedRectangle(cornerRadius: 4 * metrics.cornerScale(for: .playerControls)).fill(.black.opacity(0.6)) }
             }
             .shadow(color: style.background == .outline ? .black : .clear, radius: 1.5, x: 0, y: 0)
             .shadow(color: style.background == .outline ? .black.opacity(0.8) : .clear, radius: 3, x: 0, y: 1)
@@ -157,9 +158,10 @@ private enum BitmapImageCache {
     private static let cache = NSCache<NSString, UIImage>()
 
     static func image(for cue: BitmapSubtitleCue, index: Int) -> UIImage? {
-        let key = "\(cue.start)-\(cue.end)-\(index)" as NSString
-        if let cached = cache.object(forKey: key) { return cached }
         let image = cue.images[index]
+        // The image's place and size too: the cache outlives a track, and another track's display set can share its times.
+        let key = "\(cue.start)-\(cue.end)-\(index)-\(image.x),\(image.y),\(image.width)x\(image.height)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
         guard image.width > 0, image.height > 0, image.rgba.count == image.width * image.height * 4,
               let provider = CGDataProvider(data: Data(image.rgba) as CFData),
               let cgImage = CGImage(width: image.width, height: image.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: image.width * 4,

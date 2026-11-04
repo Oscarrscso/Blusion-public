@@ -121,7 +121,7 @@ struct TraktListBrowserView: View {
         }
         .padding(.horizontal, Theme.Spacing.m)
         .frame(maxWidth: .infinity, minHeight: Self.controlHeight)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .panels)))
     }
 
     /// The height of the title field and the Sort menu: a compact row, since three rows of controls stand above the results.
@@ -176,7 +176,7 @@ struct TraktListBrowserView: View {
         case .loading:
             VStack(spacing: Theme.Spacing.s) {
                 ForEach(0..<7, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous)
                         .fill(Theme.surface)
                         .frame(height: 68)
                 }
@@ -231,6 +231,7 @@ struct TraktListBrowserView: View {
 
 /// A Trakt list as a compact Liquid Glass row: name, creator with item count and likes, and a two-line description.
 struct TraktListRow: View {
+    @Environment(\.layoutMetrics) private var metrics
     let list: TraktListSummary
     let isSelected: Bool
 
@@ -240,7 +241,7 @@ struct TraktListRow: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .panels), style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(list.name)
@@ -274,11 +275,11 @@ struct TraktListRow: View {
         .glassCardSurface(cornerRadius: Theme.Radius.card)
         .overlay {
             if isSelected {
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(.white.opacity(0.8), lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous).strokeBorder(.white.opacity(0.8), lineWidth: 1.5)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .pointerInteraction(cornerRadius: Theme.Radius.card)
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
+        .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -296,6 +297,7 @@ struct TraktListRow: View {
 }
 
 private struct TraktUserRow: View {
+    @Environment(\.layoutMetrics) private var metrics
     let user: TraktUserSummary
 
     var body: some View {
@@ -317,8 +319,8 @@ private struct TraktUserRow: View {
         .padding(.vertical, 10)
         .frame(minHeight: 56)
         .glassCardSurface(cornerRadius: Theme.Radius.card)
-        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .pointerInteraction(cornerRadius: Theme.Radius.card)
+        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
+        .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels))
         .accessibilityElement(children: .combine)
     }
 }

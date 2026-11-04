@@ -153,11 +153,12 @@ public final class PersonViewModel {
         async let details = try? await tmdb.person(id: id)
         async let filmography = try? await tmdb.personCredits(id: id)
         async let profilePhotos = try? await tmdb.personPhotos(id: id)
-        person = await details
+        // The view loads again each time it reappears, so a request that fails now keeps what an earlier load showed.
+        if let loadedPerson = await details { person = loadedPerson }
         let loaded = await filmography
-        credits = loaded ?? []
-        photos = await profilePhotos ?? []
-        unavailableReason = person == nil && loaded == nil ? "TMDb could not load this person." : nil
+        if let loaded { credits = loaded }
+        if let loadedPhotos = await profilePhotos { photos = loadedPhotos }
+        unavailableReason = person == nil && loaded == nil && credits.isEmpty ? "TMDb could not load this person." : nil
         isLoading = false
         // The page is up; the Known For cards take their artwork as it arrives. The view's task cancels this when the view goes away.
         await loadKnownForArtwork(using: tmdb)

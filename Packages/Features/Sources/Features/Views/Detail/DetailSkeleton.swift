@@ -4,6 +4,7 @@ import UIKit
 
 /// Static, layout-sized placeholders: no per-card animation or loading tasks while scrolling.
 struct DetailSkeletonLine: View {
+    @Environment(\.layoutMetrics) private var metrics
     var font: Font = .body
     var width: CGFloat? = nil
 
@@ -13,7 +14,7 @@ struct DetailSkeletonLine: View {
             .frame(width: width)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .overlay {
-                RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.48)).padding(.vertical, 3)
+                RoundedRectangle(cornerRadius: 3 * metrics.cornerScale(for: .artwork)).fill(Color.white.opacity(0.48)).padding(.vertical, 3)
             }
             .accessibilityHidden(true)
             .modifier(DetailSkeletonPulse())
@@ -22,6 +23,7 @@ struct DetailSkeletonLine: View {
 
 /// Uses the same UIKit font metrics and rounded height as JustifiedText.
 struct DetailSkeletonParagraph: View {
+    @Environment(\.layoutMetrics) private var metrics
     var style: UIFont.TextStyle = .body
     var lines = 3
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -32,7 +34,7 @@ struct DetailSkeletonParagraph: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<lines, id: \.self) { index in
                 GeometryReader { geometry in
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: 3 * metrics.cornerScale(for: .artwork))
                         .fill(Color.white.opacity(0.48))
                         .frame(width: geometry.size.width * (index == lines - 1 ? 0.72 : 1), height: lineHeight * 0.55)
                         .frame(height: lineHeight)

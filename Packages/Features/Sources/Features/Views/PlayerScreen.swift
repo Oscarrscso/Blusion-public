@@ -47,9 +47,74 @@ private final class PictureHoldTrack {
     var baselineY: CGFloat = 0
     /// The press rested for the hold delay, so it is not a tap when it lifts, whether or not a hold began.
     var restedLong = false
+    /// The press is on a locked hold: dragged down, it releases the lock rather than starting a hold (`SpeedHoldRules.unlocks`).
+    var unlocking = false
+}
+
+/// How far the held finger has dragged toward the next lock change (`SpeedHoldRules.lockProgress`, `unlockProgress`). Its own observable
+/// object, read only by the badge, so following the finger redraws the badge and not the player.
+@MainActor
+@Observable
+private final class HoldDragProgress {
+    var fraction = 0.0
+
+    func update(_ value: Double) {
+        if fraction != value { fraction = value }
+    }
+}
+
+/// The speed a hold plays at, at the top of the picture. Beside it sits the lock as it stands; while a drag moves toward a lock change, the
+/// lock that change would leave, and a bar for how far the drag has got. Its own view, so following the finger redraws only this.
+private struct PlayerHoldBadge: View {
+    @Environment(\.layoutMetrics) private var metrics
+    let model: PlayerViewModel
+    let progress: HoldDragProgress
+
+    var body: some View {
+        let rate = model.state.rate.formatted()
+        let locked = model.heldSpeed?.isLocked == true
+        let fraction = progress.fraction
+        VStack {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: lockSymbol(locked: locked, fraction: fraction))
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffect(.bounce, value: locked)
+                    Text("\(rate)×")
+                }
+                if fraction > 0 {
+                    ProgressView(value: fraction)
+                        .tint(.white)
+                        .frame(width: 64)
+                        .transition(.opacity)
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+            .padding(.top, 16)
+            .animation(.easeInOut(duration: 0.15), value: fraction > 0)
+            Spacer()
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playing at \(rate) times speed")
+        .accessibilityIdentifier("player.doubleSpeed")
+    }
+
+    /// The lock as it stands. While a drag moves toward a change, the lock that change would leave: an open lock on a locked hold, a closed
+    /// one on an open hold.
+    private func lockSymbol(locked: Bool, fraction: Double) -> String {
+        if locked {
+            return fraction > 0 ? "lock.open.fill" : "lock.fill"
+        }
+        return fraction > 0 ? "lock.fill" : "forward.fill"
+    }
 }
 
 struct PlayerContent: View {
+    @Environment(\.layoutMetrics) private var metrics
     @State private var model: PlayerViewModel
     @State private var infoModel: PlayerInfoModel
     @State private var isPreparingNext = false
@@ -93,6 +158,7 @@ struct PlayerContent: View {
     @State private var holdEndedAt: Date?
     /// The press-and-hold on the picture (`PictureHoldGesture`). Kept out of state: following the finger must not redraw the player.
     @State private var holdTrack = PictureHoldTrack()
+    @State private var holdProgress = HoldDragProgress()
     @State private var nativeFrameEngineID: ObjectIdentifier?
     /// The next episode, readied during this one's last minute (`UpNextTiming`).
     @State private var upNext: UpNextEpisode?
@@ -204,7 +270,7 @@ struct PlayerContent: View {
                 .allowsHitTesting(controlsAreVisible)
                 .accessibilityHidden(!controlsAreVisible)
                 .disabled(!controlsAreVisible)
-                .animation(.easeInOut(duration: 0.18), value: controlsAreVisible)
+                .animation(controlsAreVisible ? nil : .easeInOut(duration: 0.18), value: controlsAreVisible)
             episodePanel
             streamPanel
             ZStack {
@@ -225,7 +291,7 @@ struct PlayerContent: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14).padding(.vertical, 8)
-                            .glassEffect(.regular, in: .capsule)
+                            .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                             .padding(.top, 16)
                         Spacer()
                     }
@@ -233,7 +299,7 @@ struct PlayerContent: View {
                     .accessibilityLabel("Seek position")
                     .accessibilityValue(PlayerTime.format(fraction * (model.duration ?? 0)))
                     .accessibilityIdentifier("player.seekPosition")
-                } else if model.heldSpeed != nil { doubleSpeedBadge.transition(.opacity) }
+                } else if model.heldSpeed != nil { PlayerHoldBadge(model: model, progress: holdProgress).transition(.opacity) }
             }
             .animation(.easeInOut(duration: 0.15), value: model.heldSpeed != nil)
             if let notice = model.notice, noticeVisible, model.failureMessage == nil {
@@ -251,8 +317,8 @@ struct PlayerContent: View {
                     .foregroundStyle(.white.opacity(0.84))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: .capsule)
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    .background(.ultraThinMaterial, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                    .overlay(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
                     .frame(maxWidth: 320)
                     .padding(.bottom, 150)
                 }
@@ -333,8 +399,11 @@ struct PlayerContent: View {
         .onChange(of: scenePhase) { _, phase in
             // Leaving the front keeps the session on the air, but its snapshot should already say where it is if the app is killed.
             if phase != .active { Task { await model.recordSessionSnapshot(force: true) } }
-            // A hold must not carry on in the background or through a lock: the speed comes back now.
-            if phase != .active { endPictureHold() }
+            // A hold, locked or not, must not carry on in the background or through a lock: the speed comes back now.
+            if phase != .active {
+                endPictureHold()
+                model.endHeldSpeed()
+            }
         }
         .fileImporter(isPresented: $importsSubtitle, allowedContentTypes: SubtitleFileTypes.subtitles) { result in
             if case .success(let url) = result { Task { await model.loadSubtitleFile(at: url) } }
@@ -349,9 +418,12 @@ struct PlayerContent: View {
         .onChange(of: model.hasFinished) { _, finished in
             if finished { Task { await handleEnd() } }
         }
-        // Both timeline handlers and picture swipes share this state: one tick per scrub, never per seek update.
+        // Timeline and picture swipes share feedback, including one step per ten seconds crossed.
         .onChange(of: model.isScrubbing) { _, scrubbing in
-            if scrubbing { Haptics.play(.playerControls) }
+            Haptics.play(.playerGestures)
+        }
+        .onChange(of: Int(model.position / 10)) { _, _ in
+            if model.isScrubbing { Haptics.play(.playerGestures) }
         }
         .onChange(of: model.heldSpeed) { old, new in
             if let old, let new, old.rate != new.rate { Haptics.play(.playerOptions) }
@@ -539,25 +611,7 @@ struct PlayerContent: View {
     /// The player's spinner, at start-up and for a stall.
     private var spinner: some View {
         Spinner().controlSize(.large)
-            .frame(width: 64, height: 64).glassEffect(.regular, in: .circle)
-    }
-
-    /// At the top while a hold temporarily speeds up playback. It shows the speed the engine reports it is playing at.
-    private var doubleSpeedBadge: some View {
-        let rate = model.state.rate.formatted()
-        return VStack {
-            Label("\(rate)×", systemImage: "forward.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .glassEffect(.regular, in: .capsule)
-                .padding(.top, 16)
-            Spacer()
-        }
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Playing at \(rate) times speed")
-        .accessibilityIdentifier("player.doubleSpeed")
+            .frame(width: 64, height: 64).glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
     }
 
     /// Covers the renderer with black until its first frame, with the spinner in the middle.
@@ -611,8 +665,8 @@ struct PlayerContent: View {
                           systemImage: "forward.fill")
                         .font(.headline)
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .pointerInteraction(cornerRadius: 22)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
@@ -651,6 +705,7 @@ struct PlayerContent: View {
                       hdrBrightness: model.processing.hdrBrightness,
                       embeddedSubtitlesOn: { if case .embedded = model.subtitleChoice { return true } else { return false } }(),
                       ambientMode: model.preferences.ambientMode, superResolution: superResolution, sampler: picture,
+                      pictureReady: isVideoReady, paused: !model.isPlaying,
                       onFirstVideoFrame: {
                           guard let engine, model.coordinator?.engine === engine else { return }
                           (engine as? AVEngine)?.markVideoFrameReady()
@@ -684,8 +739,8 @@ struct PlayerContent: View {
 
     /// Tap toggles the controls; double-tap on the left or right third skips back or forward 10 s; press and hold plays at double speed
     /// until the finger lifts (the Mac: click and hold). While held, dragging up steps the speed 1× per 40 points, to 4× where the
-    /// engine allows it, and dragging down steps back, never below 2× (`SpeedHoldRules`). A hold owns the finger: nothing else acts on
-    /// its movement until it lifts. On iPhone and iPad a sideways drag anywhere on the picture seeks live,
+    /// engine allows it, and dragging down 40 points locks the hold at its speed, which stays after the finger lifts until a hold dragged
+    /// down returns the film to the speed before (`SpeedHoldRules`). A hold owns the finger: nothing else acts on its movement until it lifts. On iPhone and iPad a sideways drag anywhere on the picture seeks live,
     /// coarsely at the top and finely at the bottom (`SwipeSeek`); a vertical swipe on the left third sets the brightness
     /// (Settings can turn it off), a swipe down in the middle closes, and a pinch zooms. a vertical swipe on the right third sets system volume.
     /// The layer covers the whole screen, edges included, under the controls: a drag that starts on a control (the timeline, the menu
@@ -694,25 +749,25 @@ struct PlayerContent: View {
         GeometryReader { proxy in
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { location in
+                .gesture(PictureTapGesture { location, tapCount in
                     guard acceptsPictureTap else { return }
-                    Haptics.play(.playerControls)
-                    // Settings → Player can turn the skips off: the whole picture then plays and pauses, as its middle does.
-                    let third = proxy.size.width / 3
-                    if model.preferences.doubleTapSkips && location.x < third {
-                        Task { await model.skipBack() }
-                    } else if model.preferences.doubleTapSkips && location.x > 2 * third {
-                        Task { await model.skipForward() }
-                    } else {
-                        model.togglePlayPause()
+                    if tapCount == 1 {
+                        // The release that ends a hold (or a press that rested as one) is not a tap. A lock does not swallow taps.
+                        if model.heldSpeed?.isLocked == false || holdTrack.restedLong || holdEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true { return }
+                        model.toggleControls()
+                    } else if tapCount == 2 {
+                        Haptics.play(.playerControls)
+                        // Settings → Player can turn the skips off: the whole picture then plays and pauses, as its middle does.
+                        let third = proxy.size.width / 3
+                        if model.preferences.doubleTapSkips && location.x < third {
+                            Task { await model.skipBack() }
+                        } else if model.preferences.doubleTapSkips && location.x > 2 * third {
+                            Task { await model.skipForward() }
+                        } else {
+                            model.togglePlayPause()
+                        }
                     }
-                }
-                .onTapGesture {
-                    guard acceptsPictureTap else { return }
-                    // The release that ends a hold (or a press that rested as one) is not a tap.
-                    if model.heldSpeed != nil || holdTrack.restedLong || holdEndedAt.map({ Date().timeIntervalSince($0) < 0.5 }) == true { return }
-                    model.toggleControls()
-                }
+                })
                 // The UIKit delegate lets both recognizers track the finger. Ownership lasts through the final swipe callback.
                 .gesture(PictureHoldGesture(minimumDuration: SpeedHoldRules.holdDelay,
                                                         touchBegan: {
@@ -721,7 +776,10 @@ struct PlayerContent: View {
                                                         },
                                                         began: { pictureHoldBegan($0) },
                                                         moved: { pictureHoldMoved($0) },
-                                                        ended: { endPictureHold() }))
+                                                        ended: {
+                                                            if holdTrack.holdBegan { Haptics.play(.playerGestures) }
+                                                            endPictureHold()
+                                                        }))
                 #if !targetEnvironment(macCatalyst)
                 .simultaneousGesture(DragGesture(minimumDistance: 12)
                     .updating($isDragGestureActive) { _, active, _ in active = true }
@@ -754,30 +812,56 @@ struct PlayerContent: View {
     /// ordinary handling, so a drag from a paused film still seeks. Either way it is no tap when it lifts.
     private func pictureHoldBegan(_ point: CGPoint) {
         holdTrack.restedLong = true
-        guard panel == nil, !showsEpisodes, !showsStreams, !isDragging, !isPinching,
-              model.beginHeldSpeed() else { return }
+        guard panel == nil, !showsEpisodes, !showsStreams, !isDragging, !isPinching else { return }
+        let locked = model.heldSpeed?.isLocked == true
+        // A press on a locked hold starts no hold of its own: dragged down, it releases the lock (`pictureHoldMoved`).
+        guard locked || model.beginHeldSpeed() else { return }
         holdTrack.ownsTouch = true
         holdTrack.holdBegan = true
+        holdTrack.unlocking = locked
         holdTrack.baselineY = point.y
         // Confirms the hold has taken. A hold the film cannot take stays silent.
-        Haptics.play(.playerControls)
+        if !locked { Haptics.play(.playerControls) }
     }
 
-    /// The held finger moved: its height from where the hold began steps the speed (`SpeedHoldRules`). Nothing else reads the movement.
+    /// The held finger moved: its height from where the hold began steps the speed up, and a drag down far enough locks it
+    /// (`SpeedHoldRules`). Nothing else reads the movement.
     private func pictureHoldMoved(_ point: CGPoint) {
         guard holdTrack.holdBegan else { return }
         let displacement = Double(point.y - holdTrack.baselineY)
-        model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum,
-                                             current: model.heldSpeed?.rate))
+        if holdTrack.unlocking {
+            // A drag down from a locked hold's press returns the film to the speed it was at: the lock is released.
+            guard SpeedHoldRules.unlocks(displacement: displacement) else {
+                holdProgress.update(SpeedHoldRules.unlockProgress(displacement: displacement))
+                return
+            }
+            holdTrack.unlocking = false
+            holdProgress.update(0)
+            model.endHeldSpeed()
+            Haptics.play(.playerGestures)
+            return
+        }
+        guard let held = model.heldSpeed, !held.isLocked else { return }
+        if SpeedHoldRules.locks(displacement: displacement, at: held.rate) {
+            holdProgress.update(0)
+            model.lockHeldSpeed()
+            Haptics.play(.playerControls)
+            return
+        }
+        holdProgress.update(SpeedHoldRules.lockProgress(displacement: displacement, at: held.rate))
+        model.setHeldSpeed(SpeedHoldRules.rate(displacement: displacement, maximum: model.heldSpeedMaximum, current: held.rate))
     }
 
     /// The press ended: it lifted, the system took it, or it moved too far before the hold began. A hold returns the film to the speed it
-    /// was at. Idempotent, so leaving the app, the screen going and the film ending may call it too.
+    /// was at, unless it is locked: a locked hold stays until a hold dragged down, a pause, or the film ending returns it. Idempotent, so
+    /// leaving the app, the screen going and the film ending may call it too.
     private func endPictureHold() {
+        holdProgress.update(0)
         if holdTrack.holdBegan {
             holdTrack.holdBegan = false
+            holdTrack.unlocking = false
             pictureGestureEndedAt = Date()
-            model.endHeldSpeed()
+            if model.heldSpeed?.isLocked != true { model.endHeldSpeed() }
         }
         if holdTrack.restedLong {
             holdTrack.restedLong = false
@@ -870,6 +954,10 @@ struct PlayerContent: View {
             #else
             model.setVolume(Float(level))
             #endif
+        }
+        // A step at each 10% boundary, rather than a buzz on every finger movement.
+        if Int((swipeLevel?.value ?? start.value) * 10) != Int(level * 10) {
+            Haptics.play(.playerGestures)
         }
         swipeLevel = SwipeLevel(kind: start.kind, value: level)
     }
@@ -1077,8 +1165,8 @@ struct PlayerContent: View {
                     Text("Watch Credits")
                         .font(.headline)
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .pointerInteraction(cornerRadius: 22)
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("player.upNext.credits")
@@ -1094,9 +1182,9 @@ struct PlayerContent: View {
                                 Rectangle().fill(.white.opacity(0.3)).frame(width: proxy.size.width * progress)
                             }
                         }
-                        .clipShape(.capsule)
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .pointerInteraction(cornerRadius: 22)
+                        .clipShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("n", modifiers: [])
@@ -1155,6 +1243,8 @@ private struct PlayerChrome: ViewModifier {
         #if os(iOS)
         content
             .onAppear {
+                // A return from the background finds the last one kept: its lock-screen commands are removed before new ones are added.
+                nowPlaying?.tearDown()
                 nowPlaying = NowPlayingController(title: model.plan.request.title, actions: .init(
                     play: { model.coordinator?.play() },
                     pause: { model.coordinator?.pause() },
@@ -1220,6 +1310,7 @@ private struct PlayerKeyboard: View {
 #endif
 
 struct FailureOverlay: View {
+    @Environment(\.layoutMetrics) private var metrics
     let message: String
     let onClose: () -> Void
 
@@ -1231,7 +1322,7 @@ struct FailureOverlay: View {
             Button("Close", action: onClose).buttonStyle(.primaryActionCompact).accessibilityIdentifier("player.failure.close")
         }
         .padding(24)
-        .glassEffect(.regular, in: .rect(cornerRadius: 28))
+        .glassEffect(.regular, in: .rect(cornerRadius: 28 * metrics.cornerScale(for: .playerControls)))
         .padding(24)
         .foregroundStyle(.white)
         .accessibilityElement(children: .contain)

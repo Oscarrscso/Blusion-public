@@ -72,7 +72,6 @@ struct MediaCard: View {
     /// True while a held poster's streams load: a spinner over the artwork, as on an episode's card.
     /// True while the picture on show is the usual poster, which stands in for a BetterPosters picture that has not loaded (or did not).
     @State private var posterFellBack = false
-    @State private var hasShownArtwork = false
     @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var usesHeroPosters = false
     @Environment(\.heroPosterOverride) private var heroPosterOverride
     @State private var heroArtwork: TMDbArtwork?
@@ -101,12 +100,7 @@ struct MediaCard: View {
     var body: some View {
         let fixed = resolvedWidth
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            if hasShownArtwork {
-                artwork
-            } else {
-                artworkSpace.background(Theme.placeholder)
-                    .clipShape(RoundedRectangle(cornerRadius: artworkAspect.cornerRadius * metrics.cornerScale))
-            }
+            artwork
             if showsCaption { captions }
         }
         // The caption is laid out inside the artwork's width and never widens the card: it is cut off instead.
@@ -114,10 +108,6 @@ struct MediaCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(spokenName)
         .accessibilityIdentifier("poster.\(item.id)")
-        .onScrollVisibility { visible in
-                // Keep the artwork's state alive until SwiftUI releases the card, including at landscape scroll edges.
-                if visible { hasShownArtwork = true }
-            }
     }
 
     /// The card takes whatever width it is offered rather than its fixed width. Only a grid column offers a real width; a row does not.
@@ -481,6 +471,7 @@ struct PressableCardStyle: ButtonStyle {
 
 /// A view of its own because the hover state needs somewhere to live.
 private struct PressableCardLabel: View {
+    @Environment(\.layoutMetrics) private var metrics
     let configuration: ButtonStyleConfiguration
     let lifts: Bool
     let addsSystemHighlight: Bool
@@ -493,7 +484,7 @@ private struct PressableCardLabel: View {
             .scaleEffect(configuration.isPressed && !reduceMotion ? (tracksPointer ? 0.985 : 0.96) : 1)
             .opacity(configuration.isPressed ? 0.8 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
-            .pointerInteraction(lifts: lifts && !configuration.isPressed, showsFocus: showsFocus, systemHighlight: addsSystemHighlight,
+            .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .artwork), lifts: lifts && !configuration.isPressed, showsFocus: showsFocus, systemHighlight: addsSystemHighlight,
                                 tracksPointer: tracksPointer)
     }
 }

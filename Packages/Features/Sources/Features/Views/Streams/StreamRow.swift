@@ -344,30 +344,31 @@ private struct StreamPreparationStatus: View {
 }
 
 private struct StreamPreparationMeter: View {
+    @Environment(\.layoutMetrics) private var metrics
     let progress: PlaybackPreparation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.1))
+                ScaledCapsule(scale: metrics.cornerScale(for: .panels)).fill(.white.opacity(0.1))
                 if progress.failure != nil {
                     Color.clear
                 } else if let ahead = progress.bufferedSeconds, ahead.isFinite, let target = progress.targetSeconds, target > 0 {
-                    Capsule().fill(.white.opacity(0.6))
+                    ScaledCapsule(scale: metrics.cornerScale(for: .panels)).fill(.white.opacity(0.6))
                         .frame(width: geometry.size.width * min(1, max(0, ahead / target)))
                         .animation(reduceMotion ? nil : .linear(duration: 0.25), value: ahead)
                 } else if progress.stage != .ready {
                     // A moving segment denotes an unknown amount of work; it never implies a percentage.
                     TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
                         let phase = reduceMotion ? 0.5 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
-                        Capsule().fill(.white.opacity(0.45))
+                        ScaledCapsule(scale: metrics.cornerScale(for: .panels)).fill(.white.opacity(0.45))
                             .frame(width: geometry.size.width * 0.25)
                             .offset(x: geometry.size.width * (phase * 1.25 - 0.25))
                     }
                 }
             }
-            .clipShape(Capsule())
+            .clipShape(ScaledCapsule(scale: metrics.cornerScale(for: .panels)))
         }
     }
 }
@@ -422,6 +423,7 @@ struct StreamDownloadSlotKey: PreferenceKey {
 
 /// Circular controls: bookmarks show confirmed saves; downloads open Infuse without claiming completion.
 struct StreamSaveButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let player: ExternalPlayer
     let isSaved: Bool
     var isDownload = false
@@ -443,7 +445,7 @@ struct StreamSaveButton: View {
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: StreamCardMetrics.markSize, height: StreamCardMetrics.markSize)
                 .background(Theme.surfaceStrong, in: Circle())
-                .contentShape(Circle())
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
         .pointerFeedback()
@@ -549,16 +551,17 @@ struct StreamTechnicalDetails: View {
 
 /// Grey stand-ins for stream cards while the first answers are on their way, so the screen has its shape at once.
 struct StreamRowsSkeleton: View {
+    @Environment(\.layoutMetrics) private var metrics
     var heights: [Int: CGFloat] = [:]
 
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
             ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
                     .fill(Theme.surface)
                     .frame(height: heights[index] ?? StreamCardMetrics.skeletonHeight)
                     .overlay {
-                        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius, style: .continuous)
+                        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
                             .strokeBorder(index == 0 ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.artworkBorder),
                                           lineWidth: index == 0 ? 1.5 : 0.7)
                     }

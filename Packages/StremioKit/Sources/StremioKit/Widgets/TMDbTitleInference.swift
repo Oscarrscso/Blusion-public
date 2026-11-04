@@ -137,6 +137,16 @@ extension TMDbDiscoverQuery {
         GenreClue(phrases: ["war"], movie: Named(id: 10752, name: "War"), series: Named(id: 10768, name: "War & Politics")),
         GenreClue(phrases: ["western", "westerns"], movie: Named(id: 37, name: "Western"), series: Named(id: 37, name: "Western")),
     ]
+
+    /// `genres`, TMDb ids for `old`, as the same genres for `new`, so a list switched between movies and series keeps what it can.
+    /// TMDb's TV genres group some film genres; a genre the other kind lacks is dropped rather than sent as an id it doesn't use.
+    public static func convertingGenres(_ genres: [Named], from old: Kind, to new: Kind) -> [Named] {
+        guard old != new else { return genres }
+        var seen = Set<Int>()
+        return genres.compactMap { genre in
+            genreClues.first { (old == .movie ? $0.movie : $0.series)?.id == genre.id }.flatMap { new == .movie ? $0.movie : $0.series }
+        }.filter { seen.insert($0.id).inserted }
+    }
 }
 
 extension HomeWidget {

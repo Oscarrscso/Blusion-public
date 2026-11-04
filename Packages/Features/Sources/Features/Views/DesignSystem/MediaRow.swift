@@ -448,12 +448,13 @@ struct MediaGridPlaceholder: View {
 /// The stand-in for a title whose artwork has been released: a blank box of its card's shape, with the two caption lines when the card
 /// has them, so the grid keeps the same row heights and its scroll position.
 private struct UnloadedCard: View {
+    @Environment(\.layoutMetrics) private var metrics
     let artwork: CardAspect
     let showsCaption: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            RoundedRectangle(cornerRadius: artwork.cornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: artwork.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
                 .fill(.quaternary)
                 .aspectRatio(artwork.ratio, contentMode: .fit)
             if showsCaption {

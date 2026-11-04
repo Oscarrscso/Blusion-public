@@ -240,6 +240,7 @@ private final class MPVEventPump: @unchecked Sendable {
     private func run() {
         var lastPosition = -1.0
         var loaded = false
+        var hasDuration = false
         var lastSpeedUpdate = ContinuousClock.now - .seconds(1)
         while isRunning {
             guard let event = mpv_wait_event(handle, 0.25)?.pointee else { continue }
@@ -252,8 +253,10 @@ private final class MPVEventPump: @unchecked Sendable {
                 continuation.yield(.preparing(.openingConnection))
             case MPV_EVENT_FILE_LOADED:
                 loaded = true
+                let duration = properties.double("duration")
+                hasDuration = duration.map { $0.isFinite && $0 > 0 } ?? false
                 let tracks = properties.tracks()
-                continuation.yield(.loaded(duration: properties.double("duration"), audio: tracks.audio, subtitles: tracks.subtitles,
+                continuation.yield(.loaded(duration: duration, audio: tracks.audio, subtitles: tracks.subtitles,
                                            selectedAudio: tracks.selectedAudio, selectedSubtitle: tracks.selectedSubtitle))
                 continuation.yield(.chapters(properties.chapters()))
             case MPV_EVENT_END_FILE:
@@ -305,6 +308,13 @@ private final class MPVEventPump: @unchecked Sendable {
                     continuation.yield(.paused(value.assumingMemoryBound(to: Int32.self).pointee != 0))
                 case ("paused-for-cache", MPV_FORMAT_FLAG):
                     continuation.yield(.buffering(value.assumingMemoryBound(to: Int32.self).pointee != 0))
+                case ("duration", MPV_FORMAT_DOUBLE) where loaded && !hasDuration:
+                    // A length mpv learns only after loading is filled in once.
+                    let duration = value.assumingMemoryBound(to: Double.self).pointee
+                    if duration.isFinite, duration > 0 {
+                        hasDuration = true
+                        continuation.yield(.duration(duration))
+                    }
                 default:
                     break   // durations of live streams can change later and are ignored
                 }
@@ -466,7 +476,11 @@ public final class MPVBackend: FallbackBackend {
         command(["loadfile", url.absoluteString, "replace"])
     }
 
-    public func setPaused(_ paused: Bool) { set("pause", paused ? "yes" : "no") }
+    public func setPaused(_ paused: Bool) {
+        // Activated whenever playback starts, as AVEngine does: the engine this one replaced deactivates the shared session as it shuts down.
+        if !paused { Self.activateAudioSession() }
+        set("pause", paused ? "yes" : "no")
+    }
 
     public func seek(to position: TimeInterval) async {
         command(["seek", String(position), "absolute+exact"])

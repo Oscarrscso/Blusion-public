@@ -19,6 +19,7 @@ struct PrimaryActionButtonStyle: PrimitiveButtonStyle {
 
 /// A view of its own because a button style cannot read the environment itself.
 private struct PrimaryActionButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let configuration: PrimitiveButtonStyleConfiguration
     let fillsWidth: Bool
     let minWidth: CGFloat
@@ -37,10 +38,10 @@ private struct PrimaryActionButton: View {
                     .padding(.horizontal, Theme.Spacing.s)
                     .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil)
                     .frame(height: height)
-                    .contentShape(Capsule())
+                    .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
             }
             .buttonStyle(.plain)
-            .glassEffect(glass ?? .regular.interactive(), in: .capsule)
+            .glassEffect(glass ?? .regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
             .pointerFeedback()
         } else {
         #if targetEnvironment(macCatalyst)
@@ -54,9 +55,10 @@ private struct PrimaryActionButton: View {
                 .fontWeight(.semibold)
                 .padding(.horizontal, Theme.Spacing.s)
                 .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil, maxHeight: .infinity)
+                .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
         }
         .configurableGlassButtonStyle(glass)
-        .buttonBorderShape(.capsule)
+        .buttonBorderShape(metrics.cornerScale(for: .playButton) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .playButton)))
         .controlSize(.large)
         .frame(height: controlSize == .small || controlSize == .mini ? Self.macSmallHeight : CircleActionButton.diameter)
         .pointerFeedback()
@@ -70,7 +72,7 @@ private struct PrimaryActionButton: View {
                 .frame(maxWidth: fillsWidth ? .infinity : nil)
         }
         .configurableGlassButtonStyle(glass)
-        .buttonBorderShape(.capsule)
+        .buttonBorderShape(metrics.cornerScale(for: .playButton) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .playButton)))
         // A main action is one size up from the controls around it.
         .controlSize(controlSize == .regular ? .large : controlSize)
         .pointerFeedback()
@@ -87,6 +89,7 @@ private struct PrimaryActionButton: View {
 /// A secondary action ("Customize", "Open on Best Blurays"): the system's Liquid Glass button as a label-sized capsule.
 /// Do not stack it on other glass and do not use it for the screen's main action.
 struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.layoutMetrics) private var metrics
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role) {
             Haptics.play(.buttons)
@@ -96,7 +99,7 @@ struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
                 .font(.subheadline.weight(.semibold))
         }
         .buttonStyle(.glass)
-        .buttonBorderShape(.capsule)
+        .buttonBorderShape(metrics.cornerScale(for: .actionButtons) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .actionButtons)))
         .pointerFeedback()
     }
 }
@@ -128,9 +131,21 @@ extension View {
     }
 
     /// Makes an icon button the system's round Liquid Glass button, the one the navigation bar draws.
-    func glassCircleButton(_ size: ControlSize = .large, glass: Glass? = nil) -> some View {
-        configurableGlassButtonStyle(glass)
-            .buttonBorderShape(.circle)
+    func glassCircleButton(_ size: ControlSize = .large, glass: Glass? = nil, group: AppearancePreferences.CornerGroup = .actionButtons) -> some View {
+        modifier(CircularGlassButton(size: size, glass: glass, group: group))
+    }
+}
+
+private struct CircularGlassButton: ViewModifier {
+    let size: ControlSize
+    let glass: Glass?
+    let group: AppearancePreferences.CornerGroup
+    @Environment(\.layoutMetrics) private var metrics
+
+    func body(content: Content) -> some View {
+        content.configurableGlassButtonStyle(glass)
+            .buttonBorderShape(metrics.includesCircularButtons
+                ? .roundedRectangle(radius: CircleActionButton.diameter / 2 * metrics.cornerScale(for: group)) : .circle)
             .controlSize(size)
             .pointerFeedback()
     }
@@ -143,6 +158,7 @@ extension View {
 ///
 /// Several in a row belong in one `GlassEffectContainer` (or `CircleActionRow`) so the glass is composed once.
 struct CircleActionButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let systemImage: String
     let isOn: Bool
@@ -205,6 +221,7 @@ struct CircleActionButton: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             .animation(.smooth(duration: 0.25), value: isLoading)
         }
         // The large size, like the main action beside it on the title page, so the two read as one row.
@@ -223,13 +240,14 @@ struct CircleActionButton: View {
 }
 
 private struct CircleActionSizing: ViewModifier {
+    @Environment(\.layoutMetrics) private var metrics
     let exact: Bool
 
     func body(content: Content) -> some View {
         if exact {
             content.buttonStyle(.plain)
                 .frame(width: CircleActionButton.diameter, height: CircleActionButton.diameter)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .pointerFeedback()
         } else {
             content.glassCircleButton()

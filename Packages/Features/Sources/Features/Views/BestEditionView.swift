@@ -5,6 +5,7 @@ import SwiftUI
 /// Best Blurays' recommendation, shown beside the stream results after Play. Folded into one row, with the release named on it, so
 /// it reads as a single line until someone opens it.
 struct BestEditionView: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: StreamPickerViewModel
     /// The Auto Pick button's height beside it, so the header row is as tall as that button. Zero until the button is measured.
     var rowHeight: CGFloat = 0
@@ -41,7 +42,7 @@ struct BestEditionView: View {
                     // tap area stays square, as it was.
                     .contentShape(isExpanded
                                   ? AnyShape(Rectangle())
-                                  : AnyShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous)))
+                                  : AnyShape(RoundedRectangle(cornerRadius: panelRadius * metrics.cornerScale(for: .panels), style: .continuous)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")

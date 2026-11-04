@@ -133,14 +133,14 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
                             Spinner()
                                 .controlSize(.large)
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous))
                         .transition(.opacity)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Loading streams")
                     }
                 }
                 .animation(.smooth(duration: 0.25), value: isLoading)
-                .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale)
+                .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: CardAspect.wide.cornerRadius * metrics.cornerScale(for: .artwork))
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableCardStyle.poster)
@@ -148,7 +148,7 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
         // The hold is the system context menu: a custom long-press gesture here blocked the row's horizontal scroll.
         // No custom preview: the system snapshots the card itself (its artwork, bounds and clipping), and this shape gives the
         // menu the card's corner radius.
-        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale, style: .continuous))
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .artwork), style: .continuous))
         .contextMenu {
             Button("Open title", systemImage: "info.circle") {
                 // No card tap fires here: a context menu action is not a tap on the card, so the click stands in for it, and
@@ -207,6 +207,7 @@ struct CardCaption<Content: View>: View {
 
 /// Shared playback styling. Unknown runtime leaves the time label out; unwatched and completed artwork has no playback overlay.
 struct PlaybackProgressOverlay: View {
+    @Environment(\.layoutMetrics) private var metrics
     let fraction: Double
     var duration: TimeInterval?
     var episode: String?
@@ -230,10 +231,10 @@ struct PlaybackProgressOverlay: View {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 9, weight: .semibold))
-                    Capsule()
+                    ScaledCapsule(scale: metrics.cornerScale(for: .artwork))
                         .fill(.white.opacity(0.32))
                         .overlay(alignment: .leading) {
-                            Capsule().fill(appearance.progressFill).scaleEffect(x: fraction, y: 1, anchor: .leading)
+                            ScaledCapsule(scale: metrics.cornerScale(for: .artwork)).fill(appearance.progressFill).scaleEffect(x: fraction, y: 1, anchor: .leading)
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: appearance.progressThickness.points)
@@ -251,7 +252,7 @@ struct PlaybackProgressOverlay: View {
                             .minimumScaleFactor(0.8)
                             .padding(.horizontal, Theme.Spacing.xs)
                             .padding(.vertical, 2)
-                            .background(.white.opacity(0.92), in: Capsule())
+                            .background(.white.opacity(0.92), in: ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
                     }
                 }
             }

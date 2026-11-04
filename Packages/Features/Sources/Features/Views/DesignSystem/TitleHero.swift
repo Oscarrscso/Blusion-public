@@ -109,7 +109,8 @@ enum TitleHero {
     /// image to measure or it is hidden, so the picture still ends where a tallest logo would be half covered.
     static func logoHeight(_ slot: HeroSlot, hidden: Bool, width: CGFloat) -> CGFloat {
         guard !hidden, case .ready(let image) = slot, image.size.width > 0, image.size.height > 0 else { return logoMaxHeight }
-        return min(width / image.size.width, logoMaxHeight / image.size.height) * image.size.height
+        // The logo is drawn no wider than `logoMaxWidth`, however wide the page.
+        return min(min(width, logoMaxWidth) / image.size.width, logoMaxHeight / image.size.height) * image.size.height
     }
 
     /// How much of the zoomed picture shows: it ends, fully faded to black, half way up the logo (which sits `logoTextGap` above the

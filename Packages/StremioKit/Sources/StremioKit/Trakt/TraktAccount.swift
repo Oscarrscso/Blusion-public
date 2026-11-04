@@ -136,6 +136,9 @@ public actor TraktAccount {
     private let baseURL: URL
     private let now: @Sendable () -> Date
     private var credentialsRevision = 0
+    /// The refresh in flight, by the refresh token it spends. Trakt's refresh token works once, so overlapping requests share one
+    /// refresh, and a cancelled request can't drop the new token after Trakt has issued it.
+    private var refreshing: (refreshToken: String, task: Task<Token, Error>)?
     private var pendingPKCE: (clientID: String, redirectURI: String, verifier: String, state: String, revision: Int)?
 
     public init(settings: any SettingsStore, secrets: any SecretStore, transport: (any HTTPTransport)? = nil,
@@ -343,7 +346,8 @@ public actor TraktAccount {
 
     /// Removes one paused record, so Trakt stops offering it under Continue Watching.
     public func removePlayback(id: Int) async throws {
-        _ = try await authorizedRequest(path: "sync/playback/\(id)", method: "DELETE")
+        // A record already gone (removed on another device) is the result wanted, not a failure that drops the others.
+        _ = try await authorizedRequest(path: "sync/playback/\(id)", method: "DELETE", accepting: [404])
     }
 
     public func addToWatchlist(_ items: [MetaPreview]) async throws -> Int {
@@ -418,6 +422,17 @@ public actor TraktAccount {
     }
 
     private func refreshed(_ old: Token, clientID: String, clientSecret: String) async throws -> Token {
+        if let refreshing, refreshing.refreshToken == old.refreshToken { return try await refreshing.task.value }
+        // A request that read the token before another one refreshed it uses the newer stored token.
+        if let stored = try await loadToken(), stored.refreshToken != old.refreshToken, stored.clientID == clientID { return stored }
+        if let refreshing, refreshing.refreshToken == old.refreshToken { return try await refreshing.task.value }
+        let task = Task { try await self.performRefresh(old, clientID: clientID, clientSecret: clientSecret) }
+        refreshing = (old.refreshToken, task)
+        defer { if refreshing?.refreshToken == old.refreshToken { refreshing = nil } }
+        return try await task.value
+    }
+
+    private func performRefresh(_ old: Token, clientID: String, clientSecret: String) async throws -> Token {
         let revision = credentialsRevision
         var body = ["refresh_token": old.refreshToken, "client_id": clientID,
                     "redirect_uri": old.redirectURI ?? "urn:ietf:wg:oauth:2.0:oob", "grant_type": "refresh_token"]
@@ -469,7 +484,8 @@ public actor TraktAccount {
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         do {
             return try await withDeadline(seconds: 20) { [request, transport] in
-                try await transport.send(request, limits: FetchLimits(maxRedirects: 0))
+                // Full watch history comes unpaged in one body, which outgrows the default 5 MiB for a long history.
+                try await transport.send(request, limits: FetchLimits(maxBytes: 32 * 1024 * 1024, maxRedirects: 0))
             }
         } catch {
             throw TraktAccountError.network(AddonError.from(error))

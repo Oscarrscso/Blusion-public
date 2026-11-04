@@ -48,7 +48,7 @@ public struct ContinueWatchingEntry: Identifiable, Equatable, Sendable {
                                            uniquingKeysWith: { $0.updatedAt > $1.updatedAt ? $0 : $1 })
         return entries.values.sorted { $0.updatedAt > $1.updatedAt }.filter { entry in
             guard entry.request.type == "series" else { return true }
-            let seriesID = ContentID(entry.request.id).baseID
+            let seriesID = ContentID.seriesID(of: entry.request.id, season: entry.request.season, episode: entry.request.episode)
             // Completing a later episode must not bring an older, unfinished episode back to Continue Watching.
             if let latest = latestLocalEpisode[seriesID], latest.isWatched, latest.updatedAt >= entry.updatedAt { return false }
             return series.insert(seriesID).inserted
@@ -73,7 +73,7 @@ extension AppServices {
     /// Episode order and air dates come from the same metadata used by the detail page, not guessed numbers.
     func queueNextContinueEpisode(after request: StreamRequest) async {
         guard request.type == "series", request.season != nil, request.episode != nil else { return }
-        let seriesID = ContentID(request.id).baseID
+        let seriesID = ContentID.seriesID(of: request.id, season: request.season, episode: request.episode)
         let preview = MetaPreview(id: seriesID, type: "series",
                                   name: request.seriesName ?? request.title.components(separatedBy: " · ").first ?? request.title,
                                   poster: request.poster)

@@ -4,6 +4,7 @@ import SwiftUI
 /// The label of a filter menu: a Liquid Glass capsule with a chevron, tinted when a filter in it is active. Used by the Library and
 /// Discover, so their filter rows look the same.
 struct FilterMenuLabel: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let systemImage: String?
     let tint: Color
@@ -19,6 +20,7 @@ struct FilterMenuLabel: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: minHeight / 2 * metrics.cornerScale(for: .filters), style: .continuous)
         HStack(spacing: 5) {
             if let systemImage { Image(systemName: systemImage).font(.caption) }
             Text(title).lineLimit(1).minimumScaleFactor(0.8)
@@ -29,7 +31,10 @@ struct FilterMenuLabel: View {
         .foregroundStyle(tint)
         .padding(.horizontal, Theme.Spacing.m)
         .frame(maxWidth: .infinity, minHeight: minHeight)
-        .glassEffect(.regular.tint(tint.opacity(isActive ? 0.25 : 0.08)).interactive(), in: .capsule)
+        .contentShape(shape)
+        .contentShape(.contextMenuPreview, shape)
+        .glassEffect(.regular.tint(tint.opacity(isActive ? 0.25 : 0.08)).interactive(), in: shape)
+        .clipShape(shape)
         .accessibilityAddTraits(isActive ? .isSelected : [])
         .pointerFeedback()
     }
@@ -63,7 +68,7 @@ struct ActiveFilterChips: View {
 }
 
 /// The filter block the Library and Discover share, so the two pages look the same and differ only in their options: the type selector,
-/// one row of menus that show their active choice, then a removable chip for each active filter. The menus sit midway between the
+/// menus that wrap to fit the available width, then a removable chip for each active filter. The menus sit midway between the
 /// selector and the grid; chips under them keep their own padding, and go with the last chip so clearing every filter leaves no gap.
 struct BrowseFilterBar<Menus: View>: View {
     /// The type selector. Nil hides it (a source with one type has nothing to choose).
@@ -95,7 +100,8 @@ struct BrowseFilterBar<Menus: View>: View {
             }
             VStack(alignment: .leading, spacing: metrics.controlSpacing) {
                 GlassEffectContainer(spacing: metrics.controlSpacing) {
-                    HStack(spacing: metrics.controlSpacing) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: metrics.controlSpacing)],
+                              alignment: .leading, spacing: metrics.controlSpacing) {
                         menus
                     }
                     // Match the floating landscape Back button's row so the shorter menu capsules share its vertical centreline.
@@ -109,6 +115,75 @@ struct BrowseFilterBar<Menus: View>: View {
         }
         .padding(.bottom, metrics.controlSpacing)
         .buttonStyle(.plain)
+        .buttonBorderShape(.roundedRectangle(radius: Self.menuHeight / 2 * metrics.cornerScale(for: .filters)))
+    }
+}
+
+/// The minimum rating, shown out of 100. Each title is rated by its best available score, so the menu names no site.
+struct RatingPicker: View {
+    @Binding var threshold: Double?
+
+    var body: some View {
+        Picker("At least", selection: $threshold) {
+            Text("Any").tag(Double?.none)
+            ForEach([5.0, 6, 7, 8, 9, 10], id: \.self) { value in
+                Text(LibraryFiltering.minimumRatingText(value)).tag(Double?.some(value))
+            }
+        }
+        .accessibilityIdentifier("library.filter.rating.threshold")
+    }
+}
+
+/// Shared release windows, individual years and decades. One Any choice clears both bounds.
+struct ReleaseYearOptions: View {
+    @Binding var minimumYear: Int?
+    @Binding var maximumYear: Int?
+    let identifier: String
+
+    var body: some View {
+        Button {
+            minimumYear = nil
+            maximumYear = nil
+        } label: {
+            choice("Any", isOn: minimumYear == nil && maximumYear == nil)
+        }
+        Section {
+            ForEach(CatalogListRecent.allCases) { recent in
+                let range = recent.years()
+                Button {
+                    minimumYear = range.lowerBound
+                    maximumYear = range.upperBound
+                } label: {
+                    choice(recent.title, isOn: minimumYear == range.lowerBound && maximumYear == range.upperBound)
+                }
+                .accessibilityIdentifier("\(identifier).recent.\(recent.rawValue)")
+            }
+        }
+        Menu("Individual Year") {
+            ForEach(Array(stride(from: Calendar.current.component(.year, from: Date()), through: 1920, by: -1)), id: \.self) { year in
+                Button {
+                    minimumYear = year
+                    maximumYear = year
+                } label: {
+                    choice(String(year), isOn: minimumYear == year && maximumYear == year)
+                }
+            }
+        }
+        Section("Decades") {
+            ForEach(Array(stride(from: 2020, through: 1920, by: -10)), id: \.self) { start in
+                Button {
+                    minimumYear = start
+                    maximumYear = start + 9
+                } label: {
+                    choice("\(start)–\(start + 9)", isOn: minimumYear == start && maximumYear == start + 9)
+                }
+                .accessibilityIdentifier("\(identifier).\(start)")
+            }
+        }
+    }
+
+    @ViewBuilder private func choice(_ title: String, isOn: Bool) -> some View {
+        if isOn { Label(title, systemImage: "checkmark") } else { Text(title) }
     }
 }
 #endif

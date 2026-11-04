@@ -23,6 +23,7 @@ struct DetailView: View {
     @State private var streams = TitleStreams()
     @State private var playOpeningMode: PlayOpeningMode = .normal
     @State private var showsMissingInfuse = false
+    @State private var downloadedPlan: PlaybackPlan?
     /// Empty results apply to this visit and this movie or episode only.
     @State private var unavailableStreams: Set<String> = []
     /// The item a Continue Watching card opens the page with. It is picked once the hero has settled (see the lookup task below), so the
@@ -383,7 +384,7 @@ struct DetailView: View {
             if let request = pendingStreams {
                 pendingStreams = nil
                 // As if Play had been tapped: Play shows the spinner.
-                streams.open(request)
+                showStreams(request, from: .play)
                 return
             }
             guard streams.request == nil else { return }
@@ -427,6 +428,12 @@ struct DetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .fullScreenCover(item: $downloadedPlan, onDismiss: {
+            Task { await model.refreshUserState() }
+        }) {
+            PlayerScreen(plan: $0, services: services)
+        }
+        .downloadErrors(services.downloads)
         .youTubeTrailer(Bindable(model.trailer).youTubeHandoff)
         // A trailer that starts on a phone held sideways plays full screen, decided when it starts, so turning the phone later does not
         // move it. A YouTube trailer that ends or fails closes its cover. AVKit's player keeps its own end state until the cover is closed.
@@ -501,24 +508,37 @@ struct DetailView: View {
     /// on, the stream it chooses starts instead and the list never shows; the next tap picks again. The page does not scroll, and back
     /// still leaves the page, by the button or the swipe: the streams are part of the title's page, not a screen of their own.
     private func showStreams(_ request: StreamRequest, from trigger: StreamTrigger, mode: PlayOpeningMode = .normal) {
-        guard !unavailableStreams.contains(request.identity) else { return }
-        if mode == .infuse {
-            guard let scheme = URL(string: "infuse://"), UIApplication.shared.canOpenURL(scheme) else {
-                showsMissingInfuse = true
-                return
+        Task { @MainActor in
+            if mode == .normal, let manager = services.downloads {
+                await manager.start()
+                if let item = manager.item(for: request), item.state == .complete,
+                   let plan = await manager.plan(for: item.id) {
+                    model.trailer.cancel()
+                    pendingStreams = nil
+                    streams.close()
+                    downloadedPlan = plan
+                    return
+                }
             }
-        }
-        model.trailer.cancel()
-        pendingStreams = nil
-        if mode == .normal {
-            let wasSpecial = playOpeningMode != .normal && streams.request != nil
-            playOpeningMode = .normal
-            if wasSpecial { streams.open(request) }
-            else { streams.show(request, from: trigger) }
-        } else {
-            // Explicit choices replace any existing picker and never change the saved player preference.
-            playOpeningMode = mode
-            streams.open(request)
+            guard !unavailableStreams.contains(request.identity) else { return }
+            if mode == .infuse {
+                guard let scheme = URL(string: "infuse://"), UIApplication.shared.canOpenURL(scheme) else {
+                    showsMissingInfuse = true
+                    return
+                }
+            }
+            model.trailer.cancel()
+            pendingStreams = nil
+            if mode == .normal {
+                let wasSpecial = playOpeningMode != .normal && streams.request != nil
+                playOpeningMode = .normal
+                if wasSpecial { streams.open(request) }
+                else { streams.show(request, from: trigger) }
+            } else {
+                // Explicit choices replace any existing picker and never change the saved player preference.
+                playOpeningMode = mode
+                streams.open(request)
+            }
         }
     }
 
@@ -608,7 +628,7 @@ struct DetailView: View {
             ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
                 if model.isLoadingRelated && model.relatedTitles.isEmpty {
                     ForEach(0..<6, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: Theme.Radius.card)
+                        RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .artwork))
                             .fill(Theme.placeholder)
                             .frame(width: metrics.landscapePosterWidth, height: metrics.landscapePosterWidth / CardAspect.wide.ratio)
                             .loadingCardSpinner()

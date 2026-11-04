@@ -201,6 +201,10 @@ public enum SubtitleParser {
 
     private static func parseBlocks(_ text: String, vtt: Bool) -> [SubtitleCue] {
         let normalised = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+            // A separator line holding only spaces or tabs still ends a cue.
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in line.allSatisfy({ $0 == " " || $0 == "\t" }) ? "" : String(line) }
+            .joined(separator: "\n")
         var cues: [SubtitleCue] = []
         for block in normalised.components(separatedBy: "\n\n") {
             let lines = block.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)

@@ -35,6 +35,18 @@ public struct ContentID: Sendable, Hashable, CustomStringConvertible {
 
     public var description: String { raw }
 
+    /// The series an episode id belongs to: `tt1` for `tt1:1:2`, and for another catalog's id, which ends in the episode's numbers,
+    /// `kitsu:1` for `kitsu:1:5` (episode 5) or `tmdb:1399` for `tmdb:1399:1:2`. An id that doesn't end in them is returned as it is.
+    public static func seriesID(of id: String, season: Int?, episode: Int?) -> String {
+        let content = ContentID(id)
+        guard case .other = content.kind else { return content.baseID }
+        var parts = id.split(separator: ":", omittingEmptySubsequences: false)
+        guard let episode, parts.count > 2, parts.last == Substring(String(episode)) else { return id }
+        parts.removeLast()
+        if let season, parts.count > 2, parts.last == Substring(String(season)) { parts.removeLast() }
+        return parts.joined(separator: ":")
+    }
+
     public var isEpisode: Bool {
         if case .imdbEpisode = kind { return true }
         return false

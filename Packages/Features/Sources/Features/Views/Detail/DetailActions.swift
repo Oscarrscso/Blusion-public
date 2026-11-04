@@ -83,7 +83,7 @@ struct DetailActions: View {
     @ViewBuilder
     private var primaryButton: some View {
         if let request = model.primaryRequest {
-            let title = hasNoStreams ? "No streams" : model.primaryActionTitle
+            let title = hasNoStreams ? "No streams available" : model.primaryActionTitle
             Button {
                 // A swipe that ends on Play, such as one going back, starts nothing, as on a stream's card.
                 guard !SwipeRecord.latest.isSwipe(at: ContinuousClock.now) else { return }
@@ -135,6 +135,7 @@ struct DetailActions: View {
                 }
             }
             .disabled(hasNoStreams)
+            .opacity(hasNoStreams ? 0.4 : 1)
             .allowsHitTesting(!blocksPlay)
             .accessibilityLabel(isLoadingStreams ? "\(title), loading" : title)
             .accessibilityIdentifier("detail.playButton")

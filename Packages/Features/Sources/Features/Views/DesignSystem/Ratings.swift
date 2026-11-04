@@ -99,6 +99,7 @@ struct PosterRatingsOverlay: View {
 /// The floating rating pill: each site's coloured mark, then its score in bold white, on a dark, very transparent rounded
 /// rectangle with no edge. Small, so it reads as a tag on the artwork; it is only as wide as its contents.
 private struct RatingPill: View {
+    @Environment(\.layoutMetrics) private var metrics
     let ratings: TitleRatings
     let sites: [ReviewSite]
 
@@ -125,7 +126,7 @@ private struct RatingPill: View {
         .fixedSize()
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
-        .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 6 * metrics.cornerScale(for: .filters), style: .continuous))
     }
 }
 
@@ -249,6 +250,7 @@ struct RatingButtonsRow: View {
 /// One small rating button: the site's icon, then the score. Without a score it is the icon alone. A tap opens the site's reviews on the
 /// page, under the buttons, so its chevron points down, or up while those reviews are open; an open site's button is lit.
 struct RatingButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let site: ReviewSite
     let score: String?
     /// True when the link is a search on the site, not the title's own page.
@@ -288,9 +290,9 @@ struct RatingButton: View {
             .padding(.horizontal, horizontalInset)
             .frame(maxWidth: .infinity)
             .frame(height: 28)
-            .background(isOpen ? Theme.surfaceStrong : Theme.surface, in: Capsule())
-            .contentShape(Capsule())
-            .pointerInteraction(cornerRadius: 999)
+            .background(isOpen ? Theme.surfaceStrong : Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .pointerInteraction(cornerRadius: 999 * metrics.cornerScale(for: .filters))
         }
         .buttonStyle(.plain)
         .titleTapHaptic(.buttons)

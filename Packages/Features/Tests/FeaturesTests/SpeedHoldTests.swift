@@ -3,7 +3,7 @@ import Testing
 @testable import Features
 
 @Suite struct SpeedHoldRulesTests {
-    /// Each full 40 points up adds 1×; dragging back down steps back, never below 2×, and the ceiling holds beyond 4×.
+    /// Each full 40 points up adds 1×, never below 2×, and the ceiling holds beyond 4×.
     @Test func eachFortyPointsStepsTheSpeed() {
         let cases: [(Double, Float)] = [(0, 2), (-39.9, 2), (-40, 3), (-79.9, 3), (-80, 4), (-400, 4), (40, 2), (-1, 2)]
         for (displacement, expected) in cases {
@@ -11,14 +11,34 @@ import Testing
         }
     }
 
-    @Test func smallMovementsAroundAStepDoNotToggleTheSpeed() {
+    /// While held the speed only climbs: a finger moving back down keeps the speed it reached, however little it moves.
+    @Test func draggingBackDownKeepsTheSpeedReached() {
         var rate: Float = 2
-        let cases: [(Double, Float)] = [(-40, 3), (-39, 3), (-41, 3), (-35, 3), (-34, 2),
-                                       (-39, 2), (-40, 3), (-80, 4), (-79, 4), (-74, 3), (-34, 2)]
+        let cases: [(Double, Float)] = [(-40, 3), (-39, 3), (-41, 3), (-35, 3), (-34, 3),
+                                       (-39, 3), (-40, 3), (-80, 4), (-79, 4), (-74, 4), (-34, 4)]
         for (displacement, expected) in cases {
             rate = SpeedHoldRules.rate(displacement: displacement, maximum: 4, current: rate)
             #expect(rate == expected, "\(displacement) points")
         }
+    }
+
+    /// A drag down locks the hold 40 points below the step its speed was reached at: at 2× that is 40 points below where the hold began.
+    @Test func aDragDownLocksTheSpeedItWasReachedAt() {
+        #expect(!SpeedHoldRules.locks(displacement: 40, at: 2))
+        #expect(SpeedHoldRules.locks(displacement: 41, at: 2))
+        #expect(!SpeedHoldRules.locks(displacement: 0, at: 3))
+        #expect(SpeedHoldRules.locks(displacement: 1, at: 3))
+        #expect(!SpeedHoldRules.locks(displacement: -40, at: 4))
+        #expect(SpeedHoldRules.locks(displacement: -39, at: 4))
+        #expect(!SpeedHoldRules.locks(displacement: .nan, at: 2))
+    }
+
+    /// From a locked hold's press, the same 40 points of drag down release the lock; dragging up or not far enough does not.
+    @Test func aDragDownFromALockReleasesIt() {
+        #expect(!SpeedHoldRules.unlocks(displacement: 40))
+        #expect(SpeedHoldRules.unlocks(displacement: 41))
+        #expect(!SpeedHoldRules.unlocks(displacement: -100))
+        #expect(!SpeedHoldRules.unlocks(displacement: .nan))
     }
 
     /// The engine's own ceiling caps the hold, including items that do not support fast-forward above 2×.
@@ -35,10 +55,10 @@ import Testing
         #expect(SpeedHoldRules.rate(displacement: 500, maximum: 4) == 2)
     }
 
-    /// A hold begins at 2×, after a 0.4 s rest, and a press may drift 10 points before it stops being one.
-    @Test func aHoldBeginsAtTwoAfterAFourHundredMillisecondRest() {
+    /// A hold begins at 2×, after a 0.1 s rest, and a press may drift 10 points before it stops being one.
+    @Test func aHoldBeginsAtTwoAfterAOneHundredMillisecondRest() {
         #expect(SpeedHoldRules.startRate == 2)
-        #expect(SpeedHoldRules.holdDelay == 0.4)
+        #expect(SpeedHoldRules.holdDelay == 0.1)
         #expect(SpeedHoldRules.holdTolerance == 10)
     }
 }

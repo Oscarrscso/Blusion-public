@@ -8,10 +8,9 @@ import UIKit
 struct HomeView: View {
     @State private var model: HomeViewModel
     @State private var scroll = HomeScrollState()
+    @State private var heroScroll = DetailHeroScrollState()
     /// Keep each spotlight's selection while its lazy section is offscreen, and when a title opened from it is popped back to Home.
     @State private var heroPages: [String: String] = [:]
-    /// How far Home has been pulled down past its top; the spotlight stretches by this much (see `HeroCarousel`).
-    @State private var heroPull: CGFloat = 0
     /// The status bar's height, the top safe area Home's content starts beneath. The navigation bar sits below it, not included.
     @State private var topInset: CGFloat = 0
     /// The page's own side safe-area inset, as its geometry reports it: the notch's inset on a phone held in landscape, zero elsewhere.
@@ -48,6 +47,7 @@ struct HomeView: View {
                 .environment(\.heroContainerWidth, geometry.size.width
                     + (isLandscape ? geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing : 0))
                 .environment(\.homeScroll, scroll)
+                .environment(\.homeHeroScroll, heroScroll)
                 .environment(\.layoutMetrics, homeMetrics)
         }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
@@ -210,6 +210,10 @@ struct HomeView: View {
                               scrollToTop: router.tabTapRevisions[.home, default: 0], jumpToTop: router.spotlightRevision,
                               onScrollingChange: { [scroll] scrolling in
                                   if scroll.isScrolling != scrolling { scroll.isScrolling = scrolling }
+                              }, onScrollOffset: { [heroScroll, scroll, heroIsFirst] offset in
+                                  heroScroll.offset = offset
+                                  let pull = heroIsFirst ? max(0, -offset) : 0
+                                  if scroll.heroPull != pull { scroll.heroPull = pull }
                               })
             .accessibilityIdentifier("board.rows")
             .modifier(BelowScreenArtwork(model: model))
@@ -261,10 +265,11 @@ struct HomeView: View {
             .scrollIndicatorsFlash(onAppear: true)
             .accessibilityIdentifier("board.rows")
             .modifier(BelowScreenArtwork(model: model))
-            .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
-                heroPull = value
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, value in
+                heroScroll.offset = value
+                let pull = heroIsFirst ? max(0, -value) : 0
+                if scroll.heroPull != pull { scroll.heroPull = pull }
             }
-            .environment(\.heroPull, heroIsFirst ? heroPull : 0)
             .trackLandscapeTabScroll()
             .onScrollPhaseChange { _, phase in
                 if scroll.isScrolling != phase.isScrolling { scroll.isScrolling = phase.isScrolling }
@@ -301,8 +306,8 @@ struct HomeView: View {
                 // A little larger than the circle, so the icon's own bevelled rim falls outside it; every point of the star stays inside.
                 .scaleEffect(1.1)
                 .clipShape(.circle)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .pointerFeedback()
         }
         .buttonStyle(.plain)

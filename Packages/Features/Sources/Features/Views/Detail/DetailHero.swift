@@ -234,12 +234,12 @@ struct DetailHeroScrollPull: ViewModifier {
     }
 }
 
-/// Landscape: scrolling the page down zooms the picture from its top, on the same curve as portrait.
+/// Shared with Home: scrolling the page down zooms the picture from its top, on the same curve as portrait.
 struct DetailHeroScrollZoom: ViewModifier {
-    let scroll: DetailHeroScrollState
+    let scroll: DetailHeroScrollState?
 
     func body(content: Content) -> some View {
-        let down = max(0, scroll.offset)
+        let down = max(0, scroll?.offset ?? 0)
         content.scaleEffect(1 + 0.28 * (down / (down + 180)), anchor: .top)
     }
 }

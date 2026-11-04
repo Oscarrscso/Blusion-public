@@ -254,9 +254,11 @@ public struct DescribedSearchService: Sendable {
         var reading = await interpreted
         guard !Task.isCancelled else { return [] }
         if reading.interpretationFailed { issue = issue ?? .ranking }
-        // Words that are a topic are searched as one, whatever the model made of them.
+        // Words that are a topic are searched as one, whatever the model made of them: first, so the cap below can't drop them.
+        var topicIndex = 0
         for topic in topics where wordsAreTopic && !reading.filters.moods.contains(where: { AISearchGrounding.isSameTopic($0, topic.name) }) {
-            reading.filters.moods.append(topic.name)
+            reading.filters.moods.insert(topic.name, at: topicIndex)
+            topicIndex += 1
         }
         reading.filters.moods = Array(reading.filters.moods.prefix(DescribedSearch.maxMoods))
         // A search with nothing the reading could use ("something to watch tonight") gets well-liked popular titles, not nothing.

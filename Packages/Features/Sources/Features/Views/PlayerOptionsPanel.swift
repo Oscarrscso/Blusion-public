@@ -36,6 +36,7 @@ enum PlayerPanelTab: String, CaseIterable, Identifiable {
 /// The open menu: a glass card with its title and close button over the menu's own scrolling content. It sits on the bar whose
 /// segments choose it (`PlayerControls`); a tap outside the card and the bar closes it.
 struct PlayerOptionsPanel: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: PlayerViewModel
     let infoModel: PlayerInfoModel
     @Binding var tab: PlayerPanelTab?
@@ -74,7 +75,7 @@ struct PlayerOptionsPanel: View {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
                 .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
                 #if !targetEnvironment(macCatalyst)
                 .keyboardShortcut(.escape, modifiers: [])
                 #endif
@@ -119,8 +120,8 @@ struct PlayerOptionsPanel: View {
                 }
             }
         }
-        .clipShape(.rect(cornerRadius: 24))
-        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24))
+        .clipShape(.rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
+        .glassEffect(.regular.tint(.black.opacity(0.32)), in: .rect(cornerRadius: 24 * metrics.cornerScale(for: .playerControls)))
         .foregroundStyle(.white)
         .tint(.white)
         .accessibilityElement(children: .contain)
@@ -413,12 +414,12 @@ struct PlayerOptionsPanel: View {
                         .font(.body.weight(selected ? .semibold : .medium).monospacedDigit())
                         .frame(maxWidth: .infinity, minHeight: 54)
                         .foregroundStyle(.white)
-                        .background(selected ? .white.opacity(0.18) : .white.opacity(0.07), in: .rect(cornerRadius: 14))
+                        .background(selected ? .white.opacity(0.18) : .white.opacity(0.07), in: .rect(cornerRadius: 14 * metrics.cornerScale(for: .playerControls)))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 14)
+                            RoundedRectangle(cornerRadius: 14 * metrics.cornerScale(for: .playerControls))
                                 .strokeBorder(.white.opacity(selected ? 0.30 : 0.07), lineWidth: 0.75)
                         }
-                        .contentShape(.rect(cornerRadius: 14))
+                        .contentShape(.rect(cornerRadius: 14 * metrics.cornerScale(for: .playerControls)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(rate == 1 ? "Normal speed" : "\(rate.formatted()) times")
@@ -654,6 +655,7 @@ private struct PanelRowTitle: View {
 
 /// Rows on one rounded card, with hairlines between them.
 private struct PanelGroup<Content: View>: View {
+    @Environment(\.layoutMetrics) private var metrics
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -665,7 +667,7 @@ private struct PanelGroup<Content: View>: View {
                 }
             }
         }
-        .background(.white.opacity(0.065), in: .rect(cornerRadius: 18))
+        .background(.white.opacity(0.065), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
     }
 }
 
@@ -796,6 +798,7 @@ private struct PanelMenuRow: View {
 
 /// Values side by side as capsules, the one in use filled. Scrolls sideways when they don't fit.
 private struct PanelChips<Value: Hashable>: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let options: [Value]
     let selection: Value
@@ -816,8 +819,8 @@ private struct PanelChips<Value: Hashable>: View {
                             Text(label(option)).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 .padding(.horizontal, 14).frame(minHeight: 36)
                                 .foregroundStyle(.white)
-                                .background(.white.opacity(selected ? 0.20 : 0.08), in: .capsule)
-                                .contentShape(.capsule)
+                                .background(.white.opacity(selected ? 0.20 : 0.08), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                                .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(title) \(label(option))")
@@ -834,6 +837,7 @@ private struct PanelChips<Value: Hashable>: View {
 
 /// A value on a slider, shown at the right of the title. `change` gets each value as it moves, and `true` once it is let go.
 private struct PanelSlider: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let value: Double
     let range: ClosedRange<Double>
@@ -862,12 +866,13 @@ private struct PanelSlider: View {
             .accessibilityValue(label(shown))
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18))
+        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
     }
 }
 
 /// A delay set in steps: − and + hold to repeat, the value resets to zero when tapped.
 private struct PanelStepper: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let value: TimeInterval
     let step: TimeInterval
@@ -894,10 +899,10 @@ private struct PanelStepper: View {
                 .accessibilityHint("Resets to zero")
                 stepButton("plus", step, label: "Later")
             }
-            .background(.white.opacity(0.1), in: .capsule)
+            .background(.white.opacity(0.1), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
         }
         .padding(.leading, 16).padding(.trailing, 6).padding(.vertical, 6)
-        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18))
+        .background(.white.opacity(0.08), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
     }
 
     private func stepButton(_ symbol: String, _ delta: TimeInterval, label: String) -> some View {
@@ -911,6 +916,7 @@ private struct PanelStepper: View {
 }
 
 private struct PanelToggle: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let isOn: Bool
     let set: (Bool) -> Void
@@ -923,11 +929,12 @@ private struct PanelToggle: View {
             .font(.body.weight(.semibold))
             .tint(.green)
             .padding(.horizontal, 16).frame(minHeight: 52)
-            .background(.white.opacity(0.08), in: .rect(cornerRadius: 18))
+            .background(.white.opacity(0.08), in: .rect(cornerRadius: 18 * metrics.cornerScale(for: .playerControls)))
     }
 }
 
 private struct PanelButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let title: String
     let symbol: String
     let action: () -> Void
@@ -942,8 +949,8 @@ private struct PanelButton: View {
         Button { Haptics.play(.playerControls); action() } label: {
             Label(title, systemImage: symbol).font(.subheadline.weight(.semibold)).lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(.white.opacity(0.1), in: .capsule)
-                .contentShape(.capsule)
+                .background(.white.opacity(0.1), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
         }
         .buttonStyle(.plain)
     }

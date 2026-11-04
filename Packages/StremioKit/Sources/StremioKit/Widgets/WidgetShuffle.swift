@@ -40,6 +40,19 @@ public enum WidgetShuffle: Sendable, Equatable, Hashable, Codable {
             return date.addingTimeInterval(seconds)
         }
     }
+
+    /// The latest time `next(after:)` can give for `date`. A kept order due later than this was made by a longer schedule.
+    func latestNext(after date: Date, calendar: Calendar) -> Date? {
+        switch self {
+        case .off, .everyOpen:
+            return nil
+        case .hourly, .daily:
+            var random = SystemRandomNumberGenerator()
+            return next(after: date, calendar: calendar, random: &random)
+        case .randomTimes(let low, let high):
+            return date.addingTimeInterval(Double(max(1, low, high)) * 3600)
+        }
+    }
 }
 
 /// A row that takes its items from a source picked at random: from `sources`, or from every catalog of the installed addons when it is
@@ -73,7 +86,9 @@ public struct ShuffleState: Sendable, Equatable, Codable {
     public static func resolve(_ current: ShuffleState?, schedule: WidgetShuffle, now: Date, calendar: Calendar,
                                random: inout some RandomNumberGenerator) -> ShuffleState? {
         if schedule == .off { return nil }
-        if schedule != .everyOpen, let current, let until = current.until, now < until { return current }
+        // An order due later than this schedule allows was made by a longer one, so it gives way now.
+        if schedule != .everyOpen, let current, let until = current.until, now < until,
+           until <= schedule.latestNext(after: now, calendar: calendar) ?? until { return current }
         return ShuffleState(seed: random.next(), until: schedule.next(after: now, calendar: calendar, random: &random))
     }
 }

@@ -174,6 +174,7 @@ struct WidgetBuilderView: View {
 /// The sentence that describes the widget. Its words wrap like text; its tokens are the settings with a value, each a capsule that opens
 /// the setting and, when it can be removed, has a cross that takes the value away. The kind is a dropdown.
 private struct SentenceCard: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: WidgetBuilderModel
 
     var body: some View {
@@ -281,9 +282,9 @@ private struct SentenceCard: View {
                 .accessibilityLabel("Remove \(token.text)")
             }
         }
-        .tokenCapsule()
+        .tokenCapsule(scale: metrics.cornerScale(for: .panels))
         .overlay {
-            if model.selectedField == token.field { Capsule().strokeBorder(.white, lineWidth: 1.5) }
+            if model.selectedField == token.field { ScaledCapsule(scale: metrics.cornerScale(for: .panels)).strokeBorder(.white, lineWidth: 1.5) }
         }
     }
 
@@ -307,7 +308,7 @@ private struct SentenceCard: View {
             }
             .font(.title3.weight(.semibold))
             .foregroundStyle(.primary)
-            .tokenCapsule()
+            .tokenCapsule(scale: metrics.cornerScale(for: .panels))
         }
         .menuIndicator(.hidden)
     }
@@ -400,6 +401,7 @@ private struct PillList: View {
 /// width, or its half of a pair of filters, and is at least as tall as the others, so they line up. A row that cannot be used now is faded
 /// and does nothing.
 private struct PillButton: View {
+    @Environment(\.layoutMetrics) private var metrics
     let model: WidgetBuilderModel
     let pill: WidgetBuilderModel.Pill
     /// The symbol's colour, which says what kind of setting this is. The name and the value stay white.
@@ -407,7 +409,7 @@ private struct PillButton: View {
 
     /// The least height of every row, so the rows of the list line up.
     static let minHeight: CGFloat = 52
-    private static let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16 * metrics.cornerScale(for: .panels), style: .continuous) }
 
     var body: some View {
         let isOpen = model.selectedField == pill.field
@@ -439,9 +441,9 @@ private struct PillButton: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, Theme.Spacing.m)
             .frame(maxWidth: .infinity, minHeight: Self.minHeight)
-            .glassEffect(.regular.interactive(), in: Self.shape)
+            .glassEffect(.regular.interactive(), in: shape)
             .overlay {
-                if isOpen { Self.shape.strokeBorder(.white, lineWidth: 1.5) }
+                if isOpen { shape.strokeBorder(.white, lineWidth: 1.5) }
             }
             .opacity(pill.isEnabled ? 1 : 0.4)
         }
@@ -455,10 +457,10 @@ private struct PillButton: View {
 
 private extension View {
     /// The capsule a token and the kind dropdown sit in: interactive glass with the sentence's padding.
-    func tokenCapsule() -> some View {
+    func tokenCapsule(scale: CGFloat) -> some View {
         padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, 6)
-            .glassEffect(.regular.interactive(), in: Capsule())
+            .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: scale))
     }
 }
 #endif

@@ -6,6 +6,7 @@ import SwiftUI
 /// player: AVKit's player is a second view of the same AVPlayer, so the trailer keeps playing, and YouTube's web view is moved here
 /// from the panel, which stays empty while this is up.
 struct TrailerFullScreenView: View {
+    @Environment(\.layoutMetrics) private var metrics
     let trailer: TrailerLoader
     let close: () -> Void
 
@@ -26,7 +27,8 @@ struct TrailerFullScreenView: View {
                 Image(systemName: "xmark")
                     .font(.title3.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             }
             .accessibilityLabel("Close")
             .accessibilityIdentifier("detail.trailerClose")

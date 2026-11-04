@@ -43,9 +43,8 @@ struct HeroSection: View {
 }
 
 extension EnvironmentValues {
-    /// How far Home has been pulled down past its top while the spotlight is its first section. The spotlight stretches by this much, like
-    /// a refresh.
-    @Entry var heroPull: CGFloat = 0
+    /// Shared artwork zoom state; only the artwork modifier observes its changing offset.
+    @Entry var homeHeroScroll: DetailHeroScrollState? = nil
 }
 
 /// A paging carousel of full-resolution portrait or landscape heroes, each clipped to its own page.
@@ -64,7 +63,6 @@ struct HeroCarousel: View {
     private var isHomeScrolling: Bool { homeScroll?.isScrolling ?? false }
     /// The portrait page's band under the picture, scaled with Dynamic Type so a larger metadata line keeps its room (see `TitleHero.captionBelow`).
     @ScaledMetric(relativeTo: .footnote) private var captionBelow: CGFloat = TitleHero.captionBelow
-    @Environment(\.heroPull) private var heroPull
     @Environment(PosterRatingsStore.self) private var ratings
     @Environment(AppRouter.self) private var router
     @Environment(\.appAppearance) private var appearance
@@ -112,7 +110,8 @@ struct HeroCarousel: View {
             Image(systemName: systemName)
                 .font(.title2.weight(.semibold))
                 .frame(width: 48, height: 48)
-                .glassEffect(.regular, in: .circle)
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -139,11 +138,11 @@ struct HeroCarousel: View {
                 GeometryReader { geometry in
                     // Pulled past the top, the spotlight stretches with the pull, in both orientations, so no black shows above it; its
                     // caption stays where it was. Landscape used to keep its height and left a black gap.
-                    let pull = heroPull
+                    let pull = homeScroll?.heroPull ?? 0
                     let height = geometry.size.height + pull
                     TabView(selection: $pageID) {
                         ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in
-                            HeroPage(item: item, isScrolling: isHomeScrolling, artworkHeight: height - captionBelow,
+                            HeroPage(item: item, artworkHeight: height - captionBelow,
                                      cachedArtwork: ratings.cachedHeroArtwork(for: item),
                                      cachedCertification: ratings.cachedCertification(for: item), distance: abs(index - currentIndex))
                                 .frame(width: geometry.size.width, height: height)
@@ -169,7 +168,9 @@ struct HeroCarousel: View {
                         // A whole page of content is replaced, so this is the harder click rather than the standard tap.
                         Haptics.play(.banner)
                     }
-                    .onAppear {
+                    // Widget edits reload Home's titles while this carousel can stay mounted.
+                    // A selection missing from the new pages leaves the native pager blank.
+                    .onChange(of: items.map(\.identity), initial: true) { _, _ in
                         if !items.contains(where: { $0.identity == pageID }) {
                             pageID = items.first?.identity
                         }
@@ -198,16 +199,18 @@ struct HeroCarousel: View {
             #endif
             // Restarts on every page change, a swipe's included, so a page always gets its whole time on screen. With Turn pages off the
             // pause is never read, so the spotlight does not redraw for tab and navigation changes it has no use for.
-            .task(id: PageTurn(seconds: appearance.heroAutoAdvance, page: pageID,
+            .task(id: PageTurn(seconds: appearance.heroAutoAdvance, page: pageID, items: items.map(\.identity),
                                paused: appearance.heroAutoAdvance > 0 && pausesPageTurns)) {
                 await turnPage(after: appearance.heroAutoAdvance)
             }
     }
 
-    /// What the spotlight's own page turning waits on: how long, on which page, and whether it is paused.
+    /// What the spotlight's own page turning waits on: how long, on which page among which pages, and whether it is paused. The pages
+    /// restart it after a reload, as a running turn would pick its next page from the pages it started with.
     private struct PageTurn: Equatable {
         let seconds: Int
         let page: String?
+        let items: [String]
         let paused: Bool
     }
 
@@ -237,7 +240,7 @@ struct HeroCarousel: View {
         HStack(spacing: 6) {
             ForEach(items, id: \.identity) { item in
                 let isCurrent = item.identity == (pageID ?? items.first?.identity)
-                Capsule()
+                ScaledCapsule(scale: metrics.cornerScale(for: .artwork))
                     .fill(.white.opacity(isCurrent ? 0.95 : 0.35))
                     .frame(width: isCurrent ? 16 : 6, height: 6)
             }
@@ -273,8 +276,9 @@ struct HeroPlaceholder: View {
 
 /// One hero page of the spotlight, using a separate image for each orientation.
 private struct HeroPage: View {
+    @Environment(\.homeHeroScroll) private var heroScroll
+    @Environment(\.homeScroll) private var homeScroll
     let item: MetaPreview
-    let isScrolling: Bool
     /// The picture's height in portrait: the page less the caption band under it, so a pull stretches the picture too.
     let artworkHeight: CGFloat
     /// Pages between this one and the one on screen. Only pages inside `HeroCarousel.loadWindow(isLandscape:)` load their picture.
@@ -301,11 +305,10 @@ private struct HeroPage: View {
     /// Set once the title's details have answered, or could not, so the grey lines give way to the metadata line and the synopsis.
     @State private var detailsSettled = false
 
-    init(item: MetaPreview, isScrolling: Bool, artworkHeight: CGFloat, cachedArtwork: TMDbArtwork?, cachedCertification: String?,
+    init(item: MetaPreview, artworkHeight: CGFloat, cachedArtwork: TMDbArtwork?, cachedCertification: String?,
          distance: Int) {
         self.distance = distance
         self.item = item
-        self.isScrolling = isScrolling
         self.artworkHeight = artworkHeight
         _heroArtwork = State(initialValue: cachedArtwork)
         _artworkChecked = State(initialValue: cachedArtwork != nil)
@@ -429,7 +432,7 @@ private struct HeroPage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .simultaneousGesture(TapGesture().onEnded {
-                    guard !isScrolling else { return }
+                    guard homeScroll?.isScrolling != true else { return }
                     openTitle()
                 })
                 .accessibilityElement(children: .ignore)
@@ -557,6 +560,7 @@ private struct HeroPage: View {
                 if isInWindow {
                     HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, preview: item,
                                 standInFromBackdrop: HeroCarousel.isMacCatalyst)
+                        .modifier(DetailHeroScrollZoom(scroll: heroScroll))
                 }
             }
     }
@@ -604,8 +608,9 @@ private struct HeroPage: View {
 
 /// A grey line standing in for a line of text in the spotlight while it loads.
 private struct HeroSkeletonLine: View {
+    @Environment(\.layoutMetrics) private var metrics
     var body: some View {
-        Capsule()
+        ScaledCapsule(scale: metrics.cornerScale(for: .artwork))
             .fill(.white.opacity(0.16))
             .frame(height: 9)
             .shimmering()

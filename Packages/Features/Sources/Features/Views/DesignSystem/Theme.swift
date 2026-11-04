@@ -87,23 +87,19 @@ extension View {
     }
 
     /// A subtle translucent rounded surface for grouped content. Deliberately not glass: glass is for controls over media.
-    func cardSurface(cornerRadius: CGFloat = Theme.Radius.surface) -> some View {
-        background(Theme.surface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    func cardSurface(cornerRadius: CGFloat = Theme.Radius.surface, group: AppearancePreferences.CornerGroup = .panels) -> some View {
+        modifier(CardSurfaceModifier(cornerRadius: cornerRadius, kind: .plain, group: group))
     }
 
     /// Glass for a card of content (a stream, a panel) with its translucent hairline. Cards share `Theme.Radius.card`.
     func glassCardSurface(cornerRadius: CGFloat = Theme.Radius.card) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return glassEffect(.regular, in: shape)
-            .glassHairline(shape)
+        modifier(CardSurfaceModifier(cornerRadius: cornerRadius, kind: .glass))
     }
 
     /// A translucent rounded surface for a panel that holds glass controls, with the same hairline as `glassCardSurface`. It is the
     /// system's material and not glass: glass chips and buttons inside a glass panel would be glass on glass.
     func translucentPanelSurface(cornerRadius: CGFloat = Theme.Radius.surface) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return background(.regularMaterial, in: shape)
-            .glassHairline(shape)
+        modifier(CardSurfaceModifier(cornerRadius: cornerRadius, kind: .material))
     }
 
     /// The translucent hairline that edges a glass card or panel, drawn just inside `shape`.
@@ -121,6 +117,46 @@ extension View {
     }
 }
 
+/// Surfaces and their hairlines follow the same Corners setting as artwork.
+private struct CardSurfaceModifier: ViewModifier {
+    enum Kind { case plain, glass, material }
+    let cornerRadius: CGFloat
+    let kind: Kind
+    var group: AppearancePreferences.CornerGroup = .panels
+    @Environment(\.layoutMetrics) private var metrics
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius * metrics.cornerScale(for: group), style: .continuous)
+        switch kind {
+        case .plain:
+            content.background(Theme.surface, in: shape)
+        case .glass:
+            content.glassEffect(.regular, in: shape).glassHairline(shape)
+        case .material:
+            content.background(.regularMaterial, in: shape).glassHairline(shape)
+        }
+    }
+}
+
+/// Pills use half their height at 100%, and become square with the other corners at 0%.
+struct ScaledCapsule: InsettableShape {
+    var scale: CGFloat
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: min(rect.width, rect.height) / 2 * scale)
+            .inset(by: insetAmount)
+            .path(in: rect)
+    }
+
+    func inset(by amount: CGFloat) -> ScaledCapsule {
+        var shape = self
+        shape.insetAmount += amount
+        return shape
+    }
+}
+
 private struct MediaArtworkModifier: ViewModifier {
     let cornerRadius: CGFloat
     @Environment(\.pixelLength) private var pixelLength
@@ -130,7 +166,7 @@ private struct MediaArtworkModifier: ViewModifier {
     @Environment(\.appAppearance) private var appearance
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius * metrics.cornerScale, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
         let outline = appearance.outline
         content
             .artworkTone(appearance.artworkTone)
