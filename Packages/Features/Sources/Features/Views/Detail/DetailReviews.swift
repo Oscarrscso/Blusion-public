@@ -39,7 +39,7 @@ struct DetailReviews: View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             HStack(spacing: 0) {
                 Text("TMDb Reviews")
-                    .font(Theme.Typography.shelfTitle)
+                    .headingStyle()
                     .accessibilityAddTraits(.isHeader)
                 Menu {
                     // Toggles rather than a picker: a toggle draws the same tick, and it reports every choice, the current sort included.
@@ -98,7 +98,9 @@ struct DetailReviews: View {
             }
             ScrollViewReader { proxy in
                 // Small shelves keep their expanding-card layout; large paginated sets build cards as they come into view.
-                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing, lazy: reviews.count > 20) {
+                // The lazy shelf must shrink when an expanded review folds, rather than keeping its tallest previous card.
+                ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing, lazy: reviews.count > 20,
+                            shrinksToFit: true) {
                         if isLoading {
                             ForEach(0..<3, id: \.self) { index in
                                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {

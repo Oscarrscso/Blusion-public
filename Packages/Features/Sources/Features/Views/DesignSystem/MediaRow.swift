@@ -38,7 +38,7 @@ private struct SectionHeaderLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             titleText
-                .font(Theme.Typography.shelfTitle)
+                .headingStyle()
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -117,6 +117,9 @@ struct MediaRow<Content: View>: View {
     #if targetEnvironment(macCatalyst)
     /// The Mac's UIKit shelf for a row built from a list of items (see `CollectionShelf`). Nil for a row of arbitrary content.
     fileprivate var collectionShelf: ((MediaRowShelfContext) -> AnyView)?
+    /// The cards the UIKit shelf has on screen. Only `ShelfLookahead` reads them: a card scrolling in or out updated the row when they
+    /// were its own state, and every update of the row refreshes every card on screen.
+    @State private var shelfVisible = CollectionVisibleRanges()
     #endif
 
     init(_ title: String, subtitle: String? = nil, hideTitle: Bool = false, onSeeAll: (() -> Void)? = nil,
@@ -157,13 +160,16 @@ struct MediaRow<Content: View>: View {
     private var shelf: some View {
         #if targetEnvironment(macCatalyst)
         if let collectionShelf {
+            let visible = shelfVisible
             collectionShelf(MediaRowShelfContext(
                 itemWidth: MediaCard.resolvedWidth(width: artworkWidth, aspect: artworkAspect, size: artworkSize, metrics: metrics,
                                                    isLandscape: isLandscape),
                 spacing: metrics.cardSpacing, margin: metrics.pageMargin, heightKey: heightKey,
-                onVisibleRange: { range in if visibleRange != range { visibleRange = range } }))
-                .modifier(BufferedArtwork(shelves: [ArtworkShelf(items: bufferedItems, aspect: artworkAspect, size: artworkSize,
-                                                                 width: artworkWidth, usesBetterPosters: usesBetterPosters)]))
+                onVisibleRange: { visible.set($0, for: ShelfLookahead.id) }))
+                .background {
+                    ShelfLookahead(visible: visible, items: artworkItems, aspect: artworkAspect, size: artworkSize, width: artworkWidth,
+                                   usesBetterPosters: usesBetterPosters)
+                }
         } else {
             swiftUIShelf
         }
@@ -271,6 +277,35 @@ struct MediaRowShelfContext {
     let margin: CGFloat
     let heightKey: String
     let onVisibleRange: (ClosedRange<Int>?) -> Void
+}
+
+/// The artwork a row's `CollectionShelf` keeps loaded around the cards on screen: as many titles on each side as the Lazy load setting
+/// asks, while the row's section is visible (`MediaRow.bufferedItems` does the same for the SwiftUI shelf).
+private struct ShelfLookahead: View {
+    /// The shelf's key in its `CollectionVisibleRanges`, which holds this one shelf.
+    static let id = "shelf"
+    let visible: CollectionVisibleRanges
+    let items: [MetaPreview]
+    let aspect: CardAspect
+    let size: CardSize
+    let width: CGFloat?
+    let usesBetterPosters: Bool
+    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+    @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
+
+    var body: some View {
+        Color.clear
+            .modifier(BufferedArtwork(shelves: [ArtworkShelf(items: buffered, aspect: aspect, size: size, width: width,
+                                                             usesBetterPosters: usesBetterPosters)]))
+            .accessibilityHidden(true)
+    }
+
+    private var buffered: [MetaPreview] {
+        guard sectionIsVisible, let shown = visible.ranges[Self.id],
+              let range = LazyLoadLookahead.bufferRange(visible: shown, count: items.count,
+                                                       titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+        return Array(items[range])
+    }
 }
 #endif
 

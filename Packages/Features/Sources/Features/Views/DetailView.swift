@@ -14,6 +14,8 @@ struct DetailView: View {
     @State private var model: DetailViewModel
     @State private var isDescriptionExpanded = false
     @State private var isDescriptionTruncated = false
+    /// Appearance's Unfold synopsis has opened this page's synopsis once; a return to the page leaves it as the listener left it.
+    @State private var appliedSynopsisPreference = false
     @State private var isConfirmingUnmarkShow = false
     /// True while an episode's context menu is open. The page blurs behind it.
     @State private var isHoldingEpisode = false
@@ -224,7 +226,11 @@ struct DetailView: View {
                                                    unavailableStreams: unavailableStreams)
                                         .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                                 }
+                                // Appearance's Section order puts Cast & Crew and Information before the reviews or after them.
+                                let credits = appearance.showsCast || appearance.showsInformation
+                                    ? DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width) : nil
                                 VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
+                                    if appearance.sectionOrder == .castFirst, let credits { credits }
                                     if appearance.showsReviews && (model.isLoadingReviews || !model.reviews.isEmpty) {
                                         DetailReviews(reviews: model.reviews, isLoading: model.isLoadingReviews && model.reviews.isEmpty,
                                                       consensus: model.reviewConsensus,
@@ -237,9 +243,7 @@ struct DetailView: View {
                                             // A changed review corpus resets the panel and cancels its in-flight AI task.
                                             .id(ReviewConsensusReader.key(for: model.reviews))
                                     }
-                                    if appearance.showsCast || appearance.showsInformation {
-                                        DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width)
-                                    }
+                                    if appearance.sectionOrder == .reviewsFirst, let credits { credits }
                                 }
                                 .padding(.top, model.isSeries ? metrics.titleSectionSpacing
                                     : isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
@@ -266,6 +270,7 @@ struct DetailView: View {
                 }
                 .scrollIndicators(.visible, axes: .vertical)
                 .scrollIndicatorsFlash(onAppear: true)
+                .contentMargins(.top, 0, for: .scrollContent)
                 .contentMargins(.bottom, bottomExtra, for: .scrollContent)
                 // Phone landscape: scrolling down tucks the landscape bar away to Home, as on every other page.
                 .trackLandscapeTabScroll()
@@ -333,7 +338,7 @@ struct DetailView: View {
         // The settle scales the whole visible page about the screen's centre; the background behind it stays put.
         .heroSettle(trigger: hasSettled)
         .environment(\.heroPosterOverride, usesHeroPosters)
-        .screenBackground()
+        .screenBackground(reservesNavigationSpace: false)
         #if targetEnvironment(macCatalyst)
         // The artwork reaches the top without reserving a native navigation bar.
         .ignoresSafeArea(.container, edges: .top)
@@ -347,7 +352,13 @@ struct DetailView: View {
         .pageNavigationBar(hidden: isPhoneInLandscape)
         .navigationBarTitleDisplayMode(.inline)
         // A detail page's landscape controls start tucked away and omit the title and divider already represented by its hero.
-        .onAppear { landscapeTabs?.prepareForDetailPage() }
+        .onAppear {
+            landscapeTabs?.prepareForDetailPage()
+            if !appliedSynopsisPreference {
+                appliedSynopsisPreference = true
+                if appearance.expandsSynopsis { isDescriptionExpanded = true }
+            }
+        }
         .onChange(of: isPhoneInLandscape) { _, landscape in
             if landscape { landscapeTabs?.prepareForDetailPage() }
         }

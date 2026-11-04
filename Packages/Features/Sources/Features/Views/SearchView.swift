@@ -5,12 +5,12 @@ import UIKit
 
 struct SearchView: View {
     @State private var model: SearchViewModel
+    @State private var selectedType = "all"
     @State private var isSearchPresented = false
     @FocusState private var isSearchFocused: Bool
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
-    @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     private let initialQuery: String?
     /// The id of the page's content, which its scroll goes back to when its tab's item is tapped.
     private static let topID = "search.top"
@@ -43,14 +43,12 @@ struct SearchView: View {
                     if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         if model.showsNoSearchableAddons {
                             EmptyStateView("No addon can search", systemImage: "magnifyingglass",
-                                           message: "Add a catalog addon, such as Cinemeta, in Settings.",
                                            actionTitle: "Open Addons", action: { router.showAddons() })
                                 .accessibilityIdentifier("search.noSearchableAddons")
                         } else {
                             browse
                         }
                     } else {
-                        // The three search areas have fixed positions even while they load independently.
                         results
                     }
                 }
@@ -141,8 +139,8 @@ struct SearchView: View {
                             Haptics.play(.buttons)
                             model.clearRecents()
                         }
-                            .labelStyle(.iconOnly)
-                            .glassCircleButton(.small)
+                            .labelStyle(.titleOnly)
+                            .buttonStyle(.borderless)
                             .help("Clear")
                             .accessibilityIdentifier("search.clearRecents")
                     }
@@ -168,10 +166,10 @@ struct SearchView: View {
                 }
             }
             if model.browseGenres.isEmpty {
-                EmptyStateView("Search your addons", systemImage: "magnifyingglass", message: "Find something to watch by title.")
+                EmptyStateView("Search", systemImage: "magnifyingglass")
             } else {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                    SectionHeader("Browse Categories")
+                    SectionHeader("Categories")
                     // Compact rows on the page's own surface, each with its category's glyph in a small coloured badge: calmer than a
                     // wall of picture-sized colour tiles, and twice as many fit on a screen.
                     LazyVGrid(columns: categoryColumns, spacing: Theme.Spacing.s) {
@@ -190,109 +188,66 @@ struct SearchView: View {
         }
     }
 
-    @ViewBuilder
+    private var resultItems: [MetaPreview] {
+        if selectedType == "ai" { return model.describedItems }
+        let items = model.groups.flatMap(\.items)
+        // Add semantic matches after title matches, showing each title only once.
+        var seen = Set(items.map(\.identity))
+        let combined = items + model.describedItems.filter { seen.insert($0.identity).inserted }
+        return combined.filter {
+            selectedType == "all" || $0.type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == selectedType
+        }
+    }
+
+    private var isLoadingResults: Bool {
+        selectedType == "ai"
+            ? model.aiPhase == .searching
+            : model.phase == .searching || model.aiPhase == .searching
+    }
+
     private var results: some View {
-        // These sections never switch between a grid and type chips when addons finish loading.
-        resultRow("Movies", type: "movie")
-        resultRow("Series", type: "series")
-        ForEach(model.groups.filter { $0.type != "movie" && $0.type != "series" }) { group in
-            MediaRow(group.title, items: group.items, id: \.identity, artworkItems: group.items) { _, item in MediaCardLink(item: item) }
-        }
-        aiResults
-    }
-
-    @ViewBuilder
-    private func resultRow(_ title: String, type: String) -> some View {
-        let items = model.groups.first(where: { $0.type == type })?.items ?? []
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: metrics.headerSpacing) {
-                resultHeader(title, type: type)
-                    .padding(.horizontal, metrics.pageMargin)
-                MediaRow(title, hideTitle: true, items: items, id: \.identity, artworkItems: items) { _, item in MediaCardLink(item: item) }
+        VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
+            Picker("Results", selection: $selectedType) {
+                Text("All").tag("all")
+                Text("Movies").tag("movie")
+                Text("Series").tag("series")
+                if model.aiAvailable { Text("AI").tag("ai") }
             }
-        } else if model.phase == .searching {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                resultHeader(title, type: type)
-                    .padding(.horizontal, metrics.pageMargin)
-                SkeletonRow()
-            }
-            .accessibilityIdentifier("search.\(type).loading")
-        } else {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                resultHeader(title, type: type)
-                Text("No \(title.lowercased()) found")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            .pickerStyle(.segmented)
             .padding(.horizontal, metrics.pageMargin)
-            .accessibilityIdentifier("search.\(type).empty")
-        }
-    }
+            .accessibilityIdentifier("search.filters")
 
-    private func resultHeader(_ title: String, type: String) -> some View {
-        Label(title, systemImage: type == "movie" ? ContinueKind.movies.symbol : ContinueKind.series.symbol)
-            .font(Theme.Typography.shelfTitle)
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    @ViewBuilder
-    private var aiResults: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                Label("AI Search", systemImage: "sparkles")
-                    .font(.headline)
-                Spacer(minLength: 0)
-                Text("On-device AI")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if !resultItems.isEmpty {
+                MediaGrid(items: resultItems, fillsWidth: true)
+            } else if isLoadingResults {
+                MediaGridPlaceholder(aspect: .poster, fillsWidth: true)
+            } else if !model.isOffline, model.failures.isEmpty || selectedType == "ai" {
+                EmptyStateView("No results", systemImage: "magnifyingglass")
+                    .accessibilityIdentifier("search.empty")
             }
-            .padding(.horizontal, metrics.pageMargin)
 
-            if !model.aiAvailable {
-                Text("On-device AI isn't available. Enable Apple Intelligence to search by meaning.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, metrics.pageMargin)
-                    .accessibilityIdentifier("search.ai.unavailable")
-            } else {
-                if model.aiPhase == .searching {
-                    HStack(spacing: Theme.Spacing.s) {
-                        ProgressView()
-                        Text(model.aiStage.text)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, metrics.pageMargin)
-                    .accessibilityIdentifier("search.ai.loading")
-                }
-                if !model.describedItems.isEmpty {
-                    MediaRow("", hideTitle: true, items: model.describedItems, id: \.identity, artworkItems: model.describedItems) { _, item in
-                        MediaCardLink(item: item)
-                    }
-                    .accessibilityIdentifier("search.ai.matches")
-                } else if model.aiPhase == .done, model.aiIssue == nil {
-                    Text("No confident AI matches for this search.")
+            if isLoadingResults {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel("Searching")
+                    .accessibilityIdentifier("search.loading")
+            }
+
+            if selectedType == "all" || selectedType == "ai",
+               model.aiPhase == .done, let issue = model.aiIssue {
+                HStack {
+                    Text(LocalizedStringKey(issue.text))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, metrics.pageMargin)
-                        .accessibilityIdentifier("search.ai.empty")
+                    Spacer()
+                    Button("Retry") { model.retryAI() }
                 }
-                if model.aiPhase == .done, let issue = model.aiIssue {
-                    HStack {
-                        Text(LocalizedStringKey(issue.text))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") { model.retryAI() }
-                    }
-                    .padding(.horizontal, metrics.pageMargin)
-                    .accessibilityIdentifier("search.ai.retry")
-                }
+                .padding(.horizontal, metrics.pageMargin)
+                .accessibilityIdentifier("search.ai.retry")
             }
         }
-        .accessibilityIdentifier("search.ai")
     }
+
 }
 
 /// One category on the Search page: its glyph in a small badge of its colour, its name, and a chevron.

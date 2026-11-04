@@ -18,6 +18,16 @@ enum ImageCachePolicy {
         return megabytes * 1024 * 1024
     }
 
+    /// The most decoded pictures kept in memory, in bytes: an eighth of the device's memory, at least 256 MB (the limit this replaced, which
+    /// full-resolution episode stills outgrew) and at most 1 GB. Pictures on screen are held by their views as well, so going over it only
+    /// drops pictures nothing shows, and they are decoded again from disk when next needed. Without it, a Mac with 8 GB kept every hero
+    /// (about 21 MB each at 3072 pixels) and still opened since launch until the whole system ran short of memory.
+    static func decodedBytes(physicalMemory: UInt64) -> Int {
+        let floor: UInt64 = 256 * 1024 * 1024
+        let ceiling: UInt64 = 1024 * 1024 * 1024
+        return Int(min(max(physicalMemory / 8, floor), ceiling))
+    }
+
     /// How long a picture from `url` is used before it is checked for a newer copy.
     static func refreshAge(for url: URL) -> TimeInterval {
         url.host?.lowercased().hasSuffix("btttr.cc") == true ? 24 * 60 * 60 : 14 * 24 * 60 * 60

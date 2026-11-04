@@ -244,7 +244,7 @@ struct ContinueWatchingRow: View {
                             Text(title)
                         }
                         .buttonStyle(.plain)
-                        .font(Theme.Typography.shelfTitle)
+                        .headingStyle()
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .layoutPriority(1)

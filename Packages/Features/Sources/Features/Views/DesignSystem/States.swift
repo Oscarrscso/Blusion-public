@@ -144,7 +144,7 @@ struct SkeletonShelf: View {
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             Text(" ")
-                .font(Theme.Typography.shelfTitle)
+                .headingStyle()
                 .frame(width: 150)
                 .background { RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Theme.surface).padding(.vertical, 4) }
                 .padding(.horizontal, metrics.pageMargin)
@@ -172,17 +172,21 @@ private struct SkeletonShapes: View {
                 .fill(Theme.surface)
                 .frame(width: width, height: width / aspect.ratio)
             if showsTitle ?? aspect.showsCaption(appearance) {
+                // The same lines the card's caption keeps (Appearance's Title lines and grey line).
                 VStack(alignment: .leading, spacing: 2) {
-                    line(font: Theme.Typography.cardTitle, width: width * 0.78)
-                    line(font: Theme.Typography.cardSubtitle, width: width * 0.46)
+                    line(font: Theme.Typography.cardTitle, width: width * 0.78, lines: appearance.captionLines)
+                    if appearance.showsCaptionDetails {
+                        line(font: Theme.Typography.cardSubtitle, width: width * 0.46)
+                    }
                 }
             }
         }
     }
 
-    private func line(font: Font, width: CGFloat) -> some View {
+    private func line(font: Font, width: CGFloat, lines: Int = 1) -> some View {
         Text(" ")
             .font(font)
+            .lineLimit(lines, reservesSpace: true)
             .frame(width: width)
             .background { RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Theme.surface).padding(.vertical, 3) }
     }

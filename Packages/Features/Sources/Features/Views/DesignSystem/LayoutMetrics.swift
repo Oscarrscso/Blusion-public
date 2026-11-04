@@ -23,6 +23,8 @@ struct LayoutMetrics: Equatable, Sendable {
     var headerSpacing: CGFloat
     /// Gap between cards in a shelf, and between the columns and the rows of a grid. Every grid uses this one value.
     var cardSpacing: CGFloat
+    /// Gap between sort/filter controls, scaled with the card and shelf spacing.
+    var controlSpacing: CGFloat = Theme.Spacing.s
     /// Width of a 2:3 poster in a shelf (`CardSize.medium`).
     var posterWidth: CGFloat
     /// Width of a 16:9 card with a caption: Up Next, landscape shelves (`CardSize.medium`).
@@ -47,6 +49,8 @@ struct LayoutMetrics: Equatable, Sendable {
     var cornerScale: CGFloat = 1
     /// Poster columns of a grid on a phone held upright (Appearance's Columns).
     var phonePosterColumns: Int = 3
+    /// Appearance's Spotlight height, as a share of the spotlight's own on Home.
+    var heroScale: CGFloat = 1
 
     static let compact = LayoutMetrics(
         isRegular: false, pageMargin: Theme.Spacing.l, shelfSpacing: 28, headerSpacing: 10, cardSpacing: 12,
@@ -63,11 +67,11 @@ struct LayoutMetrics: Equatable, Sendable {
     var continueCardWidth: CGFloat { ((isRegular ? 256 : 210) * cardScale).rounded() }
 
     /// These metrics as Settings → Appearance asks: cards scaled by the card size, gaps by the spacing, artwork corners by the corners,
-    /// and the phone's poster grid at the chosen number of columns. The defaults change nothing.
+    /// the phone's poster grid at the chosen number of columns, and Home's spotlight at its height. The defaults change nothing.
     func customised(by appearance: AppearancePreferences) -> LayoutMetrics {
         var metrics = self
-        let size = CGFloat(appearance.cardScale.factor)
-        let gaps = CGFloat(appearance.density.factor)
+        let size = CGFloat(appearance.cardScale)
+        let gaps = CGFloat(appearance.spacingScale)
         metrics.cardScale = size
         metrics.posterWidth = (posterWidth * size).rounded()
         metrics.wideCardWidth = (wideCardWidth * size).rounded()
@@ -76,8 +80,10 @@ struct LayoutMetrics: Equatable, Sendable {
         metrics.shelfSpacing = (shelfSpacing * gaps).rounded()
         metrics.headerSpacing = (headerSpacing * gaps).rounded()
         metrics.cardSpacing = max(2, (cardSpacing * gaps).rounded())
-        metrics.cornerScale = CGFloat(appearance.corners.factor)
+        metrics.controlSpacing = max(2, (controlSpacing * gaps).rounded())
+        metrics.cornerScale = CGFloat(appearance.cornerScale)
         metrics.phonePosterColumns = appearance.phoneGridColumns
+        metrics.heroScale = CGFloat(appearance.heroScale)
         return metrics
     }
 
@@ -100,6 +106,16 @@ struct LayoutMetrics: Equatable, Sendable {
 
     func heroHeight(forContainerHeight height: CGFloat) -> CGFloat {
         min(max(height * heroHeightFraction, 380), heroMaxHeight)
+    }
+
+    /// Home's spotlight: `heroHeight(forContainerHeight:)` in landscape and on the Mac, the title page's picture height in portrait, each
+    /// at Appearance's Spotlight height and never taller than the container.
+    func spotlightHeight(isLandscape: Bool, containerWidth: CGFloat, containerHeight: CGFloat, captionBelow: CGFloat) -> CGFloat {
+        if isLandscape {
+            return min(containerHeight, heroHeight(forContainerHeight: containerHeight) * heroScale + 100)
+        }
+        let portrait = TitleHero.height(width: containerWidth, metrics: self) + captionBelow
+        return heroScale == 1 ? portrait : min(containerHeight, (portrait - captionBelow) * heroScale + captionBelow)
     }
 
     /// The columns of a poster grid: three on a phone (or Appearance's Columns), as many as fit on a wide screen, at the card size.

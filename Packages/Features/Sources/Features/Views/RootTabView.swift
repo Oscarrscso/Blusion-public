@@ -34,7 +34,7 @@ public final class AppRouter {
     /// The depth of `homePath` once a title opened from Home's spotlight is on it. When the path falls below that depth, the spotlight's
     /// title has been popped and Home is back, see `HomeView`.
     var spotlightDepth: Int?
-    /// Counts the returns to Home from a spotlight title. The spotlight and Home's scroll reset to their first page and top on each.
+    /// Counts the returns to Home from a spotlight title. Home's scroll goes back to its top on each; the spotlight keeps the title it was on.
     var spotlightRevision = 0
     /// Counts the taps on each tab's item, the selected tab's included. The tab's first page scrolls to its top on each, see `tapTab(_:)`.
     private(set) var tabTapRevisions: [LaunchRoute.Tab: Int] = [:]
@@ -374,9 +374,9 @@ struct MacPageNavigation: View {
 }
 
 extension View {
-    func macPageScroll() -> some View {
+    func macPageScroll(reservesNavigationSpace: Bool = true) -> some View {
         #if targetEnvironment(macCatalyst)
-        modifier(MacPageScroll())
+        modifier(MacPageScroll(reservesNavigationSpace: reservesNavigationSpace))
         #else
         self
         #endif
@@ -430,13 +430,14 @@ private struct MacBackNavigation: ViewModifier {
 }
 
 private struct MacPageScroll: ViewModifier {
+    let reservesNavigationSpace: Bool
     @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
     @State private var offset: CGFloat = 0
     @State private var isVisible = false
 
     func body(content: Content) -> some View {
         content
-            .contentMargins(.top, MacPageNavigation.height, for: .scrollContent)
+            .contentMargins(.top, reservesNavigationSpace ? MacPageNavigation.height : 0, for: .scrollContent)
             .onScrollGeometryChange(for: CGFloat.self) {
                 min(MacPageNavigation.height, max(0, $0.contentOffset.y + $0.contentInsets.top))
             } action: { _, value in

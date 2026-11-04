@@ -164,11 +164,13 @@ extension View {
 ///
 /// `lazy: false` is for a short shelf whose cards all exist already. A plain row is exactly as tall as its tallest card, so the shelf changes
 /// height with that card's own animation, and no height is measured.
+/// `shrinksToFit` lets an expandable lazy shelf (reviews) recalculate its height as cards close; ordinary lazy shelves retain their maximum.
 struct ShelfScroll<Content: View>: View {
     let margin: CGFloat
     let spacing: CGFloat
     let lazy: Bool
     let resetKey: String
+    let shrinksToFit: Bool
     let content: Content
     @State private var height: CGFloat?
     @State private var measuredKey: String?
@@ -181,11 +183,13 @@ struct ShelfScroll<Content: View>: View {
     @State private var isHoveringShelf = false
     #endif
 
-    init(margin: CGFloat, spacing: CGFloat, lazy: Bool = true, resetKey: String = "", initialID: String? = nil, @ViewBuilder content: () -> Content) {
+    init(margin: CGFloat, spacing: CGFloat, lazy: Bool = true, resetKey: String = "", shrinksToFit: Bool = false,
+         initialID: String? = nil, @ViewBuilder content: () -> Content) {
         self.margin = margin
         self.spacing = spacing
         self.lazy = lazy
         self.resetKey = resetKey
+        self.shrinksToFit = shrinksToFit
         _shelfPosition = State(initialValue: initialID.map { ScrollPosition(id: $0, anchor: .leading) } ?? ScrollPosition())
         self.content = content()
     }
@@ -227,7 +231,7 @@ struct ShelfScroll<Content: View>: View {
             let tallest = edges.map(\.height).max() ?? 0
             guard tallest > 0 else { return }
             let previous = measuredKey == resetKey ? height : nil
-            let next = max(previous ?? 0, tallest)
+            let next = shrinksToFit ? tallest : max(previous ?? 0, tallest)
             if measuredKey != resetKey { measuredKey = resetKey }
             if abs(next - (height ?? -1)) > 0.5 { height = next }
         }

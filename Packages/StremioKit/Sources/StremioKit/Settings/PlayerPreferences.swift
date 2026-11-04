@@ -250,7 +250,7 @@ public struct VideoProcessing: Sendable, Equatable, Hashable, Codable {
 }
 
 public enum SubtitleColour: String, Sendable, Equatable, Hashable, Codable, CaseIterable {
-    case white, yellow, cyan, green
+    case white, yellow, cyan, green, orange, pink, purple, grey
 
     public var label: String { rawValue.capitalized }
 
@@ -261,6 +261,10 @@ public enum SubtitleColour: String, Sendable, Equatable, Hashable, Codable, Case
         case .yellow: (1, 0.92, 0.23)
         case .cyan: (0.4, 0.92, 1)
         case .green: (0.5, 1, 0.5)
+        case .orange: (1, 0.7, 0.3)
+        case .pink: (1, 0.6, 0.8)
+        case .purple: (0.8, 0.65, 1)
+        case .grey: (0.78, 0.78, 0.78)
         }
     }
 }

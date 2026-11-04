@@ -82,8 +82,8 @@ enum Theme {
 
 extension View {
     /// The app's screen background: pure black edge to edge, like the TV app. Artwork is the only colour on screen.
-    func screenBackground() -> some View {
-        modifier(ScreenBackgroundModifier())
+    func screenBackground(reservesNavigationSpace: Bool = true) -> some View {
+        modifier(ScreenBackgroundModifier(reservesNavigationSpace: reservesNavigationSpace))
     }
 
     /// A subtle translucent rounded surface for grouped content. Deliberately not glass: glass is for controls over media.
@@ -126,16 +126,19 @@ private struct MediaArtworkModifier: ViewModifier {
     @Environment(\.pixelLength) private var pixelLength
     /// Appearance's corners scale every artwork's radius alike.
     @Environment(\.layoutMetrics) private var metrics
-    /// Appearance's Artwork outline turns the hairline off.
+    /// Appearance's Outline sets the hairline's strength (or turns it off), and its Artwork tone the picture's colour.
     @Environment(\.appAppearance) private var appearance
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius * metrics.cornerScale, style: .continuous)
+        let outline = appearance.outline
         content
+            .artworkTone(appearance.artworkTone)
             .clipShape(shape)
             .overlay {
-                shape.strokeBorder(Theme.artworkBorder, lineWidth: pixelLength)
-                    .opacity(appearance.artworkOutline ? 1 : 0)
+                shape.strokeBorder(outline == .standard ? Theme.artworkBorder : Color.white.opacity(outline.opacity),
+                                   lineWidth: pixelLength * outline.pixels)
+                    .opacity(outline == .off ? 0 : 1)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -143,6 +146,7 @@ private struct MediaArtworkModifier: ViewModifier {
 }
 
 private struct ScreenBackgroundModifier: ViewModifier {
+    let reservesNavigationSpace: Bool
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(\.appAppearance) private var appearance
 
@@ -157,7 +161,7 @@ private struct ScreenBackgroundModifier: ViewModifier {
             .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
             .scrollEdgeEffectHidden(isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone, for: .bottom)
             .pageTopBar(hidden: isPhoneLandscape)
-            .macPageScroll()
+            .macPageScroll(reservesNavigationSpace: reservesNavigationSpace)
     }
 
     /// Mac builds keep the top bar clear (see `pageTopBar`), with no soft edge.

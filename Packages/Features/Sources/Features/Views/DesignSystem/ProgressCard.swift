@@ -213,6 +213,8 @@ struct PlaybackProgressOverlay: View {
     let width: CGFloat
     /// Extra room between the line and the card's edges (see `CardCaption`).
     var inset: CGFloat = 0
+    /// Appearance's progress line: its colour and thickness, and whether the minutes left show beside it.
+    @Environment(\.appAppearance) private var appearance
 
     private var hasProgress: Bool { fraction.isFinite && fraction > 0 && fraction < 1 }
 
@@ -231,11 +233,11 @@ struct PlaybackProgressOverlay: View {
                     Capsule()
                         .fill(.white.opacity(0.32))
                         .overlay(alignment: .leading) {
-                            Capsule().fill(.white).scaleEffect(x: fraction, y: 1, anchor: .leading)
+                            Capsule().fill(appearance.progressFill).scaleEffect(x: fraction, y: 1, anchor: .leading)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 3)
-                    if let remainingTime {
+                        .frame(height: appearance.progressThickness.points)
+                    if appearance.showsTimeLeft, let remainingTime {
                         Text(remainingTime)
                             .font(.system(size: 10, weight: .medium))
                             .monospacedDigit()

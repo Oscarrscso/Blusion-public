@@ -231,7 +231,7 @@ struct SettingsView: View {
         if let preset = appearance.preset, preset != .original { return preset.label }
         if appearance.accent != .blusion { on.append(appearance.accent.label) }
         if appearance.background != .black { on.append(appearance.background.label) }
-        if appearance.cardScale != .standard { on.append("\(appearance.cardScale.label) cards") }
+        if appearance.cardScale != 1 { on.append("\(Int((appearance.cardScale * 100).rounded()))% cards") }
         if appearance.textSize != .system { on.append("\(appearance.textSize.label) text") }
         if appearance.font != .standard { on.append(appearance.font.label) }
         if !on.isEmpty || !appearance.isDefault {

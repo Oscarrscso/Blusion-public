@@ -15,6 +15,14 @@ import Testing
         #expect(ImageCachePolicy.diskBytes(forSavedMegabytes: 300) == 1024 * 1024 * 1024, "a size the page does not offer is the default")
     }
 
+    @Test func decodedPicturesKeepAnEighthOfMemoryBetween256MBAnd1GB() {
+        let gigabyte: UInt64 = 1024 * 1024 * 1024
+        #expect(ImageCachePolicy.decodedBytes(physicalMemory: 8 * gigabyte) == 1024 * 1024 * 1024, "an 8 GB Mac or iPhone")
+        #expect(ImageCachePolicy.decodedBytes(physicalMemory: 6 * gigabyte) == 768 * 1024 * 1024)
+        #expect(ImageCachePolicy.decodedBytes(physicalMemory: 1 * gigabyte) == 256 * 1024 * 1024, "never below the old limit")
+        #expect(ImageCachePolicy.decodedBytes(physicalMemory: 32 * gigabyte) == 1024 * 1024 * 1024, "never above 1 GB")
+    }
+
     @Test func betterPostersAreCheckedAfterADayAndOtherArtworkAfterTwoWeeks() {
         #expect(!ImageCachePolicy.isDueForRefresh(url: betterPoster, fetched: now.addingTimeInterval(-23 * 3600), now: now))
         #expect(ImageCachePolicy.isDueForRefresh(url: betterPoster, fetched: now.addingTimeInterval(-25 * 3600), now: now))

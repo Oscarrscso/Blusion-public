@@ -297,18 +297,22 @@ struct MediaCard: View {
         Self.pixelSize(width: resolvedWidth, artwork: artworkAspect, displayScale: displayScale)
     }
 
-    /// One title line and one grey line, always: cards of one kind share a height (a row takes its height from its first card, see
-    /// `MediaRow`), and the grey line sits right under the name. A long name is cut off rather than wrapped, as in the TV app.
+    /// The title on as many lines as Appearance's Title lines gives it (one by default), and the grey line unless Appearance turned it
+    /// off. Every line keeps its room whether it is filled or not: cards of one kind share a height (a row takes its height from its first
+    /// card, see `MediaRow`), and the grey line sits right under the name. A long name is cut off rather than wrapped past them, as in the
+    /// TV app.
     private var captions: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(item.name)
                 .font(Theme.Typography.cardTitle)
                 .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(subtitleLine)
-                .font(Theme.Typography.cardSubtitle)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(appearance.captionLines, reservesSpace: true)
+            if appearance.showsCaptionDetails {
+                Text(subtitleLine)
+                    .font(Theme.Typography.cardSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

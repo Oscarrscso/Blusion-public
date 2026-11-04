@@ -8,12 +8,14 @@ struct HeroSection: View {
     let section: HomeViewModel.Section
     @Binding var pageID: String?
     let onRetry: () -> Void
+    let menu: AnyView
     @Environment(\.layoutMetrics) private var metrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             if !section.widget.hideTitle {
                 SectionHeader(section.widget.title).padding(.horizontal, metrics.pageMargin)
+                    .contextMenu { menu }
             }
             content
         }
@@ -24,15 +26,18 @@ struct HeroSection: View {
         switch section.state {
         case .idle, .loading:
             HeroPlaceholder()
+                .contextMenu { menu }
         case .loaded(let items) where !items.isEmpty:
-            HeroCarousel(items: items, pageID: $pageID)
+            HeroCarousel(items: items, pageID: $pageID, menu: menu)
         case .loaded:
             if let issue = section.issue {
                 IssueMessage(issue: issue)
+                    .contextMenu { menu }
             }
         case .failed(let error):
             InlineErrorView(error.shortDescription, retry: onRetry)
                 .padding(.horizontal, metrics.pageMargin)
+                .contextMenu { menu }
         }
     }
 }
@@ -48,6 +53,7 @@ struct HeroCarousel: View {
     let items: [MetaPreview]
     /// Home owns the selection so scrolling this lazy section away does not reset it.
     @Binding var pageID: String?
+    let menu: AnyView
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     /// The landscape form: a phone turned sideways, or any Mac window.
@@ -61,6 +67,10 @@ struct HeroCarousel: View {
     @Environment(\.heroPull) private var heroPull
     @Environment(PosterRatingsStore.self) private var ratings
     @Environment(AppRouter.self) private var router
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.scenePhase) private var scenePhase
+    /// Set just before the spotlight turns its own page (Appearance's Turn pages), so that change plays no haptic: the hand did nothing.
+    @State private var turnsBySelf = false
     #if targetEnvironment(macCatalyst)
     /// Whether the pointer is over the spotlight, which shows its page chevrons on Mac.
     @State private var isHoveringSpotlight = false
@@ -121,11 +131,10 @@ struct HeroCarousel: View {
     #endif
 
     var body: some View {
-        let preferred = metrics.heroHeight(forContainerHeight: containerHeight) + 100
-        let portrait = TitleHero.height(width: containerWidth, metrics: metrics) + captionBelow
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: isLandscape ? min(containerHeight, preferred) : portrait)
+            .frame(height: metrics.spotlightHeight(isLandscape: isLandscape, containerWidth: containerWidth,
+                                                   containerHeight: containerHeight, captionBelow: captionBelow))
             .overlay {
                 GeometryReader { geometry in
                     // Pulled past the top, the spotlight stretches with the pull, in both orientations, so no black shows above it; its
@@ -151,6 +160,10 @@ struct HeroCarousel: View {
                     .clipped()
                     .offset(y: -pull)
                     .onChange(of: pageID) { oldID, newID in
+                        if turnsBySelf {
+                            turnsBySelf = false
+                            return
+                        }
                         guard let oldID, let newID, oldID != newID,
                               items.contains(where: { $0.identity == oldID }) else { return }
                         // A whole page of content is replaced, so this is the harder click rather than the standard tap.
@@ -164,7 +177,18 @@ struct HeroCarousel: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if items.count > 1 { pageDots(bottom: isLandscape ? Theme.Spacing.m : 0) }
+                if items.count > 1 && appearance.showsPageDots { pageDots(bottom: isLandscape ? Theme.Spacing.m : 0) }
+            }
+            // Keep the native menu outside the paging TabView so its pages remain visible.
+            .contextMenu {
+                menu
+            } preview: {
+                if let item = items.first(where: { $0.identity == pageID }) ?? items.first {
+                    ArtworkImage(url: item.poster ?? item.background, title: item.name, maxPixelSize: 640,
+                                 acceptsAnyCachedSize: true)
+                        .frame(width: 212, height: 318)
+                        .mediaArtwork(cornerRadius: CardAspect.poster.cornerRadius)
+                }
             }
             #if targetEnvironment(macCatalyst)
             .onHover { isHoveringSpotlight = $0 }
@@ -172,6 +196,39 @@ struct HeroCarousel: View {
                 if isHoveringSpotlight && items.count > 1 { pageArrows }
             }
             #endif
+            // Restarts on every page change, a swipe's included, so a page always gets its whole time on screen. With Turn pages off the
+            // pause is never read, so the spotlight does not redraw for tab and navigation changes it has no use for.
+            .task(id: PageTurn(seconds: appearance.heroAutoAdvance, page: pageID,
+                               paused: appearance.heroAutoAdvance > 0 && pausesPageTurns)) {
+                await turnPage(after: appearance.heroAutoAdvance)
+            }
+    }
+
+    /// What the spotlight's own page turning waits on: how long, on which page, and whether it is paused.
+    private struct PageTurn: Equatable {
+        let seconds: Int
+        let page: String?
+        let paused: Bool
+    }
+
+    /// The spotlight turns no page while Home scrolls, while Home is not on screen (another tab, a title opened from it, the app in the
+    /// background) and, on the Mac, while the pointer rests on it. A title opened from the spotlight closes back onto its own page.
+    private var pausesPageTurns: Bool {
+        var paused = isHomeScrolling || router.tab != .home || router.showsTitlePage || !router.homePath.isEmpty || scenePhase != .active
+        #if targetEnvironment(macCatalyst)
+        paused = paused || isHoveringSpotlight
+        #endif
+        return paused
+    }
+
+    /// Appearance's Turn pages: after `seconds` on one page, the next, and after the last, the first.
+    private func turnPage(after seconds: Int) async {
+        guard seconds > 0, items.count > 1, !pausesPageTurns else { return }
+        try? await Task.sleep(for: .seconds(seconds))
+        guard !Task.isCancelled, !pausesPageTurns else { return }
+        let next = items[(currentIndex + 1) % items.count].identity
+        turnsBySelf = true
+        withAnimation(.snappy(duration: 0.5)) { pageID = next }
     }
 
     /// The page dots. In portrait they sit at the page's bottom edge, under the metadata line, which now runs lower (see `HeroPage.pageContent`),
@@ -203,11 +260,10 @@ struct HeroPlaceholder: View {
     /// Scaled with Dynamic Type like the spotlight's band, so the placeholder is the same height as the page it stands for.
     @ScaledMetric(relativeTo: .footnote) private var captionBelow: CGFloat = TitleHero.captionBelow
     var body: some View {
-        let preferred = metrics.heroHeight(forContainerHeight: containerHeight) + 100
-        let portrait = TitleHero.height(width: containerWidth, metrics: metrics) + captionBelow
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: isLandscape ? min(containerHeight, preferred) : portrait)
+            .frame(height: metrics.spotlightHeight(isLandscape: isLandscape, containerWidth: containerWidth,
+                                                   containerHeight: containerHeight, captionBelow: captionBelow))
             .background { Rectangle().fill(Theme.surface) }
             .shimmering()
             .accessibilityElement(children: .ignore)

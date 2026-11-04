@@ -211,7 +211,8 @@ struct PlayerOptionsPanel: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     PanelRowTitle("Colour")
-                    HStack(spacing: 12) {
+                    // Wraps onto a second row where the panel is too narrow for every colour.
+                    FlowLayout(spacing: 12) {
                         ForEach(SubtitleColour.allCases, id: \.self) { colour in
                             let rgb = colour.rgb
                             let selected = style.colour == colour

@@ -18,7 +18,8 @@ actor ImagePipeline {
     private nonisolated let files: URLCache
     /// The picture being checked for a newer copy now, if any: one at a time.
     private var refreshing: String?
-    /// `NSCache` is thread-safe and can evict under memory pressure. It has no fixed app-imposed memory limit.
+    /// `NSCache` is thread-safe and evicts under memory pressure, and past the limit `ImageCachePolicy.decodedBytes` sets from the device's
+    /// memory.
     private nonisolated(unsafe) let decoded = NSCache<NSString, UIImage>()
     /// What the cache cannot be asked: the sizes each address has been decoded at, and the addresses that answered "not found". Behind a
     /// lock, so views can read it without hopping onto the actor.
@@ -59,6 +60,7 @@ actor ImagePipeline {
         checks.urlCache = nil
         checks.requestCachePolicy = .reloadIgnoringLocalCacheData
         refreshSession = URLSession(configuration: checks)
+        decoded.totalCostLimit = ImageCachePolicy.decodedBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory)
     }
 
     // MARK: The cache on disk

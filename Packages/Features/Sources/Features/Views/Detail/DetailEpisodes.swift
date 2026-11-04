@@ -514,9 +514,12 @@ private struct EpisodeRow: View {
         !watched && fraction.map { $0.isFinite && $0 > 0 && $0 < 1 } == true
     }
 
-    /// Appearance's Hide spoilers: an episode not yet started keeps its still blurred and its synopsis greyed out. The title, number,
-    /// date and score stay, so the episode can still be found.
+    /// Appearance's Hide spoilers: an episode not yet started keeps its still blurred, its synopsis greyed out and, if Appearance says
+    /// so, its title too, each as Appearance's own switch for it says. The number, date and score stay, so the episode can still be found.
     private var hidesSpoilers: Bool { appearance.hidesSpoilers && !watched && !hasProgress }
+    private var hidesStill: Bool { hidesSpoilers && appearance.spoilerStills }
+    private var hidesSynopsis: Bool { hidesSpoilers && appearance.spoilerSynopses }
+    private var hidesTitle: Bool { hidesSpoilers && appearance.spoilerTitles }
 
     /// How far the progress line and the watched mark move in from the still's edges, so a rounder corner does not cut into them.
     private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
@@ -610,6 +613,8 @@ private struct EpisodeRow: View {
             #endif
             .allowsTightening(true)
             .foregroundStyle(.white)
+            .redacted(reason: hidesTitle ? .placeholder : [])
+            .accessibilityHidden(hidesTitle)
         }
     }
 
@@ -624,8 +629,8 @@ private struct EpisodeRow: View {
                 .font(.caption)
                 #endif
                 .foregroundStyle(.white.opacity(0.85))
-                .redacted(reason: hidesSpoilers ? .placeholder : [])
-                .accessibilityHidden(hidesSpoilers)
+                .redacted(reason: hidesSynopsis ? .placeholder : [])
+                .accessibilityHidden(hidesSynopsis)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { overviewTextHeight = $0 }
                 .padding(.bottom, showsWholeOverview ? 0 : -Theme.Spacing.xs)
         }
@@ -634,7 +639,7 @@ private struct EpisodeRow: View {
     /// The episode's own still, or the series' backdrop when the addon sent none.
     private var still: some View {
         ArtworkImage(url: video.thumbnail ?? artwork, maxPixelSize: nil, fallbackURL: artwork, extendsArtworkDownward: true)
-            .blur(radius: hidesSpoilers ? 22 : 0, opaque: true)
+            .blur(radius: hidesStill ? 22 : 0, opaque: true)
             .opacity(airsLater ? 0.45 : 1)
     }
 

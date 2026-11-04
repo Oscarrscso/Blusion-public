@@ -62,6 +62,7 @@ struct CollectionPage: UIViewRepresentable {
             view.dequeueConfiguredReusableCell(using: registration, for: path, item: id)
         }
         coordinator.collectionView = view
+        view.onLayout = { [weak coordinator] in coordinator?.reportVisibleRanges() }
         let pause = ScrollPointerPause(view)
         pause.onChange = { [weak coordinator] scrolling in coordinator?.page?.onScrollingChange?(scrolling) }
         coordinator.pointerPause = pause
@@ -257,9 +258,10 @@ struct CollectionPage: UIViewRepresentable {
             }
         }
 
+        /// The cards on screen are reported after the layout that follows (`InsetFreeCollectionView.onLayout`): until then the view still
+        /// lists the cells of the last position.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             pointerPause?.scrolled()
-            reportVisibleRanges()
             guard let report = page?.onScrollOffset else { return }
             let offset = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
             guard offset != lastOffset else { return }
@@ -295,9 +297,10 @@ struct MacGridPage: View {
 
     let parts: [Part]
     var scrollToTop: Int = 0
-    @State private var visibleRanges: [String: ClosedRange<Int>] = [:]
+    /// The cards each grid has on screen. Only `MacGridLookahead` reads them: a row scrolling in or out updated this page when they
+    /// were its own state, and every page update refreshes every card on screen.
+    @State private var visible = CollectionVisibleRanges()
     @State private var zoomScope = UUID().uuidString
-    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
     @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
 
     var body: some View {
@@ -307,8 +310,7 @@ struct MacGridPage: View {
                            if navigation?.offset != value { navigation?.offset = value }
                        })
             .environment(\.zoomScope, zoomScope)
-            .modifier(BufferedArtwork(shelves: bufferedShelves))
-            .task(id: nextPageKey) { trigger(nextPageKey) }
+            .background { MacGridLookahead(grids: grids, visible: visible) }
             .onAppear { navigation?.offset = 0 }
     }
 
@@ -317,7 +319,8 @@ struct MacGridPage: View {
     }
 
     private var blocks: [CollectionBlock] {
-        parts.map { part in
+        let visible = visible
+        return parts.map { part in
             switch part {
             case .full(let id, let view, let spacingAfter):
                 return CollectionBlock(id: id, kind: .full(view), spacingAfter: spacingAfter)
@@ -326,18 +329,42 @@ struct MacGridPage: View {
                 return CollectionBlock(id: grid.id, kind: .grid(ids: items.map(\.identity), aspect: grid.aspect, fillsWidth: grid.fillsWidth,
                                                                 cell: { index in grid.card(index, items[index]) }),
                                        spacingAfter: grid.spacingAfter,
-                                       onVisibleRange: { range in
-                                           if visibleRanges[grid.id] != range { visibleRanges[grid.id] = range }
-                                       })
+                                       onVisibleRange: { visible.set($0, for: grid.id) })
             }
         }
+    }
+}
+
+/// The cards each grid or shelf of a Mac UIKit page has on screen, by its id. Kept in an object so that a row or card scrolling in or out
+/// updates only the views that read it (the artwork buffer, the next-page check), as `HomeScrollState` does for Home's scroll.
+@MainActor @Observable
+final class CollectionVisibleRanges {
+    private(set) var ranges: [String: ClosedRange<Int>] = [:]
+
+    func set(_ range: ClosedRange<Int>?, for id: String) {
+        if ranges[id] != range { ranges[id] = range }
+    }
+}
+
+/// What `MacGridPage` does with the cards on screen: loads the artwork around them, and asks a grid for its next page when the viewer
+/// comes within the Lazy load setting's titles of its end, as `MediaGrid` does.
+private struct MacGridLookahead: View {
+    let grids: [MacTitleGrid]
+    let visible: CollectionVisibleRanges
+    @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+
+    var body: some View {
+        Color.clear
+            .modifier(BufferedArtwork(shelves: bufferedShelves))
+            .task(id: nextPageKey) { trigger(nextPageKey) }
+            .accessibilityHidden(true)
     }
 
     private var titles: Int { LazyLoadLookahead.titles(atLevel: lookaheadLevel) }
 
     private var bufferedShelves: [ArtworkShelf] {
         grids.compactMap { grid in
-            guard let visible = visibleRanges[grid.id],
+            guard let visible = visible.ranges[grid.id],
                   let range = LazyLoadLookahead.bufferRange(visible: visible, count: grid.items.count, titles: titles) else { return nil }
             return ArtworkShelf(items: Array(grid.items[range]), aspect: grid.aspect, usesBetterPosters: grid.usesBetterPosters)
         }
@@ -346,7 +373,7 @@ struct MacGridPage: View {
     /// The grids within `titles` of their end, named with their last title, so each asks for its next page once per page loaded.
     private var nextPageKey: [String] {
         grids.compactMap { grid in
-            guard grid.onLastAppear != nil, let visible = visibleRanges[grid.id],
+            guard grid.onLastAppear != nil, let visible = visible.ranges[grid.id],
                   visible.upperBound >= LazyLoadLookahead.triggerIndex(count: grid.items.count, titles: titles),
                   let last = grid.items.last else { return nil }
             return "\(grid.id)|\(last.identity)"
@@ -360,7 +387,15 @@ struct MacGridPage: View {
 /// A collection view, and cells, that pass no safe area to their content. A page runs under the window's title bar, as the SwiftUI pages
 /// do; a cell under the bar would otherwise inset its SwiftUI content by the bar's height and be measured that much taller.
 final class InsetFreeCollectionView: UICollectionView {
+    /// Told after each layout. The cells on screen change only here, as the view scrolls or its items change.
+    var onLayout: (() -> Void)?
+
     override var safeAreaInsets: UIEdgeInsets { .zero }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
 }
 
 final class InsetFreeCell: UICollectionViewCell {

@@ -48,9 +48,10 @@ struct ActiveFilterChips: View {
     let chips: [ActiveFilterChip]
     let identifier: String
     let clearAll: () -> Void
+    @Environment(\.layoutMetrics) private var metrics
 
     var body: some View {
-        FlowLayout(spacing: Theme.Spacing.s) {
+        FlowLayout(spacing: metrics.controlSpacing) {
             ForEach(chips) { chip in
                 GlassChip(chip.label, systemImage: "xmark", isCompact: true, action: chip.remove)
                     .accessibilityIdentifier("\(identifier).chip.\(chip.id)")
@@ -86,15 +87,15 @@ struct BrowseFilterBar<Menus: View>: View {
     static var menuHeight: CGFloat { 34 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: metrics.controlSpacing) {
             if let kinds {
                 QualitySelector(titles: kinds.titles, selection: kinds.selection, symbols: kinds.symbols,
                                 accessibilityID: kinds.identifier)
                     .padding(.horizontal, metrics.pageMargin)
             }
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                GlassEffectContainer(spacing: Theme.Spacing.s) {
-                    HStack(spacing: Theme.Spacing.s) {
+            VStack(alignment: .leading, spacing: metrics.controlSpacing) {
+                GlassEffectContainer(spacing: metrics.controlSpacing) {
+                    HStack(spacing: metrics.controlSpacing) {
                         menus
                     }
                     // Match the floating landscape Back button's row so the shorter menu capsules share its vertical centreline.
@@ -106,7 +107,7 @@ struct BrowseFilterBar<Menus: View>: View {
             }
             .padding(.horizontal, metrics.pageMargin)
         }
-        .padding(.bottom, Theme.Spacing.s)
+        .padding(.bottom, metrics.controlSpacing)
         .buttonStyle(.plain)
     }
 }

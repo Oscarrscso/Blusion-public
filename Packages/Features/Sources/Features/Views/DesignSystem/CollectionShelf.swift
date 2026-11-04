@@ -27,7 +27,8 @@ struct CollectionShelf<Item, Cell: View>: UIViewRepresentable {
     func makeUIView(context: Context) -> UICollectionView {
         let layout = SnappingShelfLayout()
         layout.scrollDirection = .horizontal
-        let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let view = ShelfCollectionView(frame: .zero, collectionViewLayout: layout)
+        view.onLayout = { [weak coordinator = context.coordinator] in coordinator?.reportVisibleRange() }
         view.backgroundColor = .clear
         view.showsHorizontalScrollIndicator = false
         view.showsVerticalScrollIndicator = false
@@ -142,13 +143,25 @@ struct CollectionShelf<Item, Cell: View>: UIViewRepresentable {
             return cell
         }
 
+        /// The cards on screen are reported after the layout that follows (`ShelfCollectionView.onLayout`): until then the view still
+        /// lists the cells of the last position.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             pointerPause?.scrolled()
-            reportVisibleRange()
         }
 
         func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool { false }
         func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool { false }
+    }
+}
+
+/// A shelf's collection view, which says when it has laid out its cells.
+final class ShelfCollectionView: UICollectionView {
+    /// Told after each layout. The cells on screen change only here, as the row scrolls or its items change.
+    var onLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
     }
 }
 

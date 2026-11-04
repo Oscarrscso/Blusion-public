@@ -3,8 +3,10 @@ import SwiftUI
 import UIKit
 
 /// Settings → Appearance, drawn. The root applies the app-wide parts once (`appliesAppearance()`): the accent as the tint, the text size,
-/// the font's design and weight, and the preferences themselves in the environment. Pages read the background from there; cards, shelves
-/// and grids read their sizes, spacing, corners and columns from `LayoutMetrics`, which folds the preferences in.
+/// the font's design, width, weight, slant and spacing, the animation speed, and the preferences themselves in the environment. Pages read
+/// the background from there, headings take `headingStyle()`, and cards, shelves and grids read their sizes, spacing, corners and columns
+/// from `LayoutMetrics`, which folds the preferences in. Settings → Appearance's preview applies the same look to itself
+/// (`appearanceLook(_:)`), so it can show a look before it is saved.
 extension AppearancePreferences.RGB {
     var colour: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: 1) }
 
@@ -17,10 +19,20 @@ extension AppearancePreferences.RGB {
         self.init(red: Double(red), green: Double(green), blue: Double(blue))
     }
 
-    /// A filled circle of this colour that keeps it inside a menu, where SwiftUI draws plain symbols in the text colour.
+    /// A filled circle of this colour with a faint ring, which keeps the colour inside a menu (SwiftUI draws plain symbols in the text
+    /// colour there) and keeps a near-black colour visible on a dark menu.
     var swatch: Image {
-        let image = UIImage(systemName: "circle.fill")?.withTintColor(uiColour, renderingMode: .alwaysOriginal) ?? UIImage()
-        return Image(uiImage: image)
+        let size = CGSize(width: 20, height: 20)
+        let colour = uiColour
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            let circle = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
+            colour.setFill()
+            context.cgContext.fillEllipse(in: circle)
+            UIColor(white: 1, alpha: 0.35).setStroke()
+            context.cgContext.setLineWidth(1)
+            context.cgContext.strokeEllipse(in: circle)
+        }
+        return Image(uiImage: image.withRenderingMode(.alwaysOriginal))
     }
 }
 
@@ -37,23 +49,14 @@ extension AppearancePreferences {
 
     /// The colour behind every page, which hero artwork fades into.
     var pageBackground: Color {
-        switch background {
-        case .black: Theme.background
-        case .graphite: Color(white: 0.075)
-        case .midnight: Color(.sRGB, red: 0.02, green: 0.035, blue: 0.085, opacity: 1)
-        case .tinted:
-            Color(.sRGB, red: accentRGB.red * 0.11, green: accentRGB.green * 0.11, blue: accentRGB.blue * 0.11, opacity: 1)
-        }
+        background == .black ? Theme.background : backgroundRGB.colour
     }
 
-    /// The background's colour as a swatch, for its menu.
+    /// A background's colour, for its menu and the preview.
     func backgroundSwatch(_ background: Background) -> AppearancePreferences.RGB {
-        switch background {
-        case .black: AppearancePreferences.RGB(red: 0, green: 0, blue: 0)
-        case .graphite: AppearancePreferences.RGB(red: 0.2, green: 0.2, blue: 0.2)
-        case .midnight: AppearancePreferences.RGB(red: 0.08, green: 0.12, blue: 0.28)
-        case .tinted: AppearancePreferences.RGB(red: accentRGB.red * 0.35, green: accentRGB.green * 0.35, blue: accentRGB.blue * 0.35)
-        }
+        var look = self
+        look.background = background
+        return look.backgroundRGB
     }
 
     /// The text sizes the app may use: the whole range when it follows the system, otherwise the one size chosen.
@@ -68,17 +71,57 @@ extension AppearancePreferences {
         case .xLarge: size = .xLarge
         case .xxLarge: size = .xxLarge
         case .xxxLarge: size = .xxxLarge
+        case .accessibility1: size = .accessibility1
+        case .accessibility2: size = .accessibility2
+        case .accessibility3: size = .accessibility3
+        case .accessibility4: size = .accessibility4
+        case .accessibility5: size = .accessibility5
         }
         return size...size
     }
 
-    var fontDesign: Font.Design? {
+    var fontDesign: Font.Design? { Self.design(font) }
+
+    static func design(_ font: FontStyle) -> Font.Design? {
         switch font {
         case .standard: nil
         case .rounded: .rounded
         case .serif: .serif
         case .monospaced: .monospaced
         }
+    }
+
+    var systemFontWidth: Font.Width? {
+        switch fontWidth {
+        case .compressed: .compressed
+        case .condensed: .condensed
+        case .standard: nil
+        case .expanded: .expanded
+        }
+    }
+
+    /// The font of shelf and section headings. The default is the app's own, `Theme.Typography.shelfTitle`: Title 2, bold.
+    var headingTypeface: Font {
+        let style: Font.TextStyle = switch headingSize {
+        case .small: .title3
+        case .standard: .title2
+        case .large: .title
+        case .huge: .largeTitle
+        }
+        let weight: Font.Weight = switch headingWeight {
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        }
+        return Font.system(style, design: Self.design(headingFont.font ?? font), weight: weight)
+    }
+
+    /// The progress line's colour on Continue cards.
+    var progressFill: Color {
+        progressColour == .accent ? (accentColour ?? .accentColor) : .white
     }
 }
 
@@ -100,18 +143,83 @@ extension View {
     func appliesAppearance() -> some View {
         modifier(AppearanceModifier())
     }
+
+    /// Draws everything inside with `appearance`: what the root does with the saved look, for a view (the Appearance preview) that shows
+    /// a look of its own. The preview leaves out `motion`: the root's animation speed already reaches it, and twice would square it.
+    func appearanceLook(_ appearance: AppearancePreferences, motion: Bool = true) -> some View {
+        modifier(AppearanceLookModifier(appearance: appearance, motion: motion))
+    }
+
+    /// A shelf or section heading in Appearance's heading style: its font, size, weight and case.
+    func headingStyle() -> some View {
+        modifier(HeadingStyleModifier())
+    }
+
+    /// Posters, cards and stills in Appearance's artwork tone. Natural changes nothing.
+    func artworkTone(_ tone: AppearancePreferences.ArtworkTone) -> some View {
+        modifier(ArtworkToneModifier(tone: tone))
+    }
 }
 
 private struct AppearanceModifier: ViewModifier {
     @AppStorage(AppearancePreferences.defaultsKey) private var appearance = AppearancePreferences()
 
     func body(content: Content) -> some View {
+        content.appearanceLook(appearance)
+    }
+}
+
+private struct AppearanceLookModifier: ViewModifier {
+    let appearance: AppearancePreferences
+    let motion: Bool
+
+    func body(content: Content) -> some View {
+        let speed = motion ? appearance.animationSpeed.factor : 1
         content
             .tint(appearance.accentColour)
             .dynamicTypeSize(appearance.dynamicTypeRange)
             .fontDesign(appearance.fontDesign)
+            .fontWidth(appearance.systemFontWidth)
             .bold(appearance.boldText)
+            .italic(appearance.italicText)
+            .tracking(appearance.letterSpacing.points)
+            .lineSpacing(appearance.lineSpacing.points)
             .environment(\.appAppearance, appearance)
+            // Off stops every SwiftUI animation inside, implicit ones included; another speed scales the animations changes carry.
+            .transaction { transaction in
+                if speed == 0 {
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                } else if speed != 1 {
+                    transaction.animation = transaction.animation?.speed(speed)
+                }
+            }
+    }
+}
+
+private struct HeadingStyleModifier: ViewModifier {
+    @Environment(\.appAppearance) private var appearance
+
+    func body(content: Content) -> some View {
+        content
+            .font(appearance.headingTypeface)
+            .textCase(appearance.uppercaseHeadings ? .uppercase : nil)
+    }
+}
+
+private struct ArtworkToneModifier: ViewModifier {
+    let tone: AppearancePreferences.ArtworkTone
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if tone == .natural {
+            content
+        } else {
+            content
+                .saturation(tone.saturation)
+                .brightness(tone.brightness)
+                .contrast(tone.contrast)
+        }
     }
 }
 #endif

@@ -52,6 +52,7 @@ public struct DataResetService: Sendable {
             await services.settings.save(PlaybackSettings())
             // Appearance follows at once: every screen reads it with `@AppStorage`.
             AppearancePreferences.reset()
+            AppearanceLooks.reset()
             await services.downloads?.preferencesChanged()
             await services.traktAccount.clearCredentials()
             await services.traktSync.signedOut()

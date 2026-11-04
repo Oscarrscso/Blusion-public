@@ -8,7 +8,7 @@ import UIKit
 struct HomeView: View {
     @State private var model: HomeViewModel
     @State private var scroll = HomeScrollState()
-    /// Keep each spotlight's selection while its lazy section is offscreen.
+    /// Keep each spotlight's selection while its lazy section is offscreen, and when a title opened from it is popped back to Home.
     @State private var heroPages: [String: String] = [:]
     /// How far Home has been pulled down past its top; the spotlight stretches by this much (see `HeroCarousel`).
     @State private var heroPull: CGFloat = 0
@@ -216,11 +216,6 @@ struct HomeView: View {
             .onDisappear { scroll.isScrolling = false }
             .screenBackground()
             .ignoresSafeArea(.container, edges: ignoredEdges)
-            .onChange(of: router.spotlightRevision) { _, _ in
-                var transaction = Transaction(animation: nil)
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { heroPages.removeAll() }
-            }
     }
     #endif
 
@@ -283,10 +278,7 @@ struct HomeView: View {
             .onChange(of: router.spotlightRevision) { _, _ in
                 var transaction = Transaction(animation: nil)
                 transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    heroPages.removeAll()
-                    proxy.scrollTo(Self.topID, anchor: .top)
-                }
+                withTransaction(transaction) { proxy.scrollTo(Self.topID, anchor: .top) }
             }
             // A tap on Home's tab item goes back to its first page, and scrolls it to the top.
             .onChange(of: router.tabTapRevisions[.home, default: 0]) { _, _ in
@@ -332,8 +324,8 @@ struct HomeView: View {
     private func sectionView(_ section: HomeViewModel.Section) -> some View {
         switch section.widget.content {
         case .hero:
-            withWidgetMenu(HeroSection(section: section, pageID: $heroPages[section.id], onRetry: { retry(section) }), section)
-                // The next shelf starts 20 pt below the hero: the shelf spacing that follows it, less the 20 pt gap wanted here.
+            HeroSection(section: section, pageID: $heroPages[section.id], onRetry: { retry(section) },
+                        menu: AnyView(widgetMenu(section)))
                 .padding(.bottom, 20 - metrics.shelfSpacing)
         case .banner(let row):
             // On iPhone a held card plays it, so the banner's menu is kept off its cards; the Mac's cards have their own menu.
