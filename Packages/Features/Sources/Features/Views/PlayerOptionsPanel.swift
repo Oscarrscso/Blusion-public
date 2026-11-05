@@ -74,7 +74,7 @@ struct PlayerOptionsPanel: View {
                 Button { Haptics.play(.playerControls); close() } label: {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.hoverGlass)
                 .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
                 #if !targetEnvironment(macCatalyst)
                 .keyboardShortcut(.escape, modifiers: [])
@@ -227,7 +227,7 @@ struct PlayerOptionsPanel: View {
                                     .overlay { Circle().strokeBorder(.white, lineWidth: selected ? 2 : 0) }
                                     .contentShape(.circle)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.hoverPlain)
                             .accessibilityLabel(colour.label)
                             .accessibilityAddTraits(selected ? .isSelected : [])
                         }
@@ -360,7 +360,7 @@ struct PlayerOptionsPanel: View {
                     .frame(minHeight: 36)
                     .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
             .accessibilityIdentifier("player.panel.videoMenu.back")
             PanelSection(menu.title) {
                 PanelGroup {
@@ -421,7 +421,7 @@ struct PlayerOptionsPanel: View {
                         }
                         .contentShape(.rect(cornerRadius: 14 * metrics.cornerScale(for: .playerControls)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel(rate == 1 ? "Normal speed" : "\(rate.formatted()) times")
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
@@ -759,7 +759,7 @@ private struct PanelOptionRow: View {
             .frame(minHeight: 44)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .accessibilityLabel(([title] + [subtitle, detail].compactMap { $0 } + tags).joined(separator: " · "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -791,7 +791,7 @@ private struct PanelMenuRow: View {
             .frame(minHeight: 44)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .accessibilityLabel("\(title), \(value)")
     }
 }
@@ -822,7 +822,7 @@ private struct PanelChips<Value: Hashable>: View {
                                 .background(.white.opacity(selected ? 0.20 : 0.08), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                                 .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverPlain)
                         .accessibilityLabel("\(title) \(label(option))")
                         .accessibilityAddTraits(selected ? .isSelected : [])
                     }
@@ -894,7 +894,7 @@ private struct PanelStepper: View {
                         .frame(minWidth: 72, minHeight: 40)
                         .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel("\(title) \(String(format: "%+.\(digits)f", value)) seconds")
                 .accessibilityHint("Resets to zero")
                 stepButton("plus", step, label: "Later")
@@ -909,7 +909,7 @@ private struct PanelStepper: View {
         Button { Haptics.play(.playerOptions); change(delta) } label: {
             Image(systemName: symbol).font(.subheadline.weight(.bold)).frame(width: 44, height: 40).contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .buttonRepeatBehavior(.enabled)
         .accessibilityLabel(label)
     }
@@ -952,7 +952,7 @@ private struct PanelButton: View {
                 .background(.white.opacity(0.1), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                 .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
     }
 }
 #endif

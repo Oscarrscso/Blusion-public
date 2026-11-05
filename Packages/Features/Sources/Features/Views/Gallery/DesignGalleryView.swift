@@ -213,7 +213,7 @@ struct DesignGalleryView: View {
                         Button("Trailer") {}
                             .buttonStyle(.glassCapsule)
                         Button("Customize") {}
-                            .buttonStyle(.glass)
+                            .buttonStyle(.hoverGlass)
                     }
                     HStack(spacing: Theme.Spacing.m) {
                         Button("Small") {}

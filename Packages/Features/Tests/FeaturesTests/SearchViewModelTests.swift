@@ -242,18 +242,30 @@ import StremioKitTestSupport
                  catalogs: [CatalogDescriptor(type: type, id: "films", extra: [ExtraDescriptor(name: "genre", options: options)])])
     }
 
-    @Test func browseGenresComeFromTheMovieCatalogAndSkipBlanksAndRepeats() async throws {
+    @Test func categoriesPutMovieGenresFirstAndOpenSharedGenresOnBothCatalogs() async throws {
         let shows = Manifest(id: "shows", name: "Shows", version: "1", resources: [ResourceDescriptor(name: "catalog")], types: ["series"],
-                             catalogs: [CatalogDescriptor(type: "series", id: "top", extra: [ExtraDescriptor(name: "genre", options: ["Drama"])])])
+                             catalogs: [CatalogDescriptor(type: "series", id: "top",
+                                 extra: [ExtraDescriptor(name: "genre", options: ["Drama", "action"])])])
         let films = Manifest(id: "films", name: "Films", version: "1", resources: [ResourceDescriptor(name: "catalog")], types: ["movie"],
                              catalogs: [CatalogDescriptor(type: "movie", id: "films",
                                  extra: [ExtraDescriptor(name: "genre", options: ["Action", "Comedy", "Action", "  "])])])
         let model = try await model(manifests: [shows, films], transport: stub())
         await model.refreshAvailability()
-        #expect(model.browseGenres.map(\.name) == ["Action", "Comedy"], "the movie catalog wins over the series one listed before it")
-        let first = try #require(model.browseGenres.first)
-        #expect(first.source == .addonCatalog(AddonCatalogReference(manifestID: nil, host: "stub1.example.com", catalogType: "movie",
-                                                                    catalogID: "films", genre: "Action")))
+        #expect(model.categories.map(\.name) == ["Action", "Comedy", "Drama"], "movie genres first, each name once whatever its case")
+        let first = try #require(model.categories.first)
+        #expect(first.sources == [
+            .addonCatalog(AddonCatalogReference(manifestID: nil, host: "stub1.example.com", catalogType: "movie", catalogID: "films", genre: "Action")),
+            .addonCatalog(AddonCatalogReference(manifestID: nil, host: "stub0.example.com", catalogType: "series", catalogID: "top", genre: "action")),
+        ])
+        #expect(first.imageURL != nil, "recognised genres use their selected movie stills")
+        #expect(model.categories.last?.imageURL != nil, "series genres use the same artwork mapping")
+    }
+
+    @Test func genreArtworkMatchesCommonNamesAndLeavesUnknownGenresAlone() {
+        #expect(GenreArtwork.imageURL(for: "Science Fiction") == GenreArtwork.imageURL(for: "Sci-Fi"))
+        #expect(GenreArtwork.imageURL(for: "Sports") == GenreArtwork.imageURL(for: "Sport"))
+        #expect(GenreArtwork.imageURL(for: "  Action  ") != nil)
+        #expect(GenreArtwork.imageURL(for: "Unrecognised Addon Genre") == nil)
     }
 
     @Test func aSeriesCatalogIsUsedWhenNoMovieCatalogHasGenres() async throws {
@@ -261,16 +273,30 @@ import StremioKitTestSupport
                              catalogs: [CatalogDescriptor(type: "series", id: "top", extra: [ExtraDescriptor(name: "genre", options: ["Drama", "Crime"])])])
         let model = try await model(manifests: [shows], transport: stub())
         await model.refreshAvailability()
-        #expect(model.browseGenres.map(\.name) == ["Drama", "Crime"])
-        #expect(model.browseGenres.last?.source == .addonCatalog(AddonCatalogReference(manifestID: nil, host: "stub0.example.com", catalogType: "series",
-                                                                                       catalogID: "top", genre: "Crime")))
+        #expect(model.categories.map(\.name) == ["Drama", "Crime"])
+        #expect(model.categories.last?.sources == [.addonCatalog(AddonCatalogReference(manifestID: nil, host: "stub0.example.com",
+                                                                                       catalogType: "series", catalogID: "top", genre: "Crime"))])
     }
 
-    @Test func browseGenresAreCappedAtSixteen() async throws {
-        let model = try await model(manifests: [genreManifest((1...20).map { "Genre \($0)" })], transport: stub())
+    @Test func anotherTypeIsUsedWhenNeitherMoviesNorSeriesHaveGenres() async throws {
+        let model = try await model(manifests: [genreManifest(["Shonen"], type: "anime")], transport: stub())
         await model.refreshAvailability()
-        #expect(model.browseGenres.count == 16)
-        #expect(model.browseGenres.last?.name == "Genre 16")
+        #expect(model.categories.map(\.name) == ["Shonen"])
+    }
+
+    @Test func categoriesLeaveOutYearsAndOrdersAndAreCappedAtThirty() async throws {
+        let plain = try await model(manifests: [genreManifest(["Action", "Comedy", "Drama", "Horror", "2024", "Date Added", "Title A-Z",
+                                                               "Shortest", "Longest", "Random", "Not Watched"])], transport: stub())
+        await plain.refreshAvailability()
+        #expect(plain.categories.map(\.name) == ["Action", "Comedy", "Drama", "Horror"])
+        // A catalog whose options are mostly orders has no categories of its own.
+        let sorts = try await model(manifests: [genreManifest(["Action", "Shortest", "Longest", "Random", "Not Watched"])], transport: stub())
+        await sorts.refreshAvailability()
+        #expect(sorts.categories.isEmpty)
+        let many = try await model(manifests: [genreManifest((1...40).map { "Genre \($0)" })], transport: stub())
+        await many.refreshAvailability()
+        #expect(many.categories.count == 30)
+        #expect(many.categories.last?.name == "Genre 30")
     }
 
     @Test func noShortcutsWithoutGenresOrWithOnlyRequiredGenreCatalogs() async throws {
@@ -278,13 +304,13 @@ import StremioKitTestSupport
                              catalogs: [CatalogDescriptor(type: "movie", id: "top")])
         let model = try await model(manifests: [plain], transport: stub())
         await model.refreshAvailability()
-        #expect(model.browseGenres.isEmpty)
+        #expect(model.categories.isEmpty)
         // A catalog that needs a genre to open cannot be browsed as a plain row, so it offers no shortcuts either.
         var required = genreManifest(["Action"])
         required.catalogs[0].extra[0].isRequired = true
         let other = try await self.model(manifests: [required], transport: stub())
         await other.refreshAvailability()
-        #expect(other.browseGenres.isEmpty)
+        #expect(other.categories.isEmpty)
     }
 
     // MARK: recent searches

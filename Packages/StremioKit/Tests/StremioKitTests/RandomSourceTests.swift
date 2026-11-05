@@ -36,6 +36,41 @@ import Testing
         #expect(WidgetShuffling.allSources(in: addons) == [catalog("top"), catalog("trending", "series")], "a search-only catalog is left out")
     }
 
+    @Test func theTraktFeedsJoinEverySourceOnceTheyAreOffered() {
+        #expect(WidgetShuffling.allSources(in: addons, traktFeeds: [.moviesPopular])
+                == [catalog("top"), catalog("trending", "series"), .traktFeed(.moviesPopular)])
+    }
+
+    @Test func aSourceTakenOutOfEverySourceStaysOutAndTheLastOneStaysIn() {
+        let all = [catalog("top"), catalog("trending", "series")]
+        var random = RandomSource()
+        random.toggle(catalog("top"), among: all)
+        #expect(!random.picks(catalog("top")) && random.picks(catalog("trending", "series")))
+        random.toggle(catalog("trending", "series"), among: all)
+        #expect(random.picks(catalog("trending", "series")), "the last source left is not taken out")
+        random.toggle(catalog("top"), among: all)
+        #expect(random.picks(catalog("top")) && random.excluded.isEmpty, "ticking it again brings it back")
+    }
+
+    @Test func aPickFromEverySourceNeverTakesAnExcludedOne() {
+        let widgets = [widget(RandomSource(excluded: [catalog("top")], schedule: .daily))]
+        var random = SeededRandom(seed: 1)
+        var picked = Set<WidgetSource>()
+        for _ in 0..<40 {
+            var states: [String: ShuffleState] = [:]
+            let result = WidgetShuffling.pickingSources(widgets, addons: addons, states: &states, now: date(9), calendar: calendar, random: &random)
+            if case .row(let row)? = result.first?.content { picked.insert(row.source) }
+        }
+        #expect(picked == [catalog("trending", "series")], "the excluded catalog is never the pick")
+    }
+
+    @Test func aPickSavedBeforeExclusionsStillReads() throws {
+        let saved = RandomSource(sources: [catalog("top")], schedule: .hourly)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any])
+        object["excluded"] = nil
+        #expect(try JSONDecoder().decode(RandomSource.self, from: JSONSerialization.data(withJSONObject: object)) == saved)
+    }
+
     @Test func thePickComesFromTheSetAndTheSameSeedPicksTheSame() {
         let pool = [catalog("a"), catalog("b"), catalog("c")]
         for seed in [UInt64(1), 2, 3, 42] {

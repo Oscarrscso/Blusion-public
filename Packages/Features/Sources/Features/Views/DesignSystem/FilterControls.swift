@@ -68,7 +68,7 @@ struct ActiveFilterChips: View {
 }
 
 /// The filter block the Library and Discover share, so the two pages look the same and differ only in their options: the type selector,
-/// menus that wrap to fit the available width, then a removable chip for each active filter. The menus sit midway between the
+/// menus that fill one row on Mac and wrap on iPhone, then a removable chip for each active filter. The menus sit midway between the
 /// selector and the grid; chips under them keep their own padding, and go with the last chip so clearing every filter leaves no gap.
 struct BrowseFilterBar<Menus: View>: View {
     /// The type selector. Nil hides it (a source with one type has nothing to choose).
@@ -96,13 +96,22 @@ struct BrowseFilterBar<Menus: View>: View {
             if let kinds {
                 QualitySelector(titles: kinds.titles, selection: kinds.selection, symbols: kinds.symbols,
                                 accessibilityID: kinds.identifier)
-                    .padding(.horizontal, metrics.pageMargin)
+                    .navigationAlignedWidth(margin: metrics.pageMargin)
             }
             VStack(alignment: .leading, spacing: metrics.controlSpacing) {
-                GlassEffectContainer(spacing: metrics.controlSpacing) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: metrics.controlSpacing)],
-                              alignment: .leading, spacing: metrics.controlSpacing) {
-                        menus
+                GlassEffectContainer(spacing: metrics.cardSpacing) {
+                    Group {
+                        #if targetEnvironment(macCatalyst)
+                        HStack(spacing: metrics.cardSpacing) {
+                            menus
+                        }
+                        .frame(maxWidth: .infinity)
+                        #else
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: metrics.controlSpacing)],
+                                  alignment: .leading, spacing: metrics.controlSpacing) {
+                            menus
+                        }
+                        #endif
                     }
                     // Match the floating landscape Back button's row so the shorter menu capsules share its vertical centreline.
                     .frame(minHeight: 44, alignment: .center)
@@ -114,7 +123,7 @@ struct BrowseFilterBar<Menus: View>: View {
             .padding(.horizontal, metrics.pageMargin)
         }
         .padding(.bottom, metrics.controlSpacing)
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .buttonBorderShape(.roundedRectangle(radius: Self.menuHeight / 2 * metrics.cornerScale(for: .filters)))
     }
 }

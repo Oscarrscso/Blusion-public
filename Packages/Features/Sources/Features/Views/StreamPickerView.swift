@@ -644,7 +644,7 @@ struct StreamPickerView: View {
             } label: {
                 scoreContent(score)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
             .accessibilityLabel("Open IMDb episode reviews")
             .accessibilityIdentifier("streams.episodeIMDbReviews")
         } else {
@@ -963,7 +963,7 @@ struct StreamPickerView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityValue(isNotesExpanded ? "Expanded" : "Collapsed")
                 if isNotesExpanded {

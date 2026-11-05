@@ -39,14 +39,13 @@ private struct PrimaryActionButton: View {
                     .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil)
                     .frame(height: height)
                     .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
+                    .glassEffect(glass ?? .regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
+                    .pointerFeedback()
             }
             .buttonStyle(.plain)
-            .glassEffect(glass ?? .regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
-            .pointerFeedback()
         } else {
         #if targetEnvironment(macCatalyst)
-        // The Mac's own glass button is a third shorter than the round actions beside it, so the capsule is given their height: the label
-        // fills the frame and the glass follows it, as a round action's does. A small one (Auto Pick) is a step down.
+        // Match the navigation control and the round actions beside Play.
         Button(role: configuration.role) {
             Haptics.play(.buttons)
             configuration.trigger()
@@ -56,12 +55,12 @@ private struct PrimaryActionButton: View {
                 .padding(.horizontal, Theme.Spacing.s)
                 .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil, maxHeight: .infinity)
                 .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
+                .pointerFeedback()
         }
         .configurableGlassButtonStyle(glass)
         .buttonBorderShape(metrics.cornerScale(for: .playButton) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .playButton)))
         .controlSize(.large)
-        .frame(height: controlSize == .small || controlSize == .mini ? Self.macSmallHeight : CircleActionButton.diameter)
-        .pointerFeedback()
+        .frame(height: CircleActionButton.diameter)
         #else
         Button(role: configuration.role) {
             Haptics.play(.buttons)
@@ -80,10 +79,6 @@ private struct PrimaryActionButton: View {
         }
     }
 
-    #if targetEnvironment(macCatalyst)
-    /// The height of a small main action on a Mac.
-    static let macSmallHeight: CGFloat = 32
-    #endif
 }
 
 /// A secondary action ("Customize", "Open on Best Blurays"): the system's Liquid Glass button as a label-sized capsule.
@@ -97,10 +92,10 @@ struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
         } label: {
             configuration.label
                 .font(.subheadline.weight(.semibold))
+                .pointerFeedback()
         }
         .buttonStyle(.glass)
         .buttonBorderShape(metrics.cornerScale(for: .actionButtons) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .actionButtons)))
-        .pointerFeedback()
     }
 }
 
@@ -136,6 +131,40 @@ extension View {
     }
 }
 
+/// Keep hover tracking inside the native glass button's label on Catalyst.
+struct HoverGlassButtonStyle: PrimitiveButtonStyle {
+    var glass: Glass?
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button(role: configuration.role, action: configuration.trigger) {
+            configuration.label.pointerFeedback()
+        }
+        .configurableGlassButtonStyle(glass)
+    }
+}
+
+extension PrimitiveButtonStyle where Self == HoverGlassButtonStyle {
+    static var hoverGlass: HoverGlassButtonStyle { HoverGlassButtonStyle() }
+}
+
+/// Draw and hover the whole fixed-size glass label, as Play does.
+struct FixedGlassButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.layoutMetrics) private var metrics
+    var size: CGFloat = CircleActionButton.diameter
+    var glass: Glass = .regular.interactive()
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button(role: configuration.role, action: configuration.trigger) {
+            configuration.label
+                .frame(width: size, height: size)
+                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .glassEffect(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .pointerFeedback()
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct CircularGlassButton: ViewModifier {
     let size: ControlSize
     let glass: Glass?
@@ -143,11 +172,10 @@ private struct CircularGlassButton: ViewModifier {
     @Environment(\.layoutMetrics) private var metrics
 
     func body(content: Content) -> some View {
-        content.configurableGlassButtonStyle(glass)
+        content.buttonStyle(HoverGlassButtonStyle(glass: glass))
             .buttonBorderShape(metrics.includesCircularButtons
                 ? .roundedRectangle(radius: CircleActionButton.diameter / 2 * metrics.cornerScale(for: group)) : .circle)
             .controlSize(size)
-            .pointerFeedback()
     }
 }
 
@@ -172,10 +200,9 @@ struct CircleActionButton: View {
     /// The symbol's colour while `isOn`: the title's Play colour for Save, Watched and Trailer. Nil keeps the usual grey.
     let onColour: Color?
     let exactSize: Bool
-    /// The height of the large glass capsule beside it, so the circles are level with Play and equally wide. Smaller on a Mac, where a
-    /// pointer needs less room than a finger and 50 points stood twice as tall as the Mac's own Play button.
+    /// Match Play and the navigation control on Mac; retain the larger touch target on iPhone.
     #if targetEnvironment(macCatalyst)
-    static let diameter: CGFloat = 40
+    static let diameter: CGFloat = MacPageNavigation.controlHeight
     #else
     static let diameter: CGFloat = 50
     #endif
@@ -240,15 +267,11 @@ struct CircleActionButton: View {
 }
 
 private struct CircleActionSizing: ViewModifier {
-    @Environment(\.layoutMetrics) private var metrics
     let exact: Bool
 
     func body(content: Content) -> some View {
         if exact {
-            content.buttonStyle(.plain)
-                .frame(width: CircleActionButton.diameter, height: CircleActionButton.diameter)
-                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .pointerFeedback()
+            content.buttonStyle(FixedGlassButtonStyle())
         } else {
             content.glassCircleButton()
                 .frame(width: CircleActionButton.diameter, height: CircleActionButton.diameter)

@@ -191,6 +191,18 @@ private func externalIDRequests(_ transport: StubTransport, tmdbID: Int? = nil) 
         #expect(request(chosen, region: "GB").items.contains("watch_region=IE"))
     }
 
+    @Test func aServiceCatalogLeavesOutTheOtherServicesAndPeacockIsAskedInTheUS() throws {
+        guard case .tmdbDiscover(let netflix) = StreamProvider.netflix.catalogSource,
+              case .tmdbDiscover(let peacock) = StreamProvider.peacock.catalogSource else { throw AddonError.invalidJSON }
+        let asked = request(StreamProvider.catalogRequest(for: netflix), region: "GB").items
+        #expect(asked.contains("watch_region=GB"))
+        #expect(asked.contains("without_watch_providers=1899|384|337|9|119|350|531|386|387|283"))
+        #expect(request(StreamProvider.catalogRequest(for: peacock), region: "GB").items.contains("watch_region=US"))
+        var custom = netflix
+        custom.ordering = .newest
+        #expect(StreamProvider.catalogRequest(for: custom) == custom)
+    }
+
     // MARK: Pages
 
     @Test func aMoviePageReadsTitlesDatesAndGenres() throws {

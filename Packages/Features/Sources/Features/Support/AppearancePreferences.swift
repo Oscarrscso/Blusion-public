@@ -543,6 +543,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var showsCast = true
     public var showsInformation = true
     public var showsRelated = true
+    /// Where the title can be watched in the viewer's region, from TMDb. Off until turned on, as it asks TMDb for each title.
+    public var showsWatchAnywhere = false
     public var sectionOrder: SectionOrder = .reviewsFirst
 
     // MARK: - Navigation and motion
@@ -659,6 +661,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         showsReviews = read(.showsReviews, showsReviews)
         showsCast = read(.showsCast, showsCast)
         showsInformation = read(.showsInformation, showsInformation)
+        showsWatchAnywhere = read(.showsWatchAnywhere, showsWatchAnywhere)
         showsRelated = read(.showsRelated, showsRelated)
         sectionOrder = read(.sectionOrder, sectionOrder)
 
@@ -718,6 +721,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(showsCast, forKey: .showsCast)
         try container.encode(showsInformation, forKey: .showsInformation)
         try container.encode(showsRelated, forKey: .showsRelated)
+        try container.encode(showsWatchAnywhere, forKey: .showsWatchAnywhere)
         try container.encode(sectionOrder, forKey: .sectionOrder)
 
         try container.encode(startTab, forKey: .startTab)
@@ -737,7 +741,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
              progressColour, progressThickness, showsTimeLeft
         case heroScale, heroAutoAdvance, showsPageDots
         case hidesSpoilers, spoilerStills, spoilerSynopses, spoilerTitles, expandsSynopsis, showsReviews, showsCast, showsInformation,
-             showsRelated, sectionOrder
+             showsRelated, showsWatchAnywhere, sectionOrder
         case startTab, zoomTransitions, animationSpeed, phoneTabTitles, minimisesTabBar, showsContinueBar
         /// The fixed steps saved before the sliders, read once and never written.
         case legacyCardScale = "cardScale", legacyCorners = "corners", legacyDensity = "density", legacyArtworkOutline = "artworkOutline"
@@ -771,7 +775,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             && lhs.spoilerSynopses == rhs.spoilerSynopses && lhs.spoilerTitles == rhs.spoilerTitles
         let sections: Bool = lhs.expandsSynopsis == rhs.expandsSynopsis && lhs.showsReviews == rhs.showsReviews
             && lhs.showsCast == rhs.showsCast && lhs.showsInformation == rhs.showsInformation && lhs.showsRelated == rhs.showsRelated
-            && lhs.sectionOrder == rhs.sectionOrder
+            && lhs.showsWatchAnywhere == rhs.showsWatchAnywhere && lhs.sectionOrder == rhs.sectionOrder
         let navigation: Bool = lhs.startTab == rhs.startTab && lhs.zoomTransitions == rhs.zoomTransitions
             && lhs.animationSpeed == rhs.animationSpeed
         let tabs: Bool = lhs.phoneTabTitles == rhs.phoneTabTitles && lhs.minimisesTabBar == rhs.minimisesTabBar

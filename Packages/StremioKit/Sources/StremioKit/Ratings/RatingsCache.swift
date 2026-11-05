@@ -12,15 +12,18 @@ public struct CachedRating: Sendable, Codable, Equatable {
     public var episodeIDs: [Int: String]?
     /// All episode numbers in the season response, so a partially filled season expires sooner.
     public var episodeNumbers: Set<Int>?
+    /// The film's best disc by Best Blurays, for the poster's disc mark. Nil when the site names none, so that answer is kept too.
+    public var bestDisc: BestDiscFormat?
 
     public init(rating: Double?, fetchedAt: Date, reviews: ReviewRatings? = nil, episodes: [Int: Double]? = nil,
-                episodeIDs: [Int: String]? = nil, episodeNumbers: Set<Int>? = nil) {
+                episodeIDs: [Int: String]? = nil, episodeNumbers: Set<Int>? = nil, bestDisc: BestDiscFormat? = nil) {
         self.rating = rating
         self.fetchedAt = fetchedAt
         self.reviews = reviews
         self.episodes = episodes
         self.episodeIDs = episodeIDs
         self.episodeNumbers = episodeNumbers
+        self.bestDisc = bestDisc
     }
 }
 

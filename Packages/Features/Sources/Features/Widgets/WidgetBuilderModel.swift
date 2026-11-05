@@ -354,26 +354,44 @@ public final class WidgetBuilderModel {
         ]
     }
 
-    /// A random source in a few words: "Off", "All Sources", "3 Sources".
+    /// A random source in a few words: "Off", "All Sources", "All except 2", "3 Sources".
     public static func randomSourceText(_ random: RandomSource?) -> String {
         guard let random else { return "Off" }
-        if random.usesAllSources { return "All Sources" }
+        if random.usesAllSources { return random.excluded.isEmpty ? "All Sources" : "All except \(random.excluded.count)" }
         return random.sources.count == 1 ? "1 Source" : "\(random.sources.count) Sources"
     }
 
-    /// The catalogs a random source can pick from: every catalog of the installed addons.
-    public var randomSourceChoices: [WidgetsManagerViewModel.CatalogChoice] { manager.catalogChoices }
+    /// A source a random source can pick, with the name and the line under it that the list shows.
+    public struct RandomSourceOption: Identifiable, Hashable, Sendable {
+        public let source: WidgetSource
+        public let title: String
+        public let subtitle: String
 
-    /// Turns the random source on (picking from every catalog, or keeping its sources) or off.
+        public var id: WidgetSource { source }
+    }
+
+    /// Every source a random source can pick from: the browsable catalogs of the installed addons, then Trakt's feeds once Trakt has a
+    /// client ID.
+    public var randomSourceOptions: [RandomSourceOption] {
+        manager.catalogChoices.map { RandomSourceOption(source: .addonCatalog($0.reference), title: $0.title, subtitle: $0.addonName) }
+            + manager.randomTraktFeeds.map { RandomSourceOption(source: .traktFeed($0), title: $0.title, subtitle: "Trakt") }
+    }
+
+    /// Turns the random source on (picking from every source, or keeping its sources) or off.
     public func setRandomSource(_ random: RandomSource?) {
         updateRow { $0.randomSource = random }
     }
 
-    /// Adds a source to the ones the random source picks from, or takes it off. With none left, it picks from every catalog.
+    /// Puts a source in the random source's pick or takes it out. From Off, the source becomes the only one picked. See
+    /// `RandomSource.toggle` for picking from every source.
     public func toggleRandomSource(_ source: WidgetSource) {
+        let all = randomSourceOptions.map(\.source)
         updateRow { row in
-            var random = row.randomSource ?? RandomSource()
-            if let index = random.sources.firstIndex(of: source) { random.sources.remove(at: index) } else { random.sources.append(source) }
+            guard var random = row.randomSource else {
+                row.randomSource = RandomSource(sources: [source])
+                return
+            }
+            random.toggle(source, among: all)
             row.randomSource = random
         }
     }

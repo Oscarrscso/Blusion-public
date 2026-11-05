@@ -75,6 +75,14 @@ struct HomeView: View {
                     do { try await Task.sleep(for: .seconds(interval)) } catch { return }
                 }
             }
+            // A layout saved on the user's other device shows when Home comes forward, or within a minute while it stays in front.
+            .task(id: scenePhase == .active && router.tab == .home) {
+                guard scenePhase == .active, router.tab == .home else { return }
+                while !Task.isCancelled {
+                    await model.takeInSharedLayout()
+                    do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                }
+            }
             .onChange(of: actions?.watchedIdentities) { Task { await model.refreshContinueWatching() } }
             .onChange(of: router.userStateRevision) { _, _ in Task { await model.refreshContinueWatching() } }
             // Command-R on Mac reloads everything Home shows (see `HomeViewModel.refresh()`).

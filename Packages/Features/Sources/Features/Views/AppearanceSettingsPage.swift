@@ -451,6 +451,11 @@ private struct AppearanceCardsPage: View {
                     Task { await model.setShowsPosterRatings(value) }
                 }))
                 .accessibilityIdentifier("settings.posterRatings")
+                Toggle("Best disc on posters", isOn: Binding(get: { model.settings.showsBestDiscOnPosters }, set: { value in
+                    Haptics.play(.choices)
+                    Task { await model.setShowsBestDiscOnPosters(value) }
+                }))
+                .accessibilityIdentifier("settings.bestDiscOnPosters")
                 Toggle("Coloured rating logos", isOn: Binding(get: { model.settings.showsColouredRatingLogos }, set: { value in
                     Haptics.play(.choices)
                     Task { await model.setShowsColouredRatingLogos(value) }
@@ -539,6 +544,7 @@ private struct AppearanceTitlePagesPage: View {
                 controls.toggle("Cast & Crew", \.showsCast, id: "cast")
                 controls.toggle("Information", \.showsInformation, id: "information")
                 controls.toggle("More Like This", \.showsRelated, id: "related")
+                controls.toggle("Watch Anywhere", \.showsWatchAnywhere, id: "watchAnywhere")
             }
         }
     }

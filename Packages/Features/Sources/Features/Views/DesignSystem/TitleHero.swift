@@ -5,8 +5,11 @@ import SwiftUI
 /// The portrait hero's numbers, shared by Home's spotlight and the title page so that a title looks the same on both, and opening it from the
 /// spotlight does not jump. Both screens read them; change one here and both move together.
 enum TitleHero {
-    /// On a Mac title page, the widest the synopsis and the trailer's panel under the hero run, and the stream list in their place.
+    /// On a Mac title page, the widest the stream list runs in place of the details under the hero.
     static let macDetailsWidth: CGFloat = 640
+    /// On a Mac title page, the one width of the column over the picture (title, overview, ratings, Play row) and of the trailer, reviews,
+    /// synopsis and information under the hero, so they share one straight right edge.
+    static let macBlockWidth: CGFloat = 480
     /// The desktop artwork's height, also used to bound its scroll observation.
     static func macHeight(pageHeight: CGFloat) -> CGFloat { min(max(pageHeight * 0.62, 440), 620) + 80 }
     /// The portrait picture is drawn this much larger than its frame (see `pictureHeight`).

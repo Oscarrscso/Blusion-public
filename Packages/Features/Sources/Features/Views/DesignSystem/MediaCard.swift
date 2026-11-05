@@ -227,7 +227,7 @@ struct MediaCard: View {
                                      logo: item.logo ?? resolvedHeroArtwork?.logo,
                                      maxPixelSize: PosterQuality.heroPosterPixelSize,
                                      logoAlignment: usesLandscapeArtwork ? .center : .bottom,
-                                     logoBottomInset: usesLandscapeArtwork ? 0 : (showsRating && ratingsStore?.isEnabled == true ? Theme.Spacing.xl + Theme.Spacing.s : Theme.Spacing.m),
+                                     logoBottomInset: usesLandscapeArtwork ? 0 : (showsRating && (ratingsStore?.isEnabled == true || ratingsStore?.showsBestDisc == true) ? Theme.Spacing.xl + Theme.Spacing.s : Theme.Spacing.m),
                                      showsLogo: usesLandscapeArtwork || resolvedHeroArtwork?.portraitHidesLogo != true,
                                      acceptsAnyCachedSize: false, usesHeroLogo: true, artworkIsReady: $heroImageIsReady)
                         .id(heroArtworkURL)

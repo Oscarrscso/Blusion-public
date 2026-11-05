@@ -150,6 +150,11 @@ public final class HomeViewModel {
         }
     }
 
+    /// Shows a layout the user saved on their other device since this one last looked (see `SyncedWidgetStore`).
+    public func takeInSharedLayout() async {
+        if await services.widgets.takeInSharedLayout() { await load() }
+    }
+
     /// Forgets every cached page, then loads again. The rows keep what they show until the new items arrive.
     public func refresh() async {
         await services.posterRatings.refresh()
@@ -539,7 +544,11 @@ public final class HomeViewModel {
         var states = saved
         var random = SystemRandomNumberGenerator()
         let now = Date()
-        let picked = WidgetShuffling.pickingSources(widgets, addons: addons, states: &states, now: now, calendar: .current, random: &random)
+        // Trakt's feeds are in the pick only once Trakt has a client ID, as the widgets page shows them.
+        let clientID = await TraktClient.clientID(in: services.settings)
+        let traktFeeds = clientID.isEmpty ? [] : TraktFeed.allCases
+        let picked = WidgetShuffling.pickingSources(widgets, addons: addons, traktFeeds: traktFeeds, states: &states, now: now,
+                                                    calendar: .current, random: &random)
         let ordered = WidgetShuffling.ordered(picked, settings: settings, states: &states, now: now, calendar: .current, random: &random)
         itemSeeds = WidgetShuffling.itemSeeds(for: ordered, settings: settings, states: &states, now: now, calendar: .current,
                                               random: &random)

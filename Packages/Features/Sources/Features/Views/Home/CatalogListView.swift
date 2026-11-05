@@ -130,12 +130,16 @@ struct CatalogListView: View {
         }
     }
 
-    /// Order, shuffle, type, release window and rating, in the filter block the Library and Discover share (`BrowseFilterBar`), so
-    /// restyling that block restyles this one too. Every choice works on what is loaded, so it suits any source.
+    /// Type, genre, release window, rating and order, in the filter block the Library and Discover share (`BrowseFilterBar`), with the
+    /// same four menus as Discover. Every choice works on what is loaded, so it suits any source.
     private var filters: some View {
         @Bindable var model = model
         let types = model.loadedTypes
+        let genres = model.loadedGenres
         var chips: [ActiveFilterChip] = []
+        if let genre = model.filter.genre {
+            chips.append(ActiveFilterChip(id: "genre", label: genre) { model.filter.genre = nil })
+        }
         if let year = model.filter.yearLabel() {
             chips.append(ActiveFilterChip(id: "year", label: year) { model.filter.minimumYear = nil; model.filter.maximumYear = nil })
         }
@@ -144,37 +148,45 @@ struct CatalogListView: View {
                 model.filter.minimumRating = nil
             })
         }
-        let mixed = types.contains("movie") && types.contains("series")
+        // A list of movies and series has the selector from the start, so the placeholders are not pushed down when the titles arrive.
+        let mixed = (types.contains("movie") && types.contains("series")) || (model.items.isEmpty && model.expectsMixedTypes)
         return BrowseFilterBar(kinds: mixed ? .init(titles: ["All", "Movies", "Series"], selection: Binding {
             model.filter.type == "movie" ? 1 : model.filter.type == "series" ? 2 : 0
         } set: { index in
             model.filter.type = index == 1 ? "movie" : index == 2 ? "series" : nil
         }, identifier: "catalogList.filter.type") : nil, chips: chips, identifier: "catalogList", clearAll: { model.filter.clearFilters() }) {
             Menu {
-                Picker("Sort by", selection: $model.filter.sort) {
-                    ForEach(CatalogListSort.allCases) { Label($0.title, systemImage: $0.systemImage).tag($0) }
+                Picker("Genre", selection: $model.filter.genre) {
+                    Text("Any").tag(String?.none)
+                    ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
-                if model.filter.sort == .shuffle {
-                    Divider()
-                    Button("Shuffle Again", systemImage: "shuffle") { model.reshuffle() }
-                        .accessibilityIdentifier("catalogList.sort.reshuffle")
-                }
-                Divider()
-                RatingPicker(threshold: $model.filter.minimumRating)
             } label: {
-                menuLabel(model.filter.sort.title, systemImage: model.filter.sort == .shuffle ? "shuffle" : "arrow.up.arrow.down",
-                          isActive: model.filter.sort != .original)
+                menuLabel("Genre", systemImage: "tag", isActive: model.filter.genre != nil)
             }
-            .accessibilityLabel("Sort by \(model.filter.sort.title)")
-            .accessibilityIdentifier("catalogList.sort")
+            .disabled(genres.isEmpty)
+            .accessibilityIdentifier("catalogList.filter.genre")
             Menu {
                 ReleaseYearOptions(minimumYear: $model.filter.minimumYear, maximumYear: $model.filter.maximumYear,
                                    identifier: "catalogList.filter.year")
             } label: {
-                menuLabel(model.filter.yearLabel() ?? "Any Time", systemImage: "calendar",
-                          isActive: model.filter.minimumYear != nil || model.filter.maximumYear != nil)
+                menuLabel("Year", systemImage: "calendar", isActive: model.filter.minimumYear != nil || model.filter.maximumYear != nil)
             }
             .accessibilityIdentifier("catalogList.filter.year")
+            Menu {
+                RatingPicker(threshold: $model.filter.minimumRating)
+            } label: {
+                menuLabel("Rating", systemImage: "star.fill", isActive: model.filter.minimumRating != nil)
+            }
+            .accessibilityIdentifier("catalogList.filter.rating")
+            Menu {
+                Picker("Sort by", selection: $model.filter.sort) {
+                    ForEach(CatalogListSort.allCases.filter { $0 != .shuffle }) { Label($0.title, systemImage: $0.systemImage).tag($0) }
+                }
+            } label: {
+                menuLabel(model.filter.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.filter.sort != .original)
+            }
+            .accessibilityLabel("Sort by \(model.filter.sort.title)")
+            .accessibilityIdentifier("catalogList.sort")
         }
         .onChange(of: model.filter) { _, _ in Haptics.play(.choices) }
         .task(id: model.filter) { await model.fillForFilter() }

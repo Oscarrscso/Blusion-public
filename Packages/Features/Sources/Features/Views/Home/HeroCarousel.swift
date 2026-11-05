@@ -113,7 +113,7 @@ struct HeroCarousel: View {
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .disabled(!enabled)
         // A hidden chevron must not take taps meant for the picture beneath it.
         .allowsHitTesting(enabled)

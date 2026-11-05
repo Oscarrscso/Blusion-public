@@ -60,6 +60,26 @@ struct StreamProviderBox: View {
     }
 }
 
+/// A service's logo filling its cell on the service's colour, for a grid of pictures (a collection's first four on its widgets page card).
+/// VoiceOver reads the service's name.
+struct StreamProviderTile: View {
+    let provider: StreamProvider
+
+    var body: some View {
+        Image(provider.logoName)
+            .renderingMode(.template)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .padding(14)
+            .scaleEffect(provider.logoScale)
+            .foregroundStyle(provider.markInk)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(provider.tint)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(provider.name)
+    }
+}
+
 /// A disc's box, in the place a service's box takes: the Blu-ray mark, or the Ultra HD Blu-ray mark for a 4K REMUX, on the disc's own colour.
 struct StreamDiscBox: View {
     @Environment(\.layoutMetrics) private var metrics

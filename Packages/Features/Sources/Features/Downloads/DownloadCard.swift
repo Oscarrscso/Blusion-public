@@ -64,7 +64,7 @@ struct DownloadCard: View {
             NavigationLink(value: titlePreview) {
                 backdrop.contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
             .accessibilityHidden(true)
         }
         .glassHairline(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
@@ -78,7 +78,7 @@ struct DownloadCard: View {
                 .frame(width: thumbnailWidth, height: thumbnailWidth / CardAspect.poster.ratio)
                 .mediaArtwork(cornerRadius: Theme.Radius.small)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .accessibilityLabel("Open \(titlePreview.name)")
     }
 

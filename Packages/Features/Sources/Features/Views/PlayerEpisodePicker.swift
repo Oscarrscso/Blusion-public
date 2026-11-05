@@ -81,7 +81,7 @@ struct PlayerEpisodePicker: View {
             Button { Haptics.play(.playerControls); onClose() } label: {
                 Image(systemName: "xmark").frame(width: 32, height: 32)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.hoverGlass)
             .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
             #if !targetEnvironment(macCatalyst)
             .keyboardShortcut(.escape, modifiers: [])
@@ -179,7 +179,7 @@ struct PlayerEpisodePicker: View {
             .padding(.vertical, 8)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .disabled(airsLater || model.preparingID != nil)
         .opacity(airsLater ? 0.45 : 1)
         .accessibilityIdentifier("player.episode.\(video.id)")

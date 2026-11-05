@@ -29,12 +29,14 @@ import StremioKitTestSupport
         #expect(edition.uhdTier == "Solid")
         #expect(edition.videoNotes?.hasPrefix("Caveat: mild DNR throughout the transfer") == true, "a link inside the sentence does not split it")
         #expect(edition.is4K)
+        #expect(edition.discFormat == .uhdBluRay)
     }
 
     @Test func aReleaseSpreadAcrossLinksReadsAsOneLine() throws {
         let hoop = try #require(try parse("hoop-dreams-1994").edition)
         #expect(hoop.release == "Criterion Blu-ray and UK Dogwoof Blu-ray probably similar")
         #expect(!hoop.is4K && hoop.uhdTier == nil && hoop.videoNotes == nil)
+        #expect(hoop.discFormat == .bluRay)
         let oz = try #require(try parse("wizard-of-oz-1939").edition)
         #expect(oz.release.hasPrefix("2D: Warner Bros 4K Blu-ray") && oz.release.contains("3D Blu-ray"))
     }

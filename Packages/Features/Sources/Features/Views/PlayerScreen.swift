@@ -668,7 +668,7 @@ struct PlayerContent: View {
                         .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .foregroundStyle(.white)
                 .keyboardShortcut("s", modifiers: [])
                 .accessibilityIdentifier("player.skipMarker")
@@ -1168,7 +1168,7 @@ struct PlayerContent: View {
                         .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityIdentifier("player.upNext.credits")
                 Button {
                     Haptics.play(.playerControls)
@@ -1186,7 +1186,7 @@ struct PlayerContent: View {
                         .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .keyboardShortcut("n", modifiers: [])
                 .accessibilityIdentifier("player.upNext.play")
                 .accessibilityValue("Plays in \(Int((8 * (1 - progress)).rounded(.up))) seconds")

@@ -143,6 +143,7 @@ extension TMDbRatings {
         if active(.providers) {
             add("with_watch_providers", joinedIDs(query.providers, separator: "|"))
             add("watch_region", query.region ?? defaultRegion)
+            add("without_watch_providers", query.excludedProviders.isEmpty ? nil : joinedIDs(query.excludedProviders, separator: "|"))
         }
         add("with_cast", active(.cast) ? joinedIDs(query.cast, separator: ",") : nil)
         add("with_crew", active(.crew) ? joinedIDs(query.crew, separator: ",") : nil)
@@ -216,6 +217,7 @@ extension TMDbRatings {
     public func discoverItems(_ query: TMDbDiscoverQuery, limit: Int, skip: Int, defaultRegion: String, today: Date = Date(),
                               calendar: Calendar = .current, imdb: (any IMDbDataset)? = nil) async throws -> [MetaPreview] {
         guard limit > 0, credential != nil else { return [] }
+        let query = StreamProvider.catalogRequest(for: query)
         if query.spansBothKinds {
             // A title that names neither films nor shows asks for both kinds, and interleaves them, so a show is in the list as a film is.
             var films = query

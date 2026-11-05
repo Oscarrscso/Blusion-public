@@ -1,13 +1,16 @@
 #if canImport(UIKit)
+import StremioKit
 import SwiftUI
 
 /// The TV app's category tile (a genre, a streaming service, a decade): 16:9 with the name bottom-left in bold white. With an image
 /// the name sits over a fade at the bottom of the picture (unless `hideTitle`); without one the tile is a dark gradient derived
 /// from the name, so "Action" always gets the same colours. `hideTitle` is ignored without an image: the name is then the tile's
-/// only content. `width` defaults to the layout's tile width; `stretched()` takes a grid column's width instead.
+/// only content. A streaming service's tile is its logo on the service's colour, in place of a picture and the name. `width` defaults
+/// to the layout's tile width; `stretched()` takes a grid column's width instead.
 struct CollectionTile: View {
     let title: String
     let imageURL: URL?
+    let provider: StreamProvider?
     let aspect: CardAspect
     let hideTitle: Bool
     let width: CGFloat?
@@ -15,9 +18,11 @@ struct CollectionTile: View {
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.displayScale) private var displayScale
 
-    init(title: String, imageURL: URL? = nil, aspect: CardAspect = .wide, hideTitle: Bool = false, width: CGFloat? = nil) {
+    init(title: String, imageURL: URL? = nil, provider: StreamProvider? = nil, aspect: CardAspect = .wide, hideTitle: Bool = false,
+         width: CGFloat? = nil) {
         self.title = title
         self.imageURL = imageURL
+        self.provider = provider
         self.aspect = aspect
         self.hideTitle = hideTitle
         self.width = width
@@ -60,7 +65,21 @@ struct CollectionTile: View {
 
     @ViewBuilder
     private var face: some View {
-        if let imageURL {
+        if let provider {
+            ZStack {
+                provider.tint
+                LinearGradient(colors: [.white.opacity(0.18), .clear, .black.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                GeometryReader { proxy in
+                    Image(provider.logoName)
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(provider.markInk)
+                        .frame(maxWidth: proxy.size.width * 0.52 * provider.logoScale, maxHeight: proxy.size.height * 0.36 * provider.logoScale)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+            }
+        } else if let imageURL {
             // The longer edge: a poster-shaped tile is taller than it is wide.
             let longestEdge = max(resolvedWidth, resolvedWidth / aspect.ratio)
             ArtworkImage(url: imageURL, title: title, maxPixelSize: min((longestEdge * displayScale).rounded(.up), 1200))
@@ -82,7 +101,7 @@ struct CollectionTile: View {
 
     @ViewBuilder
     private var label: some View {
-        if imageURL == nil || !hideTitle {
+        if provider == nil, imageURL == nil || !hideTitle {
             Text(title)
                 .font(.title3.bold())
                 .foregroundStyle(.white)
@@ -101,15 +120,6 @@ struct CollectionTile: View {
                     }
                 }
         }
-    }
-}
-
-extension CollectionTile {
-    /// The colour and glyph a tile without a picture uses for `title`, for a compact row that stands for the same category. A category
-    /// with no glyph of its own gets a plain grid.
-    static func accent(for title: String) -> (colour: Color, symbol: String) {
-        let look = TileLook.look(for: title)
-        return (look.top, look.symbol ?? "square.grid.2x2.fill")
     }
 }
 

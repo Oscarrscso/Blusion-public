@@ -31,6 +31,16 @@ struct CatalogListFilterTests {
         #expect(CatalogListFiltering.apply(CatalogListFilter(sort: .oldest), to: items).map(\.id) == ["b", "a", "c", "d"])
     }
 
+    @Test func genreKeepsTitlesListingItWhateverItsCase() {
+        var action = preview("e", "movie", name: "Heat")
+        action.genres = ["Action", "Crime"]
+        var drama = preview("f", "movie", name: "Whiplash")
+        drama.genres = ["Drama"]
+        let filter = CatalogListFilter(genre: "action")
+        #expect(CatalogListFiltering.apply(filter, to: [action, drama, preview("g")]).map(\.id) == ["e"])
+        #expect(filter.isFiltering)
+    }
+
     @Test func titleSortsAlphabetically() {
         #expect(CatalogListFiltering.apply(CatalogListFilter(sort: .title), to: items).map(\.id) == ["b", "a", "c", "d"])
     }

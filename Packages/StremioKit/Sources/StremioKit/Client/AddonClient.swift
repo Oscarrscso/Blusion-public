@@ -66,6 +66,27 @@ public final class AddonClient: Sendable {
         }
     }
 
+    /// POST of `body` (JSON) with a deadline and status mapping, as `get` does, but tried once: a POST is not retried.
+    public func post(_ url: URL, body: Data, headers: [String: String] = [:], limits: FetchLimits? = nil,
+                     timeout: TimeInterval? = nil) async throws -> HTTPResult {
+        let limits = limits ?? FetchLimits(maxBytes: configuration.maxBytes, maxRedirects: configuration.maxRedirects)
+        let timeout = timeout ?? configuration.timeout
+        let started = Date()
+        var headers = headers
+        if headers["Content-Type"] == nil { headers["Content-Type"] = "application/json" }
+        do {
+            let result = try await withDeadline(seconds: timeout) { [self, headers] in
+                try await attemptOnce(url, method: "POST", body: body, headers: headers, limits: limits, timeout: timeout)
+            }
+            logger.log(.debug, "POST \(Redactor.redact(url)) -> \(result.response.statusCode) (\(result.data.count) B, \(Self.millis(since: started)) ms)")
+            return result
+        } catch {
+            let mapped = AddonError.from(error)
+            logger.log(.warning, "POST \(Redactor.redact(url)) failed: \(mapped.shortDescription) after \(Self.millis(since: started)) ms")
+            throw mapped
+        }
+    }
+
     /// First bytes of a resource, for container sniffing. Asks for a range, and cuts the body short if the server ignores it.
     public func prefix(of url: URL, bytes: Int = 4096, headers: [String: String] = [:]) async throws -> (data: Data, contentType: String?) {
         var headers = headers
@@ -112,10 +133,12 @@ public final class AddonClient: Sendable {
         }
     }
 
-    private func attemptOnce(_ url: URL, headers: [String: String], limits: FetchLimits, timeout: TimeInterval) async throws -> HTTPResult {
+    private func attemptOnce(_ url: URL, method: String = "GET", body: Data? = nil, headers: [String: String], limits: FetchLimits,
+                             timeout: TimeInterval) async throws -> HTTPResult {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { throw AddonError.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = "GET"
+        request.httpMethod = method
+        request.httpBody = body
         request.setValue(configuration.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json, */*;q=0.5", forHTTPHeaderField: "Accept")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }

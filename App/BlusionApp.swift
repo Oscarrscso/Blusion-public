@@ -107,6 +107,7 @@ struct RootView: View {
             let settings = await environment.services.settings.load()
             environment.services.posterRatings.isEnabled = settings.showsPosterRatings
             environment.services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
+            environment.services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
             await reloadReviewServices()
             await environment.seedDefaultAddons()
             #if DEBUG
@@ -133,6 +134,20 @@ struct RootView: View {
         // An app left open for days is still checked once a day: coming back to the front asks again, and the 24-hour rule decides.
         .onChange(of: scenePhase) { _, phase in
             if phase == .active, isReady { refreshIMDbDataset() }
+            guard isReady else { return }
+            let sync = environment.services.traktSync
+            if phase == .background {
+                // Playback positions wait before being sent; leaving the app would otherwise strand them until it is next opened.
+                let application = UIApplication.shared
+                var task = UIBackgroundTaskIdentifier.invalid
+                task = application.beginBackgroundTask { application.endBackgroundTask(task) }
+                Task {
+                    await sync.flush()
+                    application.endBackgroundTask(task)
+                }
+            } else if phase == .active {
+                Task { await sync.resume() }
+            }
         }
         .onChange(of: isReady) { _, ready in
             guard ready else { return }

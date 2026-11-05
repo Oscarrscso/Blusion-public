@@ -57,31 +57,35 @@ public enum CatalogListRecent: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// What the grid behind "See All" shows of what it has loaded: its order, and the type, release years and rating it is narrowed to. Every
+/// What the grid behind "See All" shows of what it has loaded: its order, and the type, genre, release years and rating it is narrowed to. Every
 /// choice works on the loaded titles, so it applies to any source, addon, TMDB or Trakt alike.
 public struct CatalogListFilter: Equatable, Sendable {
     public var sort: CatalogListSort = .original
     /// "movie" or "series"; nil shows both.
     public var type: String?
+    /// A genre the titles list, matched whatever its case; nil shows every genre.
+    public var genre: String?
     public var minimumYear: Int?
     public var maximumYear: Int?
     /// Out of 10, against the IMDb rating the source sent.
     public var minimumRating: Double?
 
-    public init(sort: CatalogListSort = .original, type: String? = nil, minimumYear: Int? = nil, maximumYear: Int? = nil,
-                minimumRating: Double? = nil) {
+    public init(sort: CatalogListSort = .original, type: String? = nil, genre: String? = nil, minimumYear: Int? = nil,
+                maximumYear: Int? = nil, minimumRating: Double? = nil) {
         self.sort = sort
         self.type = type
+        self.genre = genre
         self.minimumYear = minimumYear
         self.maximumYear = maximumYear
         self.minimumRating = minimumRating
     }
 
     /// A narrowing choice is on. The order is not a filter: it never hides a title.
-    public var isFiltering: Bool { type != nil || minimumYear != nil || maximumYear != nil || minimumRating != nil }
+    public var isFiltering: Bool { type != nil || genre != nil || minimumYear != nil || maximumYear != nil || minimumRating != nil }
 
     public mutating func clearFilters() {
         type = nil
+        genre = nil
         minimumYear = nil
         maximumYear = nil
         minimumRating = nil
@@ -107,6 +111,7 @@ public struct CatalogListFilter: Equatable, Sendable {
 public enum CatalogListFiltering {
     public static func matches(_ item: MetaPreview, _ filter: CatalogListFilter) -> Bool {
         if let type = filter.type, item.type.lowercased() != type { return false }
+        if let genre = filter.genre?.lowercased(), !item.genres.contains(where: { $0.lowercased() == genre }) { return false }
         if filter.minimumYear != nil || filter.maximumYear != nil {
             guard let year = LibraryFiltering.year(from: item.releaseInfo) else { return false }
             if let low = filter.minimumYear, year < low { return false }

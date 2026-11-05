@@ -120,36 +120,19 @@ struct DiscoverView: View {
             model.minimumRating = nil
             if model.selectedGenre != nil { Task { await model.select(genre: nil) } }
         }) {
-            if !model.genres.isEmpty {
-                Menu {
-                    Button { Task { await model.select(genre: nil) } } label: {
-                        if model.selectedGenre == nil { Label("All genres", systemImage: "checkmark") } else { Text("All genres") }
-                    }
-                    ForEach(model.genres, id: \.self) { genre in
-                        Button {
-                            Task { await model.select(genre: genre) }
-                        } label: {
-                            if model.selectedGenre == genre { Label(genre, systemImage: "checkmark") } else { Text(genre) }
-                        }
-                    }
-                } label: {
-                    FilterMenuLabel("Genre", systemImage: "tag", isActive: model.selectedGenre != nil,
-                                    minHeight: BrowseFilterBar<EmptyView>.menuHeight)
-                }
-                .accessibilityIdentifier("discover.genreMenu")
-            }
+            // Filters first, then the order, the same as the Library: two even rows on iPhone, one on Mac.
+            let genres = model.genres
             Menu {
-                Picker("Sort by", selection: $model.sort) {
-                    ForEach(CatalogListSort.allCases.filter { $0 != .shuffle }) {
-                        Label($0.title, systemImage: $0.systemImage).tag($0)
-                    }
+                Picker("Genre", selection: Binding<String?> { model.selectedGenre } set: { genre in Task { await model.select(genre: genre) } }) {
+                    Text("Any").tag(String?.none)
+                    ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
             } label: {
-                FilterMenuLabel(model.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.sort != .original,
+                FilterMenuLabel("Genre", systemImage: "tag", isActive: model.selectedGenre != nil,
                                 minHeight: BrowseFilterBar<EmptyView>.menuHeight)
             }
-            .accessibilityLabel("Sort by \(model.sort.title)")
-            .accessibilityIdentifier("discover.sort")
+            .disabled(genres.isEmpty)
+            .accessibilityIdentifier("discover.genreMenu")
             Menu {
                 ReleaseYearOptions(minimumYear: $model.minimumYear, maximumYear: $model.maximumYear,
                                    identifier: "discover.filter.year")
@@ -165,6 +148,18 @@ struct DiscoverView: View {
                                 minHeight: BrowseFilterBar<EmptyView>.menuHeight)
             }
             .accessibilityIdentifier("discover.filter.rating")
+            Menu {
+                Picker("Sort by", selection: $model.sort) {
+                    ForEach(CatalogListSort.allCases.filter { $0 != .shuffle }) {
+                        Label($0.title, systemImage: $0.systemImage).tag($0)
+                    }
+                }
+            } label: {
+                FilterMenuLabel(model.sort.title, systemImage: "arrow.up.arrow.down", isActive: model.sort != .original,
+                                minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+            }
+            .accessibilityLabel("Sort by \(model.sort.title)")
+            .accessibilityIdentifier("discover.sort")
         }
         .onChange(of: model.selectedGenre) { _, _ in Haptics.play(.choices) }
         .onChange(of: model.selectedType) { _, _ in Haptics.play(.choices) }

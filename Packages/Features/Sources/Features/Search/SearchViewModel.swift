@@ -40,15 +40,18 @@ public final class SearchViewModel {
     public private(set) var aiIssue: AISearchUpdate.Issue?
     private var aiRequestID = UUID()
 
-    /// A genre of one catalog, offered on the idle Search page. `source` opens that catalog filtered to the genre.
+    /// A category on the idle Search page. `sources` are the movie and series catalogs filtered to the genre, merged when it opens.
     public struct GenreShortcut: Identifiable, Hashable, Sendable {
         public let name: String
-        public let source: WidgetSource
-        public var id: String { name }
+        public let sources: [WidgetSource]
+        /// Movie/TV still for recognised genres; nil keeps the coloured tile for other addon genres.
+        public var imageURL: URL?
+        public var id: String { name.lowercased() }
 
-        public init(name: String, source: WidgetSource) {
+        public init(name: String, sources: [WidgetSource], imageURL: URL? = nil) {
             self.name = name
-            self.source = source
+            self.sources = sources
+            self.imageURL = imageURL
         }
     }
 
@@ -58,13 +61,13 @@ public final class SearchViewModel {
     public private(set) var phase: Phase = .idle
     /// False when no enabled addon offers a searchable catalog. A search then does no network work. See `refreshAvailability()`.
     public private(set) var hasSearchableAddons = true
-    /// Genres to browse from the idle Search page. Filled by `refreshAvailability()`.
-    public private(set) var browseGenres: [GenreShortcut] = []
+    /// The categories of the idle Search page: each genre once, open on its movies and series together. Filled by `refreshAvailability()`.
+    public private(set) var categories: [GenreShortcut] = []
     /// The last titles opened from Search, newest first, at most 4. Kept in the history store.
     public private(set) var recentQueries: [String]
 
     private static let maxRecents = 4
-    private static let maxGenres = 16
+    private static let maxGenres = 30
 
     private let services: AppServices
     private let debounce: Duration
@@ -128,7 +131,7 @@ public final class SearchViewModel {
         let addons = await services.browse.searchableAddons()
         hasSearchableAddons = !addons.isEmpty
         let sources = await services.browse.catalogSources()
-        browseGenres = Self.genreShortcuts(in: sources)
+        categories = Self.categories(in: sources)
         availabilityLoaded = true
     }
 
@@ -324,18 +327,35 @@ public final class SearchViewModel {
         return key.isEmpty ? "other" : key
     }
 
-    /// Up to 16 genres of one catalog: the first movie catalog that has genre options, else the first catalog that has any.
-    /// Blank and repeated genres are left out, since each one is an id in the Search page.
-    static func genreShortcuts(in sources: [CatalogSource]) -> [GenreShortcut] {
-        let withGenres = sources.filter { !$0.catalog.genreOptions.isEmpty }
-        guard let source = withGenres.first(where: { $0.catalog.type == "movie" }) ?? withGenres.first else { return [] }
-        var seen = Set<String>()
-        let names = source.catalog.genreOptions.filter { name in
-            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && seen.insert(name).inserted
+    /// The genres of the first movie catalog and of the first series catalog that have genre options, each name once whatever its case:
+    /// the movie genres in their catalog's order, then the series-only ones. A genre both catalogs list opens on both. With neither
+    /// catalog, the genres of the first catalog that has any. Blanks, years and orders ("Date Added") are left out, at most 30.
+    static func categories(in sources: [CatalogSource]) -> [GenreShortcut] {
+        // A catalog whose options are mostly orders ("Shortest", "Random") has no genres, so the next one with genres is used.
+        let withGenres = sources.filter { !DiscoverViewModel.genreOptions(of: $0.catalog).isEmpty }
+        var chosen = ["movie", "series"].compactMap { type in withGenres.first { $0.catalog.type == type } }
+        if chosen.isEmpty, let any = withGenres.first { chosen = [any] }
+        var order: [String] = []
+        var names: [String: String] = [:]
+        var sourcesByKey: [String: [WidgetSource]] = [:]
+        for source in chosen {
+            for name in DiscoverViewModel.genreOptions(of: source.catalog) {
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = trimmed.lowercased()
+                let reference = AddonCatalogReference(manifestID: nil, host: source.addon.host, catalogType: source.catalog.type,
+                                                      catalogID: source.catalog.id, genre: name)
+                if names[key] == nil {
+                    order.append(key)
+                    names[key] = trimmed
+                }
+                if sourcesByKey[key]?.contains(.addonCatalog(reference)) != true {
+                    sourcesByKey[key, default: []].append(.addonCatalog(reference))
+                }
+            }
         }
-        return names.prefix(maxGenres).map { name in
-            GenreShortcut(name: name, source: .addonCatalog(AddonCatalogReference(
-                manifestID: nil, host: source.addon.host, catalogType: source.catalog.type, catalogID: source.catalog.id, genre: name)))
+        return order.prefix(maxGenres).compactMap { key in
+            guard let name = names[key], let sources = sourcesByKey[key] else { return nil }
+            return GenreShortcut(name: name, sources: sources, imageURL: GenreArtwork.imageURL(for: name))
         }
     }
 

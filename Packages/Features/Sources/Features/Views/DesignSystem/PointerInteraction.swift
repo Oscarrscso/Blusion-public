@@ -1,6 +1,38 @@
 #if canImport(UIKit)
 import SwiftUI
 
+/// Keep plain buttons' native press behaviour and give their labels visible Mac hover feedback.
+struct HoverPlainButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button(role: configuration.role, action: configuration.trigger) {
+            configuration.label.pointerFeedback()
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension PrimitiveButtonStyle where Self == HoverPlainButtonStyle {
+    static var hoverPlain: HoverPlainButtonStyle { HoverPlainButtonStyle() }
+}
+
+#if targetEnvironment(macCatalyst)
+private struct ButtonHoverModifier: ViewModifier {
+    let isActive: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .brightness(isActive && isEnabled && isHovering ? 0.15 : 0)
+            .scaleEffect(isActive && isEnabled && isHovering && !reduceMotion ? 1.025 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovering)
+            .hoverEffect(.highlight, isEnabled: isActive && isEnabled)
+            .onHover { isHovering = $0 }
+    }
+}
+#endif
+
 /// Shared pointer feedback for custom controls; it never changes their layout or adds a separate focus target.
 ///
 /// Every poster card on a Mac carries this, so it stays cheap while the pointer is elsewhere: the glow is only built under the pointer,
@@ -83,12 +115,11 @@ extension View {
         #endif
     }
 
-    /// The system's hover highlight over something that can be clicked, so the pointer reacts to it. Mac only: a phone has no pointer.
-    /// (Mac Catalyst has no SwiftUI cursor API, so this is the system's own pointer feedback rather than a hand cursor.)
+    /// A visible highlight and lift alongside the native pointer highlight. Apply inside button labels on Catalyst.
     @ViewBuilder
     func pointerFeedback(_ isActive: Bool = true) -> some View {
         #if targetEnvironment(macCatalyst)
-        hoverEffect(.highlight, isEnabled: isActive)
+        modifier(ButtonHoverModifier(isActive: isActive))
         #else
         self
         #endif

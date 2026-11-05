@@ -25,6 +25,9 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var showsColouredRatingLogos: Bool
     /// Poster cards use 1200-pixel hero artwork; details reuse it while loading the full-resolution image.
     public var usesHeroPosters: Bool = false
+    /// Film posters carry a 4K or Blu-ray mark beside their ratings when Best Blurays names that disc as the film's best. Off by default:
+    /// each film is looked up on bestblurays.com.
+    public var showsBestDiscOnPosters: Bool = false
     /// Play starts the best stream at once instead of showing the list of streams first.
     public var autoPlayBestStream: Bool
     /// Seconds between Trakt playback refreshes. Zero is manual; nil uses the five-minute default for older saved settings.

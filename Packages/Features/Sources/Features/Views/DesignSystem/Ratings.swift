@@ -64,8 +64,9 @@ struct RatingsLine: View {
 
 /// The ratings of one title as a small floating pill over the bottom-left of a poster: dark, very translucent, inset from the
 /// edges, sized to its contents, so the artwork stays unobstructed. Each score is led by its provider's own colours. Landscape artwork
-/// (the hero and the title page) keeps its pill in the bottom-right corner. Reads the environment's `PosterRatingsStore`; draws nothing
-/// without one, when ratings are switched off, or while no scores are known. Only this view observes the title's entry, so a rating
+/// (the hero and the title page) keeps its pill in the bottom-right corner. With best discs on, a film's pill ends with the 4K or
+/// Blu-ray mark of its best release, and shows that mark alone when ratings are off. Reads the environment's `PosterRatingsStore`; draws
+/// nothing without one, when both are switched off, or while nothing is known. Only this view observes the title's entry, so a rating
 /// that arrives late redraws one poster.
 struct PosterRatingsOverlay: View {
     let item: MetaPreview
@@ -75,12 +76,14 @@ struct PosterRatingsOverlay: View {
     @Environment(PosterRatingsStore.self) private var store: PosterRatingsStore?
 
     var body: some View {
-        if let store, store.isEnabled {
+        if let store, store.isEnabled || store.showsBestDisc {
             let ratings = store.ratings(for: item)
-            let sites = isLandscape ? [ReviewSite.imdb, .letterboxd].filter { ratings.shortText(for: $0) != nil } : ratings.posterSites
+            let sites: [ReviewSite] = !store.isEnabled ? []
+                : isLandscape ? [ReviewSite.imdb, .letterboxd].filter { ratings.shortText(for: $0) != nil } : ratings.posterSites
+            let disc = store.showsBestDisc ? ratings.bestDisc : nil
             ZStack {
-                if !sites.isEmpty {
-                    RatingPill(ratings: ratings, sites: sites)
+                if !sites.isEmpty || disc != nil {
+                    RatingPill(ratings: ratings, sites: sites, disc: disc)
                         .padding(Theme.Spacing.s - 2)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isLandscape ? .bottomTrailing : .bottomLeading)
                         .accessibilityHidden(true)
@@ -96,12 +99,13 @@ struct PosterRatingsOverlay: View {
     }
 }
 
-/// The floating rating pill: each site's coloured mark, then its score in bold white, on a dark, very transparent rounded
-/// rectangle with no edge. Small, so it reads as a tag on the artwork; it is only as wide as its contents.
+/// The floating rating pill: each site's coloured mark, then its score in bold white, then the film's best disc mark, on a dark, very
+/// transparent rounded rectangle with no edge. Small, so it reads as a tag on the artwork; it is only as wide as its contents.
 private struct RatingPill: View {
     @Environment(\.layoutMetrics) private var metrics
     let ratings: TitleRatings
     let sites: [ReviewSite]
+    var disc: BestDiscFormat?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -121,12 +125,29 @@ private struct RatingPill: View {
                     .accessibilityHidden(true)
                 }
             }
+            if let disc { BestDiscMark(format: disc, height: 10) }
         }
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
         .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 6 * metrics.cornerScale(for: .filters), style: .continuous))
+    }
+}
+
+/// The Ultra HD Blu-ray or Blu-ray Disc mark of a film's best release, in white, the logos the stream rows use.
+struct BestDiscMark: View {
+    let format: BestDiscFormat
+    var height: CGFloat = 10
+
+    var body: some View {
+        Image(format == .uhdBluRay ? "StreamLogoUHDBluRay" : "StreamLogoBluRay")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(height: height)
+            .foregroundStyle(.white)
+            .accessibilityHidden(true)
     }
 }
 
@@ -293,6 +314,7 @@ struct RatingButton: View {
             .background(isOpen ? Theme.surfaceStrong : Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
             .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
             .pointerInteraction(cornerRadius: 999 * metrics.cornerScale(for: .filters))
+            .pointerFeedback()
         }
         .buttonStyle(.plain)
         .titleTapHaptic(.buttons)

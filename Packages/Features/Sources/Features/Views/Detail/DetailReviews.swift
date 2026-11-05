@@ -50,7 +50,6 @@ struct DetailReviews: View {
                     reviewHeadingControl("arrow.up.arrow.down")
                 }
                 .buttonStyle(.plain)
-                .pointerFeedback()
                 .padding(.leading, Theme.Spacing.s)
                 .buttonBorderShape(.roundedRectangle(radius: 12 * metrics.circularButtonScale(for: .actionButtons)))
                 .accessibilityLabel("Sort TMDb reviews")
@@ -62,7 +61,6 @@ struct DetailReviews: View {
                     reviewHeadingControl("sparkles")
                 }
                 .buttonStyle(.plain)
-                .pointerFeedback()
                 .padding(.leading, Theme.Spacing.s)
                 .accessibilityLabel(showsAISummary ? "Hide AI review summary" : "Show AI review summary")
                 .accessibilityValue(showsAISummary ? "Expanded" : "Collapsed")
@@ -176,6 +174,7 @@ struct DetailReviews: View {
             .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
             .clipShape(RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
+            .pointerFeedback()
     }
 
     /// The AI button reveals this panel and starts summarisation only when requested.
@@ -521,6 +520,7 @@ struct ReviewCard: View {
         .cardSurface(group: .reviews)
         // Fixed-width text never draws outside the card while it grows or shrinks.
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .reviews), style: .continuous))
+        .pointerFeedback(folds)
     }
 
     /// A tap on a link opens it and leaves the card as it is. Any other tap on the text folds or opens the card, as a tap on the header does.

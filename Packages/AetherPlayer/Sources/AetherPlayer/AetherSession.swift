@@ -290,17 +290,18 @@ public final class AetherSession {
     }
 
     /// `aspect` sets the visible picture's display shape; `crop` measures content in the original source. nil leaves either alone. `inset` keeps
-    /// Fit that far from the left and the right (points). A change of any of them moves the picture smoothly into its new place.
+    /// Fit that far from the left and the right (points). A change of fit, zoom, aspect or crop moves the picture smoothly into its new
+    /// place; a new inset comes with a rotation, so it applies at once, as the new size does.
     public func apply(fit: AetherFit, zoom: Double, aspect: Double? = nil, crop: Double? = nil, inset: Double = 0) {
         let clampedZoom = zoom.isFinite ? max(1, zoom) : 1
         let clampedInset = inset.isFinite ? max(0, inset) : 0
-        let changes = host.fit != fit || host.zoom != clampedZoom || host.aspect != aspect || host.crop != crop || host.inset != clampedInset
+        let moves = host.fit != fit || host.zoom != clampedZoom || host.aspect != aspect || host.crop != crop
         host.fit = fit
         host.zoom = clampedZoom
         host.aspect = aspect
         host.crop = crop
         host.inset = clampedInset
-        if changes { host.animateNextLayout() }
+        if moves { host.animateNextLayout() }
     }
 
     public func apply(subtitleStyle: AetherSubtitleStyle) {

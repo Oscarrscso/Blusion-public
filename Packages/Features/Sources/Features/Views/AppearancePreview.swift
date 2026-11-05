@@ -248,6 +248,7 @@ private struct AppearancePreviewContent: View {
         if appearance.showsInformation { credits.append("Information") }
         let middle = appearance.sectionOrder == .reviewsFirst ? reviews + credits : credits + reviews
         return ["Episodes"] + middle + (appearance.showsRelated ? ["More Like This"] : [])
+            + (appearance.showsWatchAnywhere ? ["Watch Anywhere"] : [])
     }
 }
 

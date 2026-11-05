@@ -3,10 +3,14 @@ import Persistence
 import SwiftUI
 import StremioKit
 
-/// Screens reachable from the Settings tab's stack.
+/// The Settings pages, in the order of its list: pushed on iPhone, shown beside the list on Mac.
 enum SettingsDestination: Hashable {
-    case addons
-    case widgets
+    case addons, addonSpeed, widgets
+    case playback, player, appearance, lazyLoad, haptics
+    case reviews, imdb
+    case trakt, continueRefresh, server, fallback
+    case downloads, imageCache, syncFolder, data
+    case about
 }
 
 /// App-level navigation state, shared through the environment so any screen can switch tab or open Settings.
@@ -26,6 +30,8 @@ public final class AppRouter {
     var recentSearchRevision = 0
     /// Untyped, because screens inside Settings push values of their own (an addon's id, a widget).
     var settingsPath = NavigationPath()
+    /// The page Mac Settings shows beside its list. `settingsPath` holds what that page pushes.
+    var settingsSelection: SettingsDestination? = .addons
     /// The Mac Widgets tab's stack. The widgets manager registers its own editor destinations, so the stack holds nothing else.
     var widgetsPath = NavigationPath()
     var demoPlan: PlaybackPlan?
@@ -172,11 +178,18 @@ public final class AppRouter {
     public func showWidgets() { showSettings(.widgets) }
 
     private func showSettings(_ screen: LaunchRoute.Sheet) {
-        switch screen {
-        case .settings: settingsPath = NavigationPath()
-        case .addons: settingsPath = NavigationPath([SettingsDestination.addons])
-        case .widgets: settingsPath = NavigationPath([SettingsDestination.widgets])
+        let page: SettingsDestination? = switch screen {
+        case .settings: nil
+        case .addons: .addons
+        case .widgets: .widgets
         }
+        #if targetEnvironment(macCatalyst)
+        // The page is chosen in the list beside it rather than pushed.
+        if let page { settingsSelection = page }
+        settingsPath = NavigationPath()
+        #else
+        settingsPath = page.map { NavigationPath([$0]) } ?? NavigationPath()
+        #endif
         tab = .settings
     }
 }
@@ -345,30 +358,77 @@ private struct TabBarStyle: ViewModifier {
 /// One navigation view for every Mac page, moved with the active page's scroll offset.
 struct MacPageNavigation: View {
     static let height: CGFloat = 64
+    static let controlHeight: CGFloat = 32
+    /// The control's widest, and its distance from the window's edges.
+    static let maxWidth: CGFloat = 650
+    static let inset: CGFloat = 16
     #if targetEnvironment(macCatalyst)
     @Environment(AppRouter.self) private var router
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredSegment: Int?
     #endif
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
-        Picker("Navigation", selection: Binding(get: { router.tab }, set: { router.tapTab($0) })) {
-            Text("Home").tag(LaunchRoute.Tab.home)
-            Text("Discover").tag(LaunchRoute.Tab.discover)
-            Text("Library").tag(LaunchRoute.Tab.library)
-            Text("Settings").tag(LaunchRoute.Tab.settings)
-            Text("Widgets").tag(LaunchRoute.Tab.widgets)
-            Text("Search").tag(LaunchRoute.Tab.search)
+        GeometryReader { geometry in
+            let segmentWidth = geometry.size.width / CGFloat(LaunchRoute.Tab.allCases.count)
+            Picker("Navigation", selection: Binding(get: { router.tab }, set: { router.tapTab($0) })) {
+                Text("Home").tag(LaunchRoute.Tab.home)
+                Text("Discover").tag(LaunchRoute.Tab.discover)
+                Text("Library").tag(LaunchRoute.Tab.library)
+                Text("Settings").tag(LaunchRoute.Tab.settings)
+                Text("Widgets").tag(LaunchRoute.Tab.widgets)
+                Text("Search").tag(LaunchRoute.Tab.search)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.regular)
+            .font(.body)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if let hoveredSegment {
+                    Capsule()
+                        .fill(.white.opacity(0.16))
+                        .overlay { Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 1) }
+                        .frame(width: max(0, segmentWidth - 4), height: Self.controlHeight - 4)
+                        .position(x: segmentWidth * (CGFloat(hoveredSegment) + 0.5), y: geometry.size.height / 2)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hoveredSegment)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    guard segmentWidth > 0, geometry.frame(in: .local).contains(location) else {
+                        hoveredSegment = nil
+                        return
+                    }
+                    hoveredSegment = min(LaunchRoute.Tab.allCases.count - 1, Int(location.x / segmentWidth))
+                case .ended:
+                    hoveredSegment = nil
+                }
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.regular)
-        .font(.body)
-        .frame(maxWidth: 650)
-        .frame(height: 32)
-        .padding(16)
+        .frame(maxWidth: Self.maxWidth)
+        .frame(height: Self.controlHeight)
+        .padding(Self.inset)
         .frame(maxWidth: .infinity)
         #else
         EmptyView()
+        #endif
+    }
+}
+
+extension View {
+    /// A page's top selector: on Mac it takes the shared navigation's width and centre, so the two line up; elsewhere, `margin` each side.
+    func navigationAlignedWidth(margin: CGFloat) -> some View {
+        #if targetEnvironment(macCatalyst)
+        frame(maxWidth: MacPageNavigation.maxWidth)
+            .padding(.horizontal, MacPageNavigation.inset)
+            .frame(maxWidth: .infinity)
+        #else
+        padding(.horizontal, margin)
         #endif
     }
 }
@@ -412,20 +472,24 @@ private struct MacPageNavigationOverlay: View {
 }
 
 private struct MacBackNavigation: ViewModifier {
-    @Environment(\.layoutMetrics) private var metrics
     @Environment(\.dismiss) private var dismiss
+    /// False for a page at the root of its column (a Settings page beside its list), which has nothing to go back to.
+    @Environment(\.isPresented) private var isPresented
 
     func body(content: Content) -> some View {
         content
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .topLeading) {
-                Button("Back", systemImage: "chevron.backward") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
-                    .controlSize(.regular)
-                    .padding(16)
-                    .accessibilityIdentifier("mac.back")
+                if isPresented {
+                    // The system's glass button draws a third shorter than its frame on Mac, so the glass is drawn at the navigation
+                    // control's height, as the round actions beside Play are.
+                    Button("Back", systemImage: "chevron.backward") { dismiss() }
+                        .labelStyle(.iconOnly)
+                        .fontWeight(.semibold)
+                        .buttonStyle(FixedGlassButtonStyle(size: MacPageNavigation.controlHeight))
+                        .padding(MacPageNavigation.inset)
+                        .accessibilityIdentifier("mac.back")
+                }
             }
     }
 }
@@ -548,7 +612,7 @@ private struct LandscapeTabControls: View {
                     .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
             .accessibilityLabel(collapsed ? currentTab.title : "Home")
             .accessibilityIdentifier("landscape.home")
             .highPriorityGesture(tabDrag)
@@ -588,7 +652,7 @@ private struct LandscapeTabControls: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .accessibilityLabel(title)
         .accessibilityIdentifier("landscape.\(title.lowercased())")
     }
@@ -721,17 +785,14 @@ public struct RootTabView: View {
             }
             // Settings is a tab like the rest, so there is no sheet to dismiss and no Done button.
             Tab(value: LaunchRoute.Tab.settings) {
+                #if targetEnvironment(macCatalyst)
+                // The list beside its pages, as Settings is on iPad (see `SettingsView`).
+                SettingsView(services: services)
+                #else
                 NavigationStack(path: $router.settingsPath) {
                     SettingsView(services: services)
-                        .navigationDestination(for: SettingsDestination.self) { destination in
-                            Group {
-                                switch destination {
-                                case .addons: AddonsView(services: services)
-                                case .widgets: WidgetsManagerView(services: services)
-                                }
-                            }
-                        }
                 }
+                #endif
             } label: {
                 tabItem("Settings", router.tab == .settings ? "gearshape.fill" : "gearshape")
             }
@@ -792,7 +853,7 @@ public struct RootTabView: View {
                             .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                             .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hoverPlain)
                     .foregroundStyle(.white)
                     .accessibilityLabel("Search")
                     .accessibilityIdentifier("landscape.search")
@@ -823,7 +884,7 @@ public struct RootTabView: View {
                         .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                         .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel("Back")
                 .accessibilityIdentifier("landscape.back")
                 .padding(.top, LandscapeTabBarState.cornerInset)
@@ -945,6 +1006,7 @@ public struct RootTabView: View {
         let settings = await services.settings.load()
         services.posterRatings.isEnabled = settings.showsPosterRatings
         services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
+        services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
         // Trakt may hold newer saved titles and watched marks, from the other device or from the web. Whatever it changed here is read
         // again, and Home is told.
         if let summary = try? await services.traktSync.sync(), summary.changedLocalData {

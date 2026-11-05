@@ -136,7 +136,7 @@ struct TraktListBrowserView: View {
         } label: {
             FilterMenuLabel(sort?.title ?? "Sort", systemImage: "arrow.up.arrow.down", isActive: sort != nil, minHeight: Self.controlHeight)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .accessibilityLabel("Sort by \(sort?.title ?? "list default")")
         .accessibilityIdentifier("traktBrowser.sort")
     }
@@ -208,7 +208,7 @@ struct TraktListBrowserView: View {
                         Haptics.play(.choices)
                         browser.browse(user: user)
                     } label: { TraktUserRow(user: user) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverPlain)
                         .onAppear { if user.id == LazyLoadLookahead.triggerElement(in: browser.users)?.id { Task { await browser.loadMore() } } }
                         .accessibilityIdentifier("traktBrowser.user.\(user.username)")
                 }
@@ -218,7 +218,7 @@ struct TraktListBrowserView: View {
                         Haptics.play(.choices)
                         select(list)
                     } label: { TraktListRow(list: list, isSelected: list.id == selectedID) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverPlain)
                         .onAppear { if list.id == LazyLoadLookahead.triggerElement(in: browser.lists)?.id { Task { await browser.loadMore() } } }
                         .accessibilityIdentifier("traktBrowser.list.\(list.slug)")
                 }

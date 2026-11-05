@@ -78,6 +78,12 @@ public final class DetailViewModel {
     public private(set) var titleCredits: TMDbTitleCredits?
     /// Titles TMDb recommends for this one, for the shelf at the bottom of the page. Empty until TMDb answers.
     public private(set) var relatedTitles: [TMDbRelatedTitle] = []
+    /// Where the title can be watched in the viewer's region, for the Watch Anywhere section. Nil until loaded, and only asked for while
+    /// that section is on.
+    public private(set) var titleWatch: TMDbTitleWatch?
+    /// What the stores ask to rent and buy the title in the viewer's region, for Information and the line under Play. Nil until JustWatch
+    /// answers, or when no store there rents or sells it.
+    public private(set) var titlePrices: TitlePrices?
     /// What TMDb knows beyond the addon's details (studios, countries, language, budget, a series' network and run), for Information. Nil
     /// until TMDb answers, or when no read token is saved.
     public private(set) var titleFacts: TMDbTitleFacts?
@@ -205,12 +211,14 @@ public final class DetailViewModel {
         async let rating: Void = loadCertification()
         async let trailerSources: Void = loadTrailerSources()
         async let facts: Void = loadTitleFacts()
+        async let prices: Void = loadTitlePrices()
         await reviews
         await credits
         await related
         await rating
         await trailerSources
         await facts
+        await prices
     }
 
     public func refresh() async {
@@ -263,6 +271,27 @@ public final class DetailViewModel {
         let loaded = try? await TMDbRatings(client: services.client, readAccessToken: token).relatedTitles(imdbID: preview.id, type: preview.type)
         guard !Task.isCancelled else { return }
         relatedTitles = loaded ?? []
+    }
+
+    /// Where the title can be watched in the viewer's region. The title page asks only while its Watch Anywhere section is on.
+    public func loadTitleWatch() async {
+        let settings = await services.settings.load()
+        guard let token = settings.tmdbReadToken, !token.isEmpty else { titleWatch = nil; return }
+        let region = Locale.current.region?.identifier ?? "US"
+        let loaded = try? await TMDbRatings(client: services.client, readAccessToken: token)
+            .titleWatch(imdbID: preview.id, type: preview.type, region: region)
+        guard !Task.isCancelled else { return }
+        titleWatch = loaded
+    }
+
+    /// The rent and buy prices in the viewer's region, from JustWatch. Needs no TMDb token.
+    private func loadTitlePrices() async {
+        let region = Locale.current.region?.identifier ?? "US"
+        let loaded = try? await JustWatchPrices(client: services.client)
+            .prices(id: preview.id, title: detail.preview.name, year: Self.releaseYear(detail.preview.releaseInfo), type: preview.type,
+                    country: region)
+        guard !Task.isCancelled else { return }
+        titlePrices = loaded ?? nil
     }
 
     /// The part of the cast and crew picked from its menu: the cast until another is picked.

@@ -130,7 +130,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
             case .playerControls: 1.0
             case .playerOptions, .playerGestures: 0.8
             case .banner: 0.8
-            case .reviews: 0.3
+            case .reviews: 1.0
             default: 0.5
             }
         }
@@ -164,7 +164,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
     public enum Default {
         public static let overallStrength = 1.0
         public static let shelfTickSpacing = 12.0
-        public static let reviewTickLimit = 6
+        public static let reviewTickLimit = 12
     }
 
     /// The ranges the Haptics page offers. A saved value outside one of these is clamped rather than refused, so a hand-edited

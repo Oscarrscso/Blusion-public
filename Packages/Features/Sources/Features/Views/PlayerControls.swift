@@ -173,7 +173,7 @@ struct PlayerControls: View {
                 .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
     }
 
     /// Infuse's zoom button: each tap moves to the next Zoom Mode, and its symbol shows the one in use.
@@ -280,7 +280,7 @@ struct PlayerControls: View {
                 .accessibilityLabel("Forward \(Int(model.skipForwardSeconds)) seconds")
                 .accessibilityIdentifier("player.skipForward")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
         }
     }
 
@@ -322,7 +322,7 @@ struct PlayerControls: View {
                         .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 20 * metrics.cornerScale(for: .playerControls))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .help("Next episode")
                 .accessibilityIdentifier("player.nextEpisode")
             }

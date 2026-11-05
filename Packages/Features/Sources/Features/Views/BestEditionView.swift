@@ -44,7 +44,7 @@ struct BestEditionView: View {
                                   ? AnyShape(Rectangle())
                                   : AnyShape(RoundedRectangle(cornerRadius: panelRadius * metrics.cornerScale(for: .panels), style: .continuous)))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier("streams.bestEdition")
                 if isExpanded {

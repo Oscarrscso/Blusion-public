@@ -58,7 +58,7 @@ struct PlayerStreamPicker: View {
             Button { Haptics.play(.playerControls); onClose() } label: {
                 Image(systemName: "xmark").frame(width: 32, height: 32)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.hoverGlass)
             .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .playerControls)) : .circle)
             #if !targetEnvironment(macCatalyst)
             .keyboardShortcut(.escape, modifiers: [])
@@ -110,7 +110,7 @@ struct PlayerStreamPicker: View {
             .padding(.vertical, 10)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .disabled(isCurrent)
         .accessibilityIdentifier("player.stream.\(candidate.id)")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])

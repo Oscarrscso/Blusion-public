@@ -136,9 +136,10 @@ private let popularPrefix = "Make a movie list sorted by Popular and "
         #expect(model.canCommit)
         await model.commit()
         #expect(manager.widgets.count == before + 1)
-        #expect(manager.widgets.last?.id == model.widget.id)
+        let cw = try #require(manager.widgets.firstIndex(where: HomeLayout.isContinueWatching))
+        #expect(manager.widgets[cw + 1].id == model.widget.id, "a new widget goes straight below Continue Watching")
         let saved = await services.widgets.load()
-        #expect(saved?.last?.id == model.widget.id)
+        #expect(saved?[cw + 1].id == model.widget.id)
     }
 
     @Test func anEditKeepsTheWidgetsIDAndCommitsAnUpdate() async throws {

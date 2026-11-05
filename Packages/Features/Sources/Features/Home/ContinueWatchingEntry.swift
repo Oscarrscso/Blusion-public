@@ -69,7 +69,7 @@ extension ContinueWatchingEntry {
 }
 
 extension AppServices {
-    /// Adds the next available, unwatched episode to Continue Watching at 0% after a manual completion.
+    /// Adds the next available, unwatched episode to Continue Watching at 0% after completion.
     /// Episode order and air dates come from the same metadata used by the detail page, not guessed numbers.
     func queueNextContinueEpisode(after request: StreamRequest) async {
         guard request.type == "series", request.season != nil, request.episode != nil else { return }

@@ -36,21 +36,22 @@ public enum DownloadSort: String, CaseIterable, Sendable, Identifiable {
     public var title: String {
         switch self {
         case .recentlyAdded: "Recently added"
-        case .title: "Title"
-        case .year: "Year"
+        case .title: "A–Z"
+        case .year: "Newest"
         }
     }
 }
 
 /// One active filter on the Downloads page, as a chip. `target` is what removing it clears.
 public struct DownloadFilterChip: Identifiable, Equatable, Sendable {
-    public enum Target: Equatable, Sendable { case status, years }
+    public enum Target: Equatable, Sendable { case kind, status, years }
 
     public let target: Target
     public let label: String
 
     public var id: String {
         switch target {
+        case .kind: "kind"
         case .status: "status"
         case .years: "years"
         }
@@ -59,6 +60,8 @@ public struct DownloadFilterChip: Identifiable, Equatable, Sendable {
 
 /// The Downloads page's filters and sort. It is kept apart from the Library's `LibraryFilter`, so each page keeps its own selection.
 public struct DownloadFilter: Equatable, Sendable {
+    /// Movies or series; nil shows both.
+    public var kind: LibraryKind?
     public var status: DownloadStatusFilter = .all
     /// Inclusive bounds on the release year. A download with no known year is excluded while either bound is set.
     public var minimumYear: Int?
@@ -69,6 +72,7 @@ public struct DownloadFilter: Equatable, Sendable {
 
     /// Removes every filter and keeps the sort.
     public mutating func clearFilters() {
+        kind = nil
         status = .all
         minimumYear = nil
         maximumYear = nil
@@ -76,6 +80,7 @@ public struct DownloadFilter: Equatable, Sendable {
 
     public mutating func remove(_ target: DownloadFilterChip.Target) {
         switch target {
+        case .kind: kind = nil
         case .status: status = .all
         case .years:
             minimumYear = nil
@@ -83,9 +88,10 @@ public struct DownloadFilter: Equatable, Sendable {
         }
     }
 
-    /// One chip per active filter: the status, then the year span.
+    /// One chip per active filter: the type, the status, then the year span.
     public var chips: [DownloadFilterChip] {
         var chips: [DownloadFilterChip] = []
+        if let kind { chips.append(DownloadFilterChip(target: .kind, label: kind.title)) }
         if status != .all { chips.append(DownloadFilterChip(target: .status, label: status.title)) }
         if minimumYear != nil || maximumYear != nil {
             chips.append(DownloadFilterChip(target: .years, label: LibraryFiltering.yearSpanLabel(from: minimumYear, to: maximumYear)))
@@ -106,6 +112,7 @@ public enum DownloadFiltering {
     }
 
     public static func matches(_ item: DownloadItem, _ filter: DownloadFilter) -> Bool {
+        if let kind = filter.kind, LibraryKind(type: item.request.type) != kind { return false }
         guard filter.status.matches(item) else { return false }
         if filter.minimumYear != nil || filter.maximumYear != nil {
             guard let released = year(of: item) else { return false }

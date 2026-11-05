@@ -252,6 +252,10 @@ struct DetailView: View {
                                     related
                                         .padding(.top, metrics.titleSectionSpacing)
                                 }
+                                if appearance.showsWatchAnywhere, let watch = model.titleWatch, !watch.isEmpty {
+                                    DetailWatchAnywhere(watch: watch, contentMargin: contentMargin)
+                                        .padding(.top, metrics.titleSectionSpacing)
+                                }
                             }
                             .transition(.opacity)
                         }
@@ -394,6 +398,10 @@ struct DetailView: View {
         }
         // IMDb's reviews load in the background once the hero has settled, so a tap on the IMDb rating shows them at once.
         .task(id: model.hasSettledHero) { preloadReviews() }
+        // Where to watch is asked of TMDb only while its section is on, so a title page with it off asks for nothing extra.
+        .task(id: appearance.showsWatchAnywhere) {
+            if appearance.showsWatchAnywhere { await model.loadTitleWatch() }
+        }
         // The picker's episode gets its season's scores asked for, since its card may never have come on screen, so the heading shows its score.
         .task(id: streams.request?.id) {
             guard let request = streams.request else { return }

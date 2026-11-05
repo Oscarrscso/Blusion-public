@@ -586,6 +586,18 @@ public actor TraktSync {
         }
     }
 
+    /// The app is leaving the front: positions still waiting out their settle time are sent now, since a suspended app never wakes
+    /// the timer that would have sent them.
+    public func flush() async {
+        await load()
+        let date = now()
+        for index in state.operations.indices where state.operations[index].notBefore > date {
+            state.operations[index].notBefore = date
+        }
+        pausedUntil = pausedUntil == .distantFuture ? pausedUntil : .distantPast
+        _ = try? await sync()
+    }
+
     /// The app came to the front, or the network came back: whatever waited on either is tried now.
     public func resume() async {
         if pausedUntil != .distantFuture { pausedUntil = .distantPast }

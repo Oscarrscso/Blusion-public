@@ -43,6 +43,8 @@ public final class DiscoverViewModel {
     /// One catalog feeding the "All" mix, with how far it has been read.
     private struct Cursor {
         var source: CatalogSource
+        /// The selected genre as this catalog spells it, sent with its requests.
+        var genre: String?
         var received = 0
         var hasMore = true
     }
@@ -55,10 +57,43 @@ public final class DiscoverViewModel {
         self.services = services
     }
 
-    public var genres: [String] {
-        var all: [String] = []
-        for genre in visibleSources.flatMap(\.catalog.genreOptions) where !all.contains(genre) { all.append(genre) }
-        return all
+    /// The Genre menu's choices: every catalog's genres, one of each whatever its case, A to Z. Orders and years an addon lists as genres
+    /// are left out, since the Sort and Year menus cover them.
+    public var genres: [String] { Self.genres(of: visibleSources.map(\.catalog)) }
+
+    static func genres(of catalogs: [CatalogDescriptor]) -> [String] {
+        var seen = Set<String>()
+        var genres: [String] = []
+        for catalog in catalogs {
+            for genre in genreOptions(of: catalog) where seen.insert(genre.lowercased()).inserted { genres.append(genre) }
+        }
+        return genres.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// The catalog's genre options that are genres, in its order: no blanks, years or orders ("Shortest", "Random", "Not Watched"). None
+    /// for a list that is mostly orders ("Date Added ↓", "Title A-Z"), which picks the catalog's order, so none of it is a genre.
+    static func genreOptions(of catalog: CatalogDescriptor) -> [String] {
+        let options = catalog.genreOptions.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isYear($0) }
+        let kept = options.filter { !isOrder($0) }
+        return kept.count * 2 > options.count ? kept : []
+    }
+
+    /// "2024", "1990s" or "1990's".
+    static func isYear(_ option: String) -> Bool {
+        option.range(of: #"^\s*\d{4}'?s?\s*$"#, options: .regularExpression) != nil
+    }
+
+    /// An option that orders or narrows the catalog rather than naming a genre: "Recently Added", "Release Date (Newest)", "Title Z-A",
+    /// "Top Rated", "Shortest", "Random", "Not Watched".
+    static func isOrder(_ option: String) -> Bool {
+        let text = option.lowercased()
+        if text.unicodeScalars.contains(where: { "↑↓⬆⬇▲▼".unicodeScalars.contains($0) }) { return true }
+        if text.range(of: #"\b[az]\s*[-–—]\s*[az]\b"#, options: .regularExpression) != nil { return true }
+        let orderWords: Set<Substring> = ["added", "newest", "oldest", "latest", "recent", "recently", "release", "released", "date", "year",
+                                          "title", "name", "alphabetical", "ascending", "descending", "asc", "desc", "sort", "rated",
+                                          "rating", "popularity", "shortest", "longest", "random", "shuffle", "shuffled", "watched",
+                                          "unwatched", "runtime", "duration", "length"]
+        return text.split(whereSeparator: { !$0.isLetter }).contains { orderWords.contains($0) }
     }
     public var hasSources: Bool { !sources.isEmpty }
 
@@ -120,9 +155,11 @@ public final class DiscoverViewModel {
         items = []
         canLoadMore = false
         cursors = visibleSources.map { source in
-            Cursor(source: source, hasMore: selectedGenre.map { genre in
-                source.catalog.genreOptions.isEmpty || source.catalog.genreOptions.contains(genre)
-            } ?? true)
+            guard let genre = selectedGenre else { return Cursor(source: source) }
+            // A catalog that lists genres must offer this one, in any case; one that lists none is filtered locally.
+            let options = source.catalog.genreOptions
+            let match = options.first { $0.caseInsensitiveCompare(genre) == .orderedSame }
+            return Cursor(source: source, genre: match ?? genre, hasMore: options.isEmpty || match != nil)
         }
         guard !sources.isEmpty else {
             state = .idle
@@ -150,7 +187,7 @@ public final class DiscoverViewModel {
         await withTaskGroup(of: (Int, [MetaPreview]?, Error?).self) { group in
             for (index, cursor) in pending {
                 group.addTask {
-                    do { return (index, try await browse.page(cursor.source, genre: genre, skip: cursor.received), nil) } catch { return (index, nil, error) }
+                    do { return (index, try await browse.page(cursor.source, genre: cursor.genre, skip: cursor.received), nil) } catch { return (index, nil, error) }
                 }
             }
             for await (index, page, error) in group {

@@ -70,11 +70,9 @@ struct NativeDownloadButton: View {
         }
         Group {
             if matchesStream {
-                button.buttonStyle(.plain).background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                button.buttonStyle(.hoverPlain).background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             } else if let glass {
-                button.buttonStyle(.plain)
-                    .frame(width: size, height: size)
-                    .glassEffect(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                button.buttonStyle(FixedGlassButtonStyle(size: size, glass: glass))
             } else {
                 button.glassCircleButton()
             }

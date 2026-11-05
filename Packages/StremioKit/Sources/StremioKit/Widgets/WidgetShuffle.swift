@@ -55,19 +55,54 @@ public enum WidgetShuffle: Sendable, Equatable, Hashable, Codable {
     }
 }
 
-/// A row that takes its items from a source picked at random: from `sources`, or from every catalog of the installed addons when it is
-/// empty, picked again on `schedule`.
+/// A row that takes its items from a source picked at random: from `sources`, or, when `sources` is empty, from every source a random
+/// source offers (`WidgetShuffling.allSources`) but the `excluded` ones. It is picked again on `schedule`.
 public struct RandomSource: Sendable, Codable, Equatable, Hashable {
     public var sources: [WidgetSource]
+    /// Sources left out while `sources` is empty. Always empty when `sources` is the pick.
+    public var excluded: [WidgetSource]
     public var schedule: WidgetShuffle
 
-    public init(sources: [WidgetSource] = [], schedule: WidgetShuffle = .daily) {
+    public init(sources: [WidgetSource] = [], excluded: [WidgetSource] = [], schedule: WidgetShuffle = .daily) {
         self.sources = sources
+        self.excluded = excluded
         self.schedule = schedule
     }
 
-    /// True when the pick is from every catalog of the installed addons.
+    private enum CodingKeys: String, CodingKey { case sources, excluded, schedule }
+
+    /// Saved picks from before exclusions existed have none, so they read as they did.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sources = try container.decodeIfPresent([WidgetSource].self, forKey: .sources) ?? []
+        excluded = try container.decodeIfPresent([WidgetSource].self, forKey: .excluded) ?? []
+        schedule = try container.decodeIfPresent(WidgetShuffle.self, forKey: .schedule) ?? .daily
+    }
+
+    /// True when the pick is from every source, but the excluded ones.
     public var usesAllSources: Bool { sources.isEmpty }
+
+    /// Whether `source` is in the pick: one of `sources`, or, while `sources` is empty, any source but the excluded ones.
+    public func picks(_ source: WidgetSource) -> Bool {
+        sources.isEmpty ? !excluded.contains(source) : sources.contains(source)
+    }
+
+    /// Puts `source` in the pick or takes it out. From every source (`among` them), taking one out leaves it excluded, but the last one
+    /// left stays in, so the pick is never empty. Ticking one from a list of its own adds it, and unticking the last one returns to every
+    /// source.
+    public mutating func toggle(_ source: WidgetSource, among all: [WidgetSource]) {
+        if sources.isEmpty {
+            if let index = excluded.firstIndex(of: source) {
+                excluded.remove(at: index)
+            } else if all.contains(where: { $0 != source && !excluded.contains($0) }) {
+                excluded.append(source)
+            }
+        } else if let index = sources.firstIndex(of: source) {
+            sources.remove(at: index)
+        } else {
+            sources.append(source)
+        }
+    }
 }
 
 /// The order a widget, or Home, keeps until its next shuffle: the seed it is shuffled with and when that seed gives way.
@@ -245,8 +280,9 @@ public enum WidgetShuffling {
 
     // MARK: Random sources
 
-    /// Every catalog of the enabled addons, in the user's order: what a random source picks from when it has no sources of its own.
-    public static func allSources(in addons: [InstalledAddon]) -> [WidgetSource] {
+    /// Every source a random source picks from when it has none of its own: each browsable catalog of the enabled addons, in the user's
+    /// order, then the Trakt feeds in `traktFeeds` (empty until Trakt has a client ID).
+    public static func allSources(in addons: [InstalledAddon], traktFeeds: [TraktFeed] = []) -> [WidgetSource] {
         var seen = Set<AddonCatalogReference>()
         var sources: [WidgetSource] = []
         for addon in addons where addon.isEnabled {
@@ -256,7 +292,7 @@ public enum WidgetShuffling {
                 if seen.insert(reference).inserted { sources.append(.addonCatalog(reference)) }
             }
         }
-        return sources
+        return sources + traktFeeds.map { WidgetSource.traktFeed($0) }
     }
 
     /// The source `seed` picks from `pool`, or nil from an empty pool.
@@ -281,21 +317,28 @@ public enum WidgetShuffling {
 
     /// The widgets with each random source picked: the row takes the picked source, and its title is that source's name. A pick stays
     /// until its schedule's next time (its seed is kept in `states`). A pool with nothing in it leaves the widget as it is.
-    public static func pickingSources(_ widgets: [HomeWidget], addons: [InstalledAddon], states: inout [String: ShuffleState],
-                                      now: Date, calendar: Calendar, random: inout some RandomNumberGenerator) -> [HomeWidget] {
-        let every = allSources(in: addons)
+    public static func pickingSources(_ widgets: [HomeWidget], addons: [InstalledAddon], traktFeeds: [TraktFeed] = [],
+                                      states: inout [String: ShuffleState], now: Date, calendar: Calendar,
+                                      random: inout some RandomNumberGenerator) -> [HomeWidget] {
+        let every = allSources(in: addons, traktFeeds: traktFeeds)
         return widgets.map { widget in
             let key = ShuffleKeys.source(of: widget.id)
             guard var row = loadingRow(of: widget), let setting = row.randomSource else {
                 states[key] = nil
                 return widget
             }
-            // A ticked catalog whose addon has since been removed or turned off is left out; with none left, every catalog is the pool.
+            // A ticked source that has gone (an addon removed or turned off, Trakt without a client ID) is left out; with none left,
+            // every source is the pool. Then the excluded ones come out, unless that would leave nothing.
             let available = setting.sources.filter { source in
-                guard case .addonCatalog(let reference) = source else { return true }
-                return reference.resolve(in: addons.filter(\.isEnabled)) != nil
+                switch source {
+                case .addonCatalog(let reference): return reference.resolve(in: addons.filter(\.isEnabled)) != nil
+                case .traktFeed(let feed): return traktFeeds.contains(feed)
+                case .tmdbDiscover, .traktList, .unsupported: return true
+                }
             }
-            let pool = available.isEmpty ? every : available
+            let base = available.isEmpty ? every : available
+            let open = base.filter { !setting.excluded.contains($0) }
+            let pool = open.isEmpty ? base : open
             // A random source always picks again on some schedule: one saved as off picks daily.
             let schedule = setting.schedule == .off ? WidgetShuffle.daily : setting.schedule
             let state = ShuffleState.resolve(states[key], schedule: schedule, now: now, calendar: calendar, random: &random)

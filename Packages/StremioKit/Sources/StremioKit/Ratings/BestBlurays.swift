@@ -34,6 +34,18 @@ public struct BestBlurayEdition: Sendable, Equatable {
 
     /// True when the best release is a 4K disc.
     public var is4K: Bool { release.localizedCaseInsensitiveContains("4K") }
+
+    /// The kind of disc the best release is, for a poster's disc mark. Nil when it is neither a 4K nor a Blu-ray disc (a DVD, say).
+    public var discFormat: BestDiscFormat? {
+        if is4K || release.localizedCaseInsensitiveContains("UHD") { return .uhdBluRay }
+        return release.localizedCaseInsensitiveContains("Blu-ray") ? .bluRay : nil
+    }
+}
+
+/// The highest-quality disc a film has, as Best Blurays' pick of its best release says.
+public enum BestDiscFormat: String, Sendable, Codable, Equatable {
+    case uhdBluRay
+    case bluRay
 }
 
 /// The answer to "what is the best edition of this film?".
@@ -45,12 +57,13 @@ public enum BestBlurayResult: Sendable, Equatable {
     case noPage(searchURL: URL)
 }
 
-/// Looks a film up on Best Blurays by reading its public pages, once, when the viewer asks. The site has no API, so this reads the
+/// Looks a film up on Best Blurays by reading its public pages: when the viewer opens a film's streams, and, with disc marks on posters
+/// switched on, one film at a time as posters show, each answer kept for weeks. The site has no API, so this reads the
 /// search page for the film's title, picks the page for that title and year, and confirms it is the same film by the IMDb id the
 /// page carries. At most four requests, each bounded in size. Pages the site's robots.txt allows (`/films`, `/film/…`).
 public struct BestBluraysClient: Sendable {
     public static let defaultBaseURL = URL(string: "https://www.bestblurays.com") ?? URL(fileURLWithPath: "/")
-    private static let userAgent = "Blusion/1.0 (personal media player; looks up one film when asked)"
+    private static let userAgent = "Blusion/1.0 (personal media player; one film at a time, answers cached)"
     /// The part of a page that names the best release sits within the first 70 KB; the rest is the cast and release tables.
     private static let pageLimit = FetchLimits(maxBytes: 192 * 1024, truncateAtLimit: true)
 

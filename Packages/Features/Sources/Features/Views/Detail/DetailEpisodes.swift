@@ -44,6 +44,20 @@ struct DetailEpisodes: View {
         Image(systemName: "shuffle").font(.caption.weight(.semibold)).hidden().accessibilityHidden(true)
     }
 
+    /// The round glass beside the season picker, at the picker's height. On Mac the system's own glass button is a third shorter than the
+    /// picker and lights only its symbol on hover, so there the glass is drawn as the round actions beside Play are: fixed to the picker's
+    /// height, and lit with the pointer.
+    private struct SeasonRowCircle: ViewModifier {
+        func body(content: Content) -> some View {
+            #if targetEnvironment(macCatalyst)
+            content.buttonStyle(FixedGlassButtonStyle(size: DetailEpisodes.secondaryControlHeight))
+            #else
+            content.glassCircleButton(.regular)
+                .frame(width: DetailEpisodes.secondaryControlHeight, height: DetailEpisodes.secondaryControlHeight)
+            #endif
+        }
+    }
+
     /// The space inside an episode's menu preview, so the menu's rounded corners do not cut into the still or the text.
     private static let previewPadding: CGFloat = Theme.Spacing.m
     /// The corner radius of the panel the system draws an episode's menu preview in: 32 pt, measured on an iPhone on iOS 27. The system
@@ -223,8 +237,7 @@ struct DetailEpisodes: View {
                 // The same grey as the trailer's symbol beside the title's other buttons.
                 .foregroundStyle(.white.opacity(0.6))
         }
-        .glassCircleButton(.regular)
-        .frame(width: Self.secondaryControlHeight, height: Self.secondaryControlHeight)
+        .modifier(SeasonRowCircle())
         .disabled(!model.canShuffle)
         .opacity(model.canShuffle ? 1 : 0.4)
         .allowsHitTesting(!isLoadingStreams)
@@ -250,8 +263,7 @@ struct DetailEpisodes: View {
                     .contentTransition(.symbolEffect(.replace))
             }
         }
-        .glassCircleButton(.regular)
-        .frame(width: Self.secondaryControlHeight, height: Self.secondaryControlHeight)
+        .modifier(SeasonRowCircle())
         .titleTapHaptic()
         .accessibilityLabel("Episode width")
         .help("Episode width")

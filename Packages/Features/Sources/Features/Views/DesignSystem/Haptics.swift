@@ -266,7 +266,7 @@ struct ShelfScroll<Content: View>: View {
                 // Only the circle takes the click. The square's corners pass it to the card beneath, as they would with no chevron there.
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverPlain)
         .disabled(!enabled)
         // A hidden chevron must not take clicks meant for the cards beneath it.
         .allowsHitTesting(enabled)

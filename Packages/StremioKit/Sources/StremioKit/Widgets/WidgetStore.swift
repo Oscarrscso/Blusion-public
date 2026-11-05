@@ -6,6 +6,13 @@ public protocol WidgetStore: Sendable {
     func load() async -> [HomeWidget]?
     /// nil goes back to the automatic layout.
     func save(_ widgets: [HomeWidget]?) async
+    /// Takes in a layout saved on the user's other device since this one last looked. True when the layout here changed.
+    func takeInSharedLayout() async -> Bool
+}
+
+public extension WidgetStore {
+    /// A layout kept on this device only never changes from elsewhere.
+    func takeInSharedLayout() async -> Bool { false }
 }
 
 public actor InMemoryWidgetStore: WidgetStore {
@@ -138,6 +145,14 @@ public final class DefaultsWidgetStore: WidgetStore, @unchecked Sendable {
         }
         guard let data = try? JSONEncoder().encode(Envelope(version: Self.currentVersion, widgets: entries)) else { return }
         defaults.set(data, forKey: Self.key)
+    }
+
+    /// The saved layout exactly as stored, widgets this build cannot read included; nil for the automatic layout.
+    public var storedData: Data? { defaults.data(forKey: Self.key) }
+
+    /// Replaces the saved layout with one stored the same way on another device; nil goes back to the automatic layout.
+    public func replaceStoredData(_ data: Data?) {
+        if let data { defaults.set(data, forKey: Self.key) } else { defaults.removeObject(forKey: Self.key) }
     }
 
     /// The saved envelope, or nil when there is none, it cannot be read, or it is another version.

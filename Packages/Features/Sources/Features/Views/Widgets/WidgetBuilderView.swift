@@ -77,7 +77,7 @@ struct WidgetBuilderView: View {
             }
         }
         .navigationDestination(isPresented: $showsPicker) {
-            WidgetSourcePicker(model: manager, openTraktLists: { showsTraktBrowser = true }, chooseTrakt: { source in
+            WidgetSourcePicker(model: manager, openTraktLists: { showsTraktBrowser = true }, chooseSource: { source in
                 model.setSource(source)
                 showsPicker = false
             }) { choice, _ in
@@ -149,7 +149,7 @@ struct WidgetBuilderView: View {
                 dismiss()
             }
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.hoverGlass)
         .accessibilityIdentifier("widgetEditor.remove")
     }
 
@@ -266,7 +266,7 @@ private struct SentenceCard: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverPlain)
             if token.isRemovable {
                 Button {
                     Haptics.play(.buttons)
@@ -278,7 +278,7 @@ private struct SentenceCard: View {
                         .frame(minWidth: 28, minHeight: 28)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel("Remove \(token.text)")
             }
         }

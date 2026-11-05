@@ -105,7 +105,7 @@ struct DetailReviewsPanel: View {
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel("Close \(visible.site.name) reviews")
                 .accessibilityIdentifier("detail.reviews.close")
             }

@@ -53,3 +53,54 @@ public enum StreamProvider: String, Sendable, Equatable, Hashable, CaseIterable 
         return nil
     }
 }
+
+extension StreamProvider {
+    /// The services offered as catalogs on Search and in a Streaming Services collection. Hulu is left out: it shows Disney+'s logo, as
+    /// it streams from the Disney+ app.
+    public static let browsable: [StreamProvider] = [.netflix, .hboMax, .disneyPlus, .primeVideo, .appleTV, .paramountPlus, .peacock,
+                                                     .crunchyroll]
+
+    /// TMDb's watch-provider ids for the service, any of which matches. TMDb lists HBO Max, Prime Video and Peacock under more than one.
+    public var tmdbProviderIDs: [Int] {
+        switch self {
+        case .netflix: [8]
+        case .primeVideo: [9, 119]
+        case .appleTV: [350]
+        case .disneyPlus: [337]
+        case .hboMax: [1899, 384]
+        case .hulu: [15]
+        case .paramountPlus: [531]
+        case .peacock: [386, 387]
+        case .crunchyroll: [283]
+        }
+    }
+
+    /// Everything TMDb lists on the service in the device's region, films and series together, most popular first. This is the form a
+    /// tile or row saves; `catalogRequest(for:)` turns it into what TMDb is asked.
+    public var catalogSource: WidgetSource {
+        .tmdbDiscover(TMDbDiscoverQuery(providers: providerNames, spansBothKinds: true))
+    }
+
+    /// What TMDb is asked for a service's catalog, or the query itself when it is no service's. A service lists only the titles none of
+    /// the other browsable services also streams, so the services do not repeat each other's popular titles. Peacock is asked in the US,
+    /// the only region TMDb lists it in. Saved tiles and rows keep `catalogSource`, so they ask this way without being saved again.
+    static func catalogRequest(for query: TMDbDiscoverQuery) -> TMDbDiscoverQuery {
+        guard let service = browsable.first(where: { $0.catalogSource == .tmdbDiscover(query) }) else { return query }
+        var request = query
+        request.excludedProviders = browsable.filter { $0 != service }.flatMap(\.providerNames)
+        if service == .peacock { request.region = "US" }
+        return request
+    }
+
+    /// The service's TMDb provider ids, named for the service.
+    private var providerNames: [TMDbDiscoverQuery.Named] {
+        tmdbProviderIDs.map { TMDbDiscoverQuery.Named(id: $0, name: name) }
+    }
+
+    /// The service a collection tile names, when its title is the service's name ("Netflix", "HBO Max"), whatever its case.
+    public init?(tileTitle: String) {
+        let title = tileTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let match = Self.allCases.first(where: { $0.name.lowercased() == title }) else { return nil }
+        self = match
+    }
+}

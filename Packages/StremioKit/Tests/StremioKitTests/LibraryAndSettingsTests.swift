@@ -195,6 +195,22 @@ import Testing
         #expect(VideoCrop.ratio4x3.ratio == 4.0 / 3.0 && VideoCrop.off.ratio == nil)
     }
 
+    @Test func reviewHapticsDefaultToSoftFullStrengthAndTwelveTicks() {
+        let defaults = HapticPreferences()
+        #expect(defaults.feel(.reviews) == .soft)
+        #expect(defaults.strength(.reviews) == 1.0)
+        #expect(defaults.intensity(.reviews) == 1.0)
+        #expect(defaults.reviewTicks == 12)
+        #expect(defaults.isDefault(.reviews))
+
+        var customized = defaults
+        customized[.reviews].strength = 0.4
+        customized.reviewTickLimit = 4
+        #expect(customized.strength(.reviews) == 0.4 && customized.reviewTicks == 4)
+        customized.restore(.reviews)
+        #expect(customized.isDefault(.reviews) && customized.reviewTicks == 12)
+    }
+
     @Test func serverURLValidationMessages() {
         #expect(PlaybackSettings.validationMessage(forServerURL: "") == nil)
         #expect(PlaybackSettings.validationMessage(forServerURL: "  ") == nil)

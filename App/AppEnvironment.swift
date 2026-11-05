@@ -159,7 +159,8 @@ final class AppEnvironment {
         let aetherLinked = false
         #endif
         // The Home layout is a preference, not a secret: it names addons by manifest id and host, never by URL.
-        let widgets: any WidgetStore = uiTesting ? InMemoryWidgetStore() : DefaultsWidgetStore(defaults: settingsDefaults)
+        let sharedFolder = SharedFolder(defaults: settingsDefaults)
+        let widgets: any WidgetStore = uiTesting ? InMemoryWidgetStore() : SyncedWidgetStore(defaults: settingsDefaults, shared: sharedFolder)
         // Streams handed to Infuse and not yet called back, so a stop recorded after a relaunch still counts.
         let handoffs: any HandoffStore = uiTesting ? InMemoryHandoffStore() : DefaultsHandoffStore(defaults: settingsDefaults)
         let addonSpeed: any AddonSpeedStore = uiTesting ? InMemoryAddonSpeedStore() : DefaultsAddonSpeedStore(defaults: settingsDefaults)
@@ -196,7 +197,8 @@ final class AppEnvironment {
             ratingsCache = InMemoryRatingsCache()
         }
         let posterRatings = PosterRatingsStore(letterboxd: uiTesting ? nil : LetterboxdRatings(client: client), cache: ratingsCache,
-                                               dataset: imdbDataset, logger: logger)
+                                               dataset: imdbDataset, bestBlurays: uiTesting ? nil : BestBluraysClient(client: client),
+                                               logger: logger)
         let searchHistory: any SearchHistoryStore = uiTesting ? InMemorySearchHistoryStore() : DefaultsSearchHistoryStore(defaults: settingsDefaults)
         let streamService = StreamService(registry: registry, client: client, timings: addonSpeed)
         let subtitleService = SubtitleService(registry: registry, client: client)
@@ -211,7 +213,8 @@ final class AppEnvironment {
                                    widgets: widgets, widgetContent: widgetContent,
                                    posterRatings: posterRatings, handoffs: handoffs, searchHistory: searchHistory, traktAccount: traktAccount, trakt: trakt,
                                    secretsInKeychain: secretsInKeychain, traktSyncState: traktSyncState, syncSchedulesItself: !uiTesting,
-                                   addonSpeed: addonSpeed, widgetShuffle: widgetShuffle, downloads: downloadManager)
+                                   addonSpeed: addonSpeed, widgetShuffle: widgetShuffle, downloads: downloadManager,
+                                   sharedFolder: uiTesting ? nil : sharedFolder)
         if !uiTesting {
             // The first report from the network monitor is also the launch sync.
             Task { await services.traktSync.startMonitoringNetwork() }

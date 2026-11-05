@@ -47,6 +47,34 @@ public final class CatalogListViewModel {
     public private(set) var visibleItems: [MetaPreview] = []
     /// The types among the loaded titles, so the type selector shows only when there is a choice to make.
     public var loadedTypes: Set<String> { Set(items.map { $0.type.lowercased() }) }
+    /// Whether the sources hold movies and series together, so the type selector is in place while the first page loads.
+    public var expectsMixedTypes: Bool {
+        var types = Set<String>()
+        for source in request.sources {
+            switch source {
+            case .addonCatalog(let reference): types.insert(reference.catalogType.lowercased())
+            case .tmdbDiscover(let query):
+                if query.spansBothKinds { return true }
+                types.insert(query.kind == .movie ? "movie" : "series")
+            case .traktList, .traktFeed, .unsupported: break
+            }
+        }
+        return types.isSuperset(of: ["movie", "series"])
+    }
+    /// The genres the loaded titles list, each once whatever its case, A to Z, for the Genre menu. Years and orders are left out.
+    public var loadedGenres: [String] {
+        var seen = Set<String>()
+        var genres: [String] = []
+        for item in items {
+            for genre in item.genres {
+                let name = genre.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty, !DiscoverViewModel.isYear(name), !DiscoverViewModel.isOrder(name),
+                      seen.insert(name.lowercased()).inserted else { continue }
+                genres.append(name)
+            }
+        }
+        return genres.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
     private var shuffleRank: [String: Int] = [:]
     private let defaults: UserDefaults
     private var sortKey: String { "catalogList.sort.\(request.title)" }
@@ -63,7 +91,8 @@ public final class CatalogListViewModel {
         self.request = request
         self.services = services
         self.defaults = defaults
-        if let saved = defaults.string(forKey: "catalogList.sort.\(request.title)").flatMap(CatalogListSort.init(rawValue:)) {
+        // Shuffle is no longer offered, so a list remembered as shuffled opens in its own order.
+        if let saved = defaults.string(forKey: "catalogList.sort.\(request.title)").flatMap(CatalogListSort.init(rawValue:)), saved != .shuffle {
             filter.sort = saved
         }
     }

@@ -24,6 +24,8 @@ public struct AppServices: Sendable {
     public let traktSync: TraktSync
     /// The user's Home layout (nil inside means "automatic").
     public let widgets: any WidgetStore
+    /// The folder the Home layout is shared through with the user's other devices; nil where nothing may be shared (UI tests).
+    public let sharedFolder: SharedFolder?
     /// Loads the items of Home widgets, with an in-memory cache.
     public let widgetContent: WidgetContentService
     /// IMDb and Letterboxd ratings for poster badges.
@@ -65,8 +67,9 @@ public struct AppServices: Sendable {
                 trakt: TraktClient? = nil, secretsInKeychain: Bool = true, bestBlurays: BestBluraysClient? = nil,
                 traktSyncState: (any TraktSyncStateStore)? = nil, syncSchedulesItself: Bool = false, heroMeta: HeroMetaStore? = nil,
                 addonSpeed: (any AddonSpeedStore)? = nil, speedTester: AddonSpeedTester? = nil,
-                widgetShuffle: (any WidgetShuffleStore)? = nil, downloads: DownloadManager? = nil) {
+                widgetShuffle: (any WidgetShuffleStore)? = nil, downloads: DownloadManager? = nil, sharedFolder: SharedFolder? = nil) {
         self.downloads = downloads
+        self.sharedFolder = sharedFolder
         self.registry = registry
         self.client = client
         self.browse = browse ?? BrowseService(registry: registry, client: client)

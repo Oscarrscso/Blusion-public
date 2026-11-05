@@ -71,8 +71,6 @@ struct SearchView: View {
             #endif
             // Coming from another tab, Search starts on an empty field.
             .onChange(of: router.searchBrowseRevision) { model.query = "" }
-            // A title opened from a search was recorded as a recent search; the list reads them again.
-            .onChange(of: router.recentSearchRevision) { model.reloadRecents() }
             // Every arrival on Search, and every tap on its button, puts the cursor in the field and brings the keyboard up. The field
             // stays where it is, under the title.
             .onChange(of: router.searchFocusRevision, initial: true) { focusField() }
@@ -122,70 +120,41 @@ struct SearchView: View {
         }
     }
 
-    /// Two across on a phone, as many as fit on a wide window.
-    private var categoryColumns: [GridItem] {
-        metrics.isRegular
-            ? [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: Theme.Spacing.s)]
-            : Array(repeating: GridItem(.flexible(), spacing: Theme.Spacing.s), count: 2)
-    }
-
+    /// The idle page: the streaming services, each opening everything it streams, then the categories.
     private var browse: some View {
         VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
-            if !model.recentQueries.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    HStack {
-                        SectionHeader("Recent Searches")
-                        Button("Clear", systemImage: "xmark") {
-                            Haptics.play(.buttons)
-                            model.clearRecents()
-                        }
-                            .labelStyle(.titleOnly)
-                            .buttonStyle(.borderless)
-                            .help("Clear")
-                            .accessibilityIdentifier("search.clearRecents")
+            tileSection("Streaming Services") {
+                ForEach(StreamProvider.browsable, id: \.self) { provider in
+                    NavigationLink(value: CatalogListRequest(title: provider.name, sources: [provider.catalogSource])) {
+                        CollectionTile(title: provider.name, provider: provider).stretched()
                     }
-                    .padding(.horizontal, metrics.pageMargin)
-                    ForEach(model.recentQueries, id: \.self) { query in
-                        Button {
-                            model.query = query
-                            Task { await model.submit() }
-                        } label: {
-                            // The inset is part of the label, so the whole row from edge to edge answers a tap, not only the text.
-                            Label(query, systemImage: "clock")
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, metrics.pageMargin)
-                                .contentShape(Rectangle())
-                                .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("search.recent.\(query)")
-                        .contextMenu {
-                            Button("Remove", role: .destructive) { model.removeRecent(query) }
-                        }
-                    }
+                    .buttonStyle(PressableCardStyle.poster)
+                    .titleTapHaptic()
+                    .accessibilityIdentifier("search.service.\(provider.rawValue)")
                 }
             }
-            if model.browseGenres.isEmpty {
-                EmptyStateView("Search", systemImage: "magnifyingglass")
-            } else {
-                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                    SectionHeader("Categories")
-                    // Compact rows on the page's own surface, each with its category's glyph in a small coloured badge: calmer than a
-                    // wall of picture-sized colour tiles, and twice as many fit on a screen.
-                    LazyVGrid(columns: categoryColumns, spacing: Theme.Spacing.s) {
-                        ForEach(model.browseGenres) { genre in
-                            NavigationLink(value: CatalogListRequest(title: genre.name, sources: [genre.source])) {
-                                CategoryRow(title: genre.name)
-                            }
-                            .buttonStyle(PressableCardStyle(lifts: false))
-                            .titleTapHaptic()
-                            .accessibilityIdentifier("search.genre.\(genre.name)")
+            if !model.categories.isEmpty {
+                tileSection("Categories") {
+                    // Picture tiles, as on Home's genre shelf. A genre without a picture shows its colour placeholder.
+                    ForEach(model.categories) { genre in
+                        NavigationLink(value: CatalogListRequest(title: genre.name, sources: genre.sources)) {
+                            CollectionTile(title: genre.name, imageURL: genre.imageURL).stretched()
                         }
+                        .buttonStyle(PressableCardStyle.poster)
+                        .titleTapHaptic()
+                        .accessibilityIdentifier("search.genre.\(genre.name)")
                     }
                 }
-                .padding(.horizontal, metrics.pageMargin)
             }
         }
+    }
+
+    private func tileSection(_ title: String, @ViewBuilder tiles: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            SectionHeader(title)
+            LazyVGrid(columns: metrics.wideGridColumns, spacing: metrics.cardSpacing) { tiles() }
+        }
+        .padding(.horizontal, metrics.pageMargin)
     }
 
     private var resultItems: [MetaPreview] {
@@ -214,7 +183,7 @@ struct SearchView: View {
                 if model.aiAvailable { Text("AI").tag("ai") }
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, metrics.pageMargin)
+            .navigationAlignedWidth(margin: metrics.pageMargin)
             .accessibilityIdentifier("search.filters")
 
             if !resultItems.isEmpty {
@@ -248,40 +217,5 @@ struct SearchView: View {
         }
     }
 
-}
-
-/// One category on the Search page: its glyph in a small badge of its colour, its name, and a chevron.
-private struct CategoryRow: View {
-    @Environment(\.layoutMetrics) private var metrics
-    let title: String
-
-    var body: some View {
-        let accent = CollectionTile.accent(for: title)
-        HStack(spacing: Theme.Spacing.m) {
-            Image(systemName: accent.symbol)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(accent.colour.gradient, in: RoundedRectangle(cornerRadius: 8 * metrics.cornerScale(for: .panels), style: .continuous))
-                .accessibilityHidden(true)
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-        }
-        .padding(.horizontal, Theme.Spacing.m)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .cardSurface(cornerRadius: Theme.Radius.card + 2)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(.isButton)
-    }
 }
 #endif

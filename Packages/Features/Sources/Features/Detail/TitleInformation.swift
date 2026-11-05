@@ -3,7 +3,7 @@ import StremioKit
 
 /// The rows of a title page's Information, each a label and a value: its release (a series' first and last air dates), runtime, genres,
 /// director or creators and writers, studios and a series' network, countries, original language and title, a series' seasons and status,
-/// budget and box office, age rating, and the average of its ratings. Blank rows are left out.
+/// budget and box office, its rent and buy prices, age rating, and the average of its ratings. Blank rows are left out.
 public enum TitleInformation {
     public struct Row: Equatable, Sendable {
         public let label: String
@@ -11,7 +11,8 @@ public enum TitleInformation {
     }
 
     /// The rows in order, without the blank ones.
-    public static func rows(detail: MetaDetail, facts: TMDbTitleFacts?, certification: String?, averageRating: String?) -> [Row] {
+    public static func rows(detail: MetaDetail, facts: TMDbTitleFacts?, certification: String?, averageRating: String?,
+                            prices: TitlePrices? = nil) -> [Row] {
         let isSeries = detail.type == "series"
         let preview = detail.preview
         var rows: [(String, String?)] = []
@@ -38,12 +39,37 @@ public enum TitleInformation {
         if isSeries || facts?.status != "Released" { rows.append(("Status", facts?.status)) }
         rows.append(("Budget", money(facts?.budget)))
         rows.append(("Box office", money(facts?.revenue)))
+        for kind in TitlePrices.Kind.allCases {
+            for quality in TitlePrices.Quality.allCases.reversed() {
+                rows.append((priceLabel(kind, quality), price(prices?.cheapest(kind, quality) ?? [])))
+            }
+        }
         rows.append(("Age rating", certification))
         rows.append(("Average rating", averageRating))
         return rows.compactMap { label, value in
             guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
             return Row(label: label, value: value)
         }
+    }
+
+    /// A price row's label: "Rent 4K", "Buy SD".
+    public static func priceLabel(_ kind: TitlePrices.Kind, _ quality: TitlePrices.Quality) -> String {
+        "\(kind.label) \(quality.label)"
+    }
+
+    /// "€3.99" when every store asks the same; otherwise each price, cheapest first, with the stores that ask it ("€3.49 Amazon Video ·
+    /// €3.99 Apple TV Store, Sky Store"). Nil without offers.
+    private static func price(_ offers: [TitlePrices.Offer]) -> String? {
+        var groups: [(price: String, stores: [String])] = []
+        for offer in offers {
+            if let index = groups.firstIndex(where: { $0.price == offer.priceText }) {
+                groups[index].stores.append(offer.store)
+            } else {
+                groups.append((price: offer.priceText, stores: [offer.store]))
+            }
+        }
+        guard groups.count > 1 else { return groups.first?.price }
+        return groups.map { "\($0.price) \($0.stores.joined(separator: ", "))" }.joined(separator: " · ")
     }
 
     /// Up to three names, comma separated.

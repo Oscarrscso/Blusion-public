@@ -547,11 +547,10 @@ struct WidgetFieldPanel: View {
                 }
             }
             labelled("Pick From") {
-                ChoiceList(rowCount: model.randomSourceChoices.count) {
-                    ForEach(model.randomSourceChoices) { choice in
-                        let source = WidgetSource.addonCatalog(choice.reference)
-                        ChoiceRow(title: choice.title, subtitle: choice.addonName, isSelected: random?.sources.contains(source) == true) {
-                            model.toggleRandomSource(source)
+                ChoiceList(rowCount: model.randomSourceOptions.count) {
+                    ForEach(model.randomSourceOptions) { option in
+                        ChoiceRow(title: option.title, subtitle: option.subtitle, isSelected: random?.picks(option.source) == true) {
+                            model.toggleRandomSource(option.source)
                         }
                     }
                 }
@@ -568,8 +567,8 @@ struct WidgetFieldPanel: View {
                 }
             }
             Text("""
-                Home shows this widget with a source picked at random, from every catalog or from the ones ticked, named after the source, \
-                and picks again on the New Source schedule. With none ticked, it picks from every catalog.
+                Home shows this widget with a source picked at random, named after the source, and picks again on the New Source schedule. \
+                With none ticked, it picks from every source, less any unticked.
                 """)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -728,8 +727,7 @@ private struct ChoiceRow: View {
             .contentShape(Rectangle())
             .background(isSelected ? Theme.surface : Color.clear, in: RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .panels), style: .continuous))
         }
-        .buttonStyle(.plain)
-        .pointerFeedback()
+        .buttonStyle(.hoverPlain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -765,7 +763,7 @@ private struct SearchField: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .accessibilityLabel("Clear search")
             }
         }

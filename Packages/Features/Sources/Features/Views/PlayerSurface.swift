@@ -31,7 +31,10 @@ final class PlayerLayerView: UIView {
     var layout = VideoLayout() {
         didSet {
             guard layout != oldValue else { return }
-            if sourceSize != nil, window != nil, embedded == nil {
+            // A new inset comes with a rotation, so it applies at once, as the new size does; only a picture change eases into place.
+            var sameInset = layout
+            sameInset.inset = oldValue.inset
+            if sameInset != oldValue, sourceSize != nil, window != nil, embedded == nil {
                 animatesNextLayout = true
             }
             setNeedsLayout()

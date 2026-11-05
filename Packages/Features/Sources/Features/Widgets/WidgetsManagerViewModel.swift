@@ -53,6 +53,8 @@ public final class WidgetsManagerViewModel {
     public private(set) var widgets: [HomeWidget] = []
     public private(set) var isCustomised = false
     public private(set) var catalogChoices: [CatalogChoice] = []
+    /// The Trakt feeds a random source can pick: all of them once Trakt has a client ID, none before.
+    public private(set) var randomTraktFeeds: [TraktFeed] = []
     public private(set) var pendingImport: PendingImport?
     public private(set) var isWorking = false
     /// One sentence about the last action ("Imported 8 widgets.", "That isn't a widget export.") or nil.
@@ -158,7 +160,8 @@ public final class WidgetsManagerViewModel {
         await services.widgetShuffle.save(settings)
     }
 
-    /// Appended at the end. A widget whose id the list already uses gets a new one.
+    /// Put straight below Continue Watching, at the top of the list, so the new widget is seen first. A widget whose id the list already
+    /// uses gets a new one.
     public func add(_ widget: HomeWidget) async {
         guard let current = await savedList() else { return }
         let fresh = WidgetsManagerViewModel.withFreshIDs([widget], existing: current)
@@ -167,7 +170,11 @@ public final class WidgetsManagerViewModel {
             report("Home has a showcase already, and it stays at the top.", isError: true)
             return
         }
-        await commit(current + fresh)
+        // Without Continue Watching in the list the widget goes first, and `HomeLayout.normalised` puts Continue Watching back above it.
+        let index = (current.firstIndex(where: HomeLayout.isContinueWatching) ?? -1) + 1
+        var list = current
+        list.insert(contentsOf: fresh, at: index)
+        await commit(list)
         saveRevision += 1
     }
 
@@ -398,6 +405,7 @@ public final class WidgetsManagerViewModel {
         case .traktFeed(let feed):
             return "Trakt · \(feed.title)"
         case .tmdbDiscover(let query):
+            if let provider = StreamProvider.browsable.first(where: { $0.catalogSource == source }) { return "Streaming · \(provider.name)" }
             return query.summary
         case .unsupported(let kind):
             return "Not supported (\(kind))"
@@ -498,7 +506,8 @@ public final class WidgetsManagerViewModel {
         case .traktList, .traktFeed:
             return WidgetsManagerViewModel.traktTitle(source)
         case .tmdbDiscover(let query):
-            return query.title
+            // A streaming service's list is named for the service.
+            return StreamProvider.browsable.first { $0.catalogSource == source }?.name ?? query.title
         case .unsupported:
             return ""
         }
@@ -570,6 +579,14 @@ public final class WidgetsManagerViewModel {
         return HomeWidget(title: title, content: .collection(tiles))
     }
 
+    /// A collection with one tile per streaming service. Each tile opens everything TMDb lists on that service in the device's region.
+    public static func makeServicesCollection() -> HomeWidget {
+        let tiles = StreamProvider.browsable.map { provider in
+            CollectionItem(id: "service/\(provider.rawValue)", title: provider.name, imageAspect: .wide, sources: [provider.catalogSource])
+        }
+        return HomeWidget(title: "Streaming Services", content: .collection(tiles))
+    }
+
     // MARK: Helpers
 
     private static func catalogReference(_ choice: CatalogChoice, genre: String?) -> AddonCatalogReference {
@@ -639,6 +656,8 @@ public final class WidgetsManagerViewModel {
         let addons = await services.registry.addons
         installedAddons = addons
         catalogChoices = WidgetsManagerViewModel.choices(in: addons)
+        let clientID = await TraktClient.clientID(in: services.settings)
+        randomTraktFeeds = clientID.isEmpty ? [] : TraktFeed.allCases
         return addons
     }
 

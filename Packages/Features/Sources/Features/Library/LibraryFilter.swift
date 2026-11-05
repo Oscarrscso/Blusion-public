@@ -51,9 +51,10 @@ public enum LibrarySort: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .recentlyAdded: "Recently added"
         case .recentlyWatched: "Recently watched"
-        case .title: "Title"
-        case .year: "Year"
-        case .rating: "Rating"
+        // Named like Discover's orders, so none reads like the Year or Rating filter beside it.
+        case .title: "A–Z"
+        case .year: "Newest"
+        case .rating: "Top Rated"
         }
     }
 }

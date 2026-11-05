@@ -94,21 +94,10 @@ struct DetailActions: View {
                     Image(systemName: "play.fill")
                     if !hasNoStreams, model.isSeries, title.hasPrefix("Resume"),
                        let next = model.nextUp, let season = next.season, let episode = next.episode {
-                        #if targetEnvironment(macCatalyst)
-                        HStack(spacing: Theme.Spacing.s) {
-                            Text("Resume").foregroundStyle(.white)
-                            Text("S\(season)E\(episode)")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.6))
-                        }
-                        #else
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Resume").foregroundStyle(.white)
-                            Text("S\(season)E\(episode)")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.6))
-                        }
-                        #endif
+                        labelWithDetail("Resume", "S\(season)E\(episode)")
+                    } else if !hasNoStreams, let rent = model.titlePrices?.bestRent {
+                        // The cheapest rent in the best quality a store has, where a resumed episode would be.
+                        labelWithDetail(title.hasPrefix("Play") ? "Play" : title, "\(rent.quality.label) Rental: \(rent.priceText)")
                     } else {
                         Text(!hasNoStreams && title.hasPrefix("Play") ? "Play" : title)
                     }
@@ -122,6 +111,7 @@ struct DetailActions: View {
                         }
                     }
                     .animation(.smooth(duration: 0.25), value: isLoadingStreams)
+                    .animation(.smooth(duration: 0.3), value: model.titlePrices?.bestRent)
             }
             .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
             .contextMenu {
@@ -169,6 +159,26 @@ struct DetailActions: View {
             .accessibilityLabel(playsWhenLoaded ? "Play, loading" : "Play")
             .accessibilityIdentifier("detail.playButton")
         }
+    }
+
+    /// Play's label with a smaller second line (a resumed episode, a rent price): beside it on the Mac, under it on iPhone.
+    @ViewBuilder
+    private func labelWithDetail(_ label: String, _ detail: String) -> some View {
+        #if targetEnvironment(macCatalyst)
+        HStack(spacing: Theme.Spacing.s) {
+            Text(label).foregroundStyle(.white)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        #else
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).foregroundStyle(.white)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        #endif
     }
 
     /// Fixed circles reserve their natural width; Play uses all remaining space.

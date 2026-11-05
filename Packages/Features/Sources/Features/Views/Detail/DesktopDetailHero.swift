@@ -32,7 +32,7 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     /// The hero is extended below its former height so its bottom-aligned title, overview, ratings and actions sit noticeably lower.
     private var heroHeight: CGFloat { TitleHero.macHeight(pageHeight: size.height) }
     /// The widest the title, the actions and the ratings are, over the picture's lower left edge.
-    private static var textWidth: CGFloat { 560 }
+    private static var textWidth: CGFloat { TitleHero.macBlockWidth }
     /// The widest and tallest the title's logo is on this page.
     private static var logoBox: CGSize { CGSize(width: 420, height: 120) }
     /// The page's width from which the synopsis and the information sit side by side.
@@ -41,7 +41,7 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     private static var informationWidth: CGFloat { 300 }
     private static var columnGap: CGFloat { 48 }
     /// The widest the synopsis and the trailer's panel run, so their lines stay readable on a wide window.
-    private static var detailsMax: CGFloat { TitleHero.macDetailsWidth }
+    private static var detailsMax: CGFloat { TitleHero.macBlockWidth }
 
     /// The page's width less its margins.
     private var contentWidth: CGFloat { max(0, size.width - contentMargin * 2) }

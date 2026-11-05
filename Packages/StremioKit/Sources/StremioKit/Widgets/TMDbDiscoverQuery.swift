@@ -92,6 +92,9 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
     public var providers: [Named]
     /// The country the watch providers are looked up in, as an uppercase ISO 3166-1 code such as "IE". Nil uses the device's region.
     public var region: String?
+    /// Watch providers whose titles are left out, in `region`, sent as `without_watch_providers` alongside `providers`. Written only when
+    /// set, so a saved list keeps its encoding.
+    public var excludedProviders: [Named]
     public var cast: [Named]
     public var crew: [Named]
     public var companies: [Named]
@@ -107,7 +110,7 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
     public init(kind: Kind = .movie, ordering: Ordering = .popular, period: Period? = nil, genres: [Named] = [], keywords: [Named] = [],
                 excludedKeywords: [Named] = [], minimumScore: Double? = nil, maximumScore: Double? = nil, minimumVotes: Int? = nil,
                 language: String? = nil, minimumRuntime: Int? = nil, maximumRuntime: Int? = nil, releasedFrom: String? = nil,
-                releasedTo: String? = nil, providers: [Named] = [], region: String? = nil, cast: [Named] = [], crew: [Named] = [],
+                releasedTo: String? = nil, providers: [Named] = [], region: String? = nil, excludedProviders: [Named] = [], cast: [Named] = [], crew: [Named] = [],
                 companies: [Named] = [], excludedGenres: [Named] = [], spansBothKinds: Bool = false, usesTMDbScores: Bool = false) {
         self.spansBothKinds = spansBothKinds
         self.usesTMDbScores = usesTMDbScores
@@ -127,6 +130,7 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
         self.releasedTo = releasedTo
         self.providers = providers
         self.region = region
+        self.excludedProviders = excludedProviders
         self.cast = cast
         self.crew = crew
         self.companies = companies
@@ -136,7 +140,7 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case kind, ordering, period, genres, keywords, excludedKeywords, minimumScore, maximumScore, minimumVotes, language
         case minimumRuntime, maximumRuntime, releasedFrom, releasedTo, providers, region, cast, crew, companies, excludedGenres
-        case spansBothKinds, usesTMDbScores
+        case excludedProviders, spansBothKinds, usesTMDbScores
     }
 
     /// Every key is optional. An unknown `kind`, `ordering` or `period` falls back to its default, so a file from another version still
@@ -160,6 +164,7 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
             releasedTo: try container.decodeIfPresent(String.self, forKey: .releasedTo),
             providers: try container.decodeIfPresent([Named].self, forKey: .providers) ?? [],
             region: try container.decodeIfPresent(String.self, forKey: .region),
+            excludedProviders: try container.decodeIfPresent([Named].self, forKey: .excludedProviders) ?? [],
             cast: try container.decodeIfPresent([Named].self, forKey: .cast) ?? [],
             crew: try container.decodeIfPresent([Named].self, forKey: .crew) ?? [],
             companies: try container.decodeIfPresent([Named].self, forKey: .companies) ?? [],
@@ -192,6 +197,7 @@ public struct TMDbDiscoverQuery: Sendable, Codable, Equatable, Hashable {
         try container.encode(crew, forKey: .crew)
         try container.encode(companies, forKey: .companies)
         if !excludedGenres.isEmpty { try container.encode(excludedGenres, forKey: .excludedGenres) }
+        if !excludedProviders.isEmpty { try container.encode(excludedProviders, forKey: .excludedProviders) }
         if spansBothKinds { try container.encode(true, forKey: .spansBothKinds) }
         if usesTMDbScores { try container.encode(true, forKey: .usesTMDbScores) }
     }

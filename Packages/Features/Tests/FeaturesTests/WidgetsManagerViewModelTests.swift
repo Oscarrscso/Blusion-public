@@ -126,10 +126,22 @@ private let tvManifest = Manifest(id: "test.tv", name: "TV Catalogs", version: "
         let automatic = model.widgets
         let extra = plainRow("extra")
         await model.add(extra)
+        let cw = try #require(automatic.firstIndex(where: HomeLayout.isContinueWatching))
+        var expected = automatic
+        expected.insert(extra, at: cw + 1)
         #expect(model.isCustomised)
-        #expect(model.widgets == automatic + [extra])
+        #expect(model.widgets == expected, "a new widget goes straight below Continue Watching")
         let saved = await services.widgets.load()
-        #expect(saved == automatic + [extra], "the saved list is the whole layout, not just the change")
+        #expect(saved == expected, "the saved list is the whole layout, not just the change")
+    }
+
+    @Test func aNewWidgetGoesStraightBelowContinueWatching() async throws {
+        let services = try await services(widgets: [plainRow("a"), continueWatching, plainRow("b")])
+        let model = await loaded(services)
+        await model.add(plainRow("d"))
+        #expect(model.widgets.map(\.id) == ["a", "cw", "d", "b"])
+        let saved = await services.widgets.load()
+        #expect(saved?.map(\.id) == ["a", "cw", "d", "b"], "the saved order is the order Home shows")
     }
 
     @Test func mutationsPersistAndKeepTheirOrder() async throws {

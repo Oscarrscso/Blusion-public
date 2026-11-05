@@ -135,9 +135,9 @@ struct LibraryView: View {
     /// `isPhoneLandscape` is also true on an iPad turned sideways, so the device is checked as well.
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
 
-    /// The type selector: All, Movies, Series and Downloads. Then the menus and chips of the page in view. The Library shows its Year, Rating
-    /// and Sort; Downloads shows Status, Year and Sort. Each page keeps its own selection, so switching never changes the other's. The block
-    /// is the one Discover shares (see `BrowseFilterBar`), so the pages look the same.
+    /// The type selector: All, Movies, Series and Downloads. Then the menus and chips of the page in view. The Library shows its Genre, Year,
+    /// Rating and Sort; Downloads shows Type, Status, Year and Sort. Each page keeps its own selection, so switching never changes the
+    /// other's. The block is the one Discover shares (see `BrowseFilterBar`), so the pages look the same.
     private var filters: some View {
         @Bindable var model = model
         let kinds: [LibraryKind] = [.movie, .series]
@@ -152,6 +152,16 @@ struct LibraryView: View {
         }, identifier: "library.filter.kind", symbols: ["square.grid.2x2", "film", "tv", "arrow.down.circle"]), chips: filterChips,
         identifier: "library", clearAll: { model.clearFilters() }) {
             if model.showsDownloads {
+                Menu {
+                    Picker("Type", selection: $model.downloadFilter.kind) {
+                        Text("Any").tag(LibraryKind?.none)
+                        ForEach(kinds) { Text($0.title).tag(LibraryKind?.some($0)) }
+                    }
+                } label: {
+                    filterLabel(model.downloadFilter.kind?.title ?? "Type", systemImage: "film",
+                                isActive: model.downloadFilter.kind != nil)
+                }
+                .accessibilityIdentifier("library.downloads.filter.kind")
                 Menu {
                     Picker("Status", selection: $model.downloadFilter.status) {
                         ForEach(DownloadStatusFilter.allCases) { Text($0.title).tag($0) }
@@ -180,6 +190,17 @@ struct LibraryView: View {
                 .accessibilityLabel("Sort by \(model.downloadFilter.sort.title)")
                 .accessibilityIdentifier("library.downloads.sort")
             } else {
+                let genres = model.availableGenres
+                Menu {
+                    Picker("Genre", selection: Binding<String?> { model.filter.genres.first } set: { genre in model.filter.genres = genre.map { [$0] } ?? [] }) {
+                        Text("Any").tag(String?.none)
+                        ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
+                    }
+                } label: {
+                    filterLabel("Genre", systemImage: "tag", isActive: !model.filter.genres.isEmpty)
+                }
+                .disabled(genres.isEmpty)
+                .accessibilityIdentifier("library.filter.genre")
                 Menu {
                     ReleaseYearOptions(minimumYear: $model.filter.minimumYear, maximumYear: $model.filter.maximumYear,
                                        identifier: "library.filter.year")

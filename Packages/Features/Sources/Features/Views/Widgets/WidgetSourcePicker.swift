@@ -2,8 +2,8 @@
 import StremioKit
 import SwiftUI
 
-/// Where a widget's items come from: a catalog of an installed addon, or Trakt. With `genresOnly` (a collection tile) it lists catalogs
-/// that have genres and asks for one; otherwise a catalog is chosen whole and the editor offers the genre filter.
+/// Where a widget's items come from: a streaming service, Trakt, or a catalog of an installed addon. With `genresOnly` (a collection
+/// tile) it lists catalogs that have genres and asks for one; otherwise a catalog is chosen whole and the editor offers the genre filter.
 struct WidgetSourcePicker: View {
     let model: WidgetsManagerViewModel
     var genresOnly = false
@@ -11,8 +11,8 @@ struct WidgetSourcePicker: View {
     var showsCancel = false
     /// Opens the Trakt list browser. nil hides it (collections take addon genres only).
     var openTraktLists: (() -> Void)?
-    /// A Trakt list or feed was chosen. Collections take addon genres only, so Trakt is not offered for them.
-    var chooseTrakt: (WidgetSource) -> Void = { _ in }
+    /// A streaming service, or a Trakt list or feed, was chosen. Collections take addon genres only, so neither is offered for them.
+    var chooseSource: (WidgetSource) -> Void = { _ in }
     let choose: (WidgetsManagerViewModel.CatalogChoice, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -20,6 +20,12 @@ struct WidgetSourcePicker: View {
     var body: some View {
         List {
             if !genresOnly && query.isEmpty {
+                Section("Streaming Services") {
+                    ForEach(StreamProvider.browsable, id: \.self) { provider in
+                        Button { chooseSource(provider.catalogSource) } label: { Text(provider.name) }
+                            .accessibilityIdentifier("widgetSource.service.\(provider.rawValue)")
+                    }
+                }
                 Section("Trakt") {
                     if let openTraktLists {
                         Button { openTraktLists() } label: {
@@ -28,11 +34,11 @@ struct WidgetSourcePicker: View {
                         .accessibilityIdentifier("widgetSource.trakt.lists")
                     }
                     ForEach(TraktFeed.allCases, id: \.self) { feed in
-                        Button { chooseTrakt(.traktFeed(feed)) } label: { Text(feed.title) }
+                        Button { chooseSource(.traktFeed(feed)) } label: { Text(feed.title) }
                             .accessibilityIdentifier("widgetSource.trakt.\(feed.rawValue)")
                     }
                     NavigationLink {
-                        TraktListLinkForm(model: model, chooseTrakt: chooseTrakt)
+                        TraktListLinkForm(model: model, chooseSource: chooseSource)
                     } label: {
                         Text("Trakt List from Link")
                     }
@@ -81,7 +87,7 @@ struct WidgetSourcePicker: View {
 /// Adds a public Trakt list from its link. The list's name is read from Trakt, so a bad link or a missing client ID is said here.
 private struct TraktListLinkForm: View {
     let model: WidgetsManagerViewModel
-    let chooseTrakt: (WidgetSource) -> Void
+    let chooseSource: (WidgetSource) -> Void
     @State private var link = ""
     @State private var isReading = false
     @State private var problem: String?
@@ -119,7 +125,7 @@ private struct TraktListLinkForm: View {
         do {
             let list = try await model.traktList(fromLink: link)
             problem = nil
-            chooseTrakt(.traktList(list))
+            chooseSource(.traktList(list))
         } catch let error as WidgetsManagerViewModel.TraktLinkError {
             problem = error.message
         } catch {

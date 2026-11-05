@@ -82,6 +82,10 @@ struct WidgetsManagerView: View {
             Button("New Widget", systemImage: "rectangle.stack.badge.plus") { hidesWidgets = false; creating = .widget }
             Button("Genre Collection", systemImage: "square.grid.2x2") { hidesWidgets = false; showsGenreCollection = true }
                 .disabled(model.catalogChoices.allSatisfy { $0.genres.isEmpty })
+            Button("Streaming Services", systemImage: "play.tv") {
+                hidesWidgets = false
+                Task { await model.add(WidgetsManagerViewModel.makeServicesCollection()) }
+            }
             Button("Continue Watching", systemImage: "play.circle") {
                 hidesWidgets = false
                 Task { await model.add(HomeWidget(title: "Continue", content: .continueWatching)) }
@@ -336,6 +340,26 @@ struct WidgetsManagerView: View {
         }
     }
 
+    /// Everything under the cards. On the Mac the grid takes the whole window, as the Mac's other grids do, and only these keep to the
+    /// readable column.
+    private var settingsGroups: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            if model.catalogChoices.isEmpty {
+                Text("Install an addon with catalogs, or use a Trakt list, to add more rows.").font(.footnote).foregroundStyle(.secondary)
+            }
+            shuffleSettings
+            importAndExport
+            if model.isCustomised { resetRow }
+            if let message = model.message {
+                Text(message).font(.footnote).foregroundStyle(model.messageIsError ? Color.orange : Color.secondary)
+                    .accessibilityIdentifier("widgets.message")
+            }
+        }
+        #if targetEnvironment(macCatalyst)
+        .readableColumn()
+        #endif
+    }
+
     // MARK: Grid
 
     private var grid: some View {
@@ -415,16 +439,7 @@ struct WidgetsManagerView: View {
                     grid
                         .accessibilityIdentifier("widgets.list")
                 }
-                if model.catalogChoices.isEmpty {
-                    Text("Install an addon with catalogs, or use a Trakt list, to add more rows.").font(.footnote).foregroundStyle(.secondary)
-                }
-                shuffleSettings
-                importAndExport
-                if model.isCustomised { resetRow }
-                if let message = model.message {
-                    Text(message).font(.footnote).foregroundStyle(model.messageIsError ? Color.orange : Color.secondary)
-                        .accessibilityIdentifier("widgets.message")
-                }
+                settingsGroups
             }
             .padding(16)
             .onGeometryChange(for: CGFloat.self) { max(0, $0.size.width - 32) } action: { gridWidth = $0 }
@@ -433,8 +448,8 @@ struct WidgetsManagerView: View {
         .scrollIndicatorsFlash(onAppear: true)
         #if !targetEnvironment(macCatalyst)
         .scrollDisabled(drag != nil)
-        #endif
         .readableColumn()
+        #endif
         .screenBackground()
         .navigationTitle("Widgets")
         .macRootNavigation()
@@ -778,7 +793,7 @@ private struct WidgetCard: View {
                             .font(.system(size: Self.trashSize * 0.39, weight: .semibold))
                             .frame(width: Self.trashSize, height: Self.trashSize)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.hoverGlass)
                     .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
                     .accessibilityLabel("Duplicate \(widget.title)")
                     .accessibilityIdentifier("widgets.menu.duplicate.\(widget.id)")
@@ -789,7 +804,7 @@ private struct WidgetCard: View {
                             .font(.system(size: Self.trashSize * 0.39, weight: .semibold))
                             .frame(width: Self.trashSize, height: Self.trashSize)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.hoverGlass)
                     .buttonBorderShape(metrics.includesCircularButtons ? .roundedRectangle(radius: 22 * metrics.circularButtonScale(for: .actionButtons)) : .circle)
                     .accessibilityLabel("Delete \(widget.title)")
                     .accessibilityIdentifier("widgets.menu.delete.\(widget.id)")
@@ -850,13 +865,25 @@ private struct WidgetCard: View {
         .background(Color(white: 0.14))
     }
 
-    /// One picture of the collage, small enough to load quickly. A backdrop falls back to the poster when the title has none.
+    /// The first four tiles of a collection, which its card shows as pictures.
+    private var collectionTiles: [CollectionItem] {
+        guard case .collection(let tiles) = widget.content else { return [] }
+        return Array(tiles.prefix(4))
+    }
+
+    /// One picture of the collage, small enough to load quickly. A backdrop falls back to the poster when the title has none. A streaming
+    /// service's tile in a collection shows the service's logo.
+    @ViewBuilder
     private func tile(_ index: Int, backdrop: Bool) -> some View {
-        let item = items.indices.contains(index) ? items[index] : nil
-        let url = item.flatMap { backdrop ? ($0.background ?? $0.poster) : $0.poster }
-        return ArtworkImage(url: url, title: item?.name ?? "", maxPixelSize: 300, contentMode: .fill)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
+        if collectionTiles.indices.contains(index), let provider = StreamProvider(tileTitle: collectionTiles[index].title) {
+            StreamProviderTile(provider: provider)
+        } else {
+            let item = items.indices.contains(index) ? items[index] : nil
+            let url = item.flatMap { backdrop ? ($0.background ?? $0.poster) : $0.poster }
+            ArtworkImage(url: url, title: item?.name ?? "", maxPixelSize: 300, contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+        }
     }
 
     /// The widget's style, as its editor names it.
@@ -918,7 +945,7 @@ private struct WidgetsPageGroup<Content: View>: View {
                 Text(title).font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
             }
             VStack(spacing: 0) { content }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverPlain)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .panels), style: .continuous))
         }
         .frame(maxWidth: .infinity, alignment: .leading)

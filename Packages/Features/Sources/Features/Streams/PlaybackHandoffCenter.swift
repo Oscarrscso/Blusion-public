@@ -51,5 +51,8 @@ public struct PlaybackHandoffCenter: Sendable {
                                    position: position, duration: duration, isWatched: reachedEnd || previous?.isWatched == true,
                                    updatedAt: now(), season: request.season, episode: request.episode)
         await services.progress.save(record)
+        if reachedEnd {
+            await services.queueNextContinueEpisode(after: request)
+        }
     }
 }

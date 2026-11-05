@@ -71,6 +71,7 @@ private struct ShelfHeaderButtonStyle: ButtonStyle {
         configuration.label
             .opacity(configuration.isPressed ? 0.55 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .pointerFeedback()
     }
 }
 

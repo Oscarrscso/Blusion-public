@@ -3,6 +3,7 @@ import Network
 import SwiftUI
 import StremioKit
 import UIKit
+import UniformTypeIdentifiers
 
 /// The Settings root: one row per area, each with a one-line summary of its current state. The areas are pages of their own below,
 /// all reading and writing the one `SettingsViewModel` the root owns.
@@ -10,6 +11,7 @@ struct SettingsView: View {
     @Environment(\.layoutMetrics) private var metrics
     @State private var model: SettingsViewModel
     @State private var datasetStatus: IMDbDatasetStatus?
+    @State private var syncFolderName: String?
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
     @AppStorage(ImageCachePolicy.diskMegabytesKey) private var imageCacheMegabytes = ImageCachePolicy.defaultDiskMegabytes
     @AppStorage(AppearancePreferences.defaultsKey) private var appearance = AppearancePreferences()
@@ -18,6 +20,7 @@ struct SettingsView: View {
     let aetherEngineLinked: Bool
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
+    @Environment(AppRouter.self) private var router
     /// Ghost mode, kept between launches (see `GhostMode`). Pulling the page down and holding it for two seconds switches it.
     @AppStorage(GhostMode.defaultsKey) private var ghostIsOn = false
     /// How far the page is pulled down past its top, in points.
@@ -36,7 +39,32 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        SettingsList {
+        #if targetEnvironment(macCatalyst)
+        // As on iPad: the list beside the page chosen in it, and what that page pushes on a stack of its own.
+        @Bindable var router = router
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            list
+                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 400)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
+            NavigationStack(path: $router.settingsPath) {
+                if let selection = router.settingsSelection {
+                    page(selection)
+                } else {
+                    Color.clear.screenBackground()
+                }
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onChange(of: router.settingsSelection) { router.settingsPath = NavigationPath() }
+        #else
+        list.navigationDestination(for: SettingsDestination.self) { page($0) }
+        #endif
+    }
+
+    private var list: some View {
+        @Bindable var router = router
+        return SettingsList(selection: Self.selectsBesideList ? $router.settingsSelection : nil) {
             if ghostIsOn {
                 Section {
                     HStack(spacing: Theme.Spacing.m) {
@@ -49,74 +77,75 @@ struct SettingsView: View {
                     }
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("settings.ghost")
+                    .listRowBackground(SettingsRowBackground())
                 }
             }
             Section("Content") {
-                NavigationLink(value: SettingsDestination.addons) {
+                link(.addons) {
                     SettingsRow(title: "Addons", summary: "\(model.installedAddonCount) installed", systemImage: "puzzlepiece.extension")
                 }
                 .accessibilityIdentifier("settings.addons")
-                NavigationLink { AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } }) } label: {
+                link(.addonSpeed) {
                     SettingsRow(title: "Addon Speed",
                                 summary: AddonSpeedViewModel.summary(for: model.settings.autoPickWait, names: model.addonNames),
                                 systemImage: "speedometer")
                 }
                 .accessibilityIdentifier("settings.section.addonSpeed")
-                NavigationLink(value: SettingsDestination.widgets) {
+                link(.widgets) {
                     SettingsRow(title: "Widgets", summary: "Home rows and layout", systemImage: "rectangle.3.group")
                 }
                 .accessibilityIdentifier("settings.widgets")
             }
             Section("Playback & appearance") {
-                NavigationLink { PlaybackSettingsPage(model: model) } label: {
+                link(.playback) {
                     SettingsRow(title: "Playback", summary: playbackSummary, systemImage: "play.rectangle")
                 }
                 .accessibilityIdentifier("settings.section.playback")
-                NavigationLink { PlayerSettingsPage(model: model) } label: {
+                link(.player) {
                     SettingsRow(title: "Player", summary: "Subtitles, audio, picture, skip buttons", systemImage: "slider.horizontal.3")
                 }
                 .accessibilityIdentifier("settings.section.player")
-                NavigationLink { AppearanceSettingsPage(model: model) } label: {
+                link(.appearance) {
                     SettingsRow(title: "Appearance", summary: appearanceSummary, systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("settings.section.appearance")
-                NavigationLink { LazyLoadSettingsPage() } label: {
+                link(.lazyLoad) {
                     SettingsRow(title: "Lazy load", summary: lazyLoadLabel(lookaheadLevel), systemImage: "arrow.down.to.line")
                 }
                 .accessibilityIdentifier("settings.section.lazyLoad")
                 // A Mac has no haptic hardware, so the page would be sliders it cannot demonstrate.
                 #if !targetEnvironment(macCatalyst)
-                NavigationLink { HapticsSettingsPage(model: model) } label: {
+                link(.haptics) {
                     SettingsRow(title: "Haptics", summary: hapticsSummary, systemImage: "hand.tap")
                 }
                 .accessibilityIdentifier("settings.section.haptics")
                 #endif
             }
             Section("Ratings") {
-                NavigationLink { ReviewServicesPage(model: model, services: services) } label: {
+                link(.reviews) {
                     SettingsRow(title: "Review services", summary: reviewServicesSummary, systemImage: "star.bubble")
                 }
                 .accessibilityIdentifier("settings.section.reviews")
-                NavigationLink { IMDbRatingsPage(status: datasetStatus) } label: {
+                link(.imdb) {
                     SettingsRow(title: "IMDb ratings", summary: IMDbDatasetSummary.text(datasetStatus), systemImage: "arrow.down.circle")
                 }
                 .accessibilityIdentifier("settings.section.imdb")
             }
             Section("Accounts & server") {
-                NavigationLink { TraktAccountView(services: services) } label: {
+                link(.trakt) {
                     SettingsRow(title: "Trakt", summary: "Sync and lists", systemImage: "person.crop.circle")
                 }
                 .accessibilityIdentifier("settings.trakt")
-                NavigationLink { AccountsSettingsPage(model: model) } label: {
+                link(.continueRefresh) {
                     SettingsRow(title: "Continue refresh", summary: continueRefreshSummary, systemImage: "arrow.clockwise")
                 }
                 .accessibilityIdentifier("settings.section.accounts")
-                NavigationLink { ServerSettingsPage(model: model) } label: {
+                link(.server) {
                     SettingsRow(title: "Streaming server", summary: model.settings.streamingServerURL ?? "Not set", systemImage: "server.rack")
                 }
                 .accessibilityIdentifier("settings.section.server")
                 if fallbackEngineLinked {
-                    NavigationLink { FallbackSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked) } label: {
+                    link(.fallback) {
                         SettingsRow(title: "Fallback player", summary: FallbackSettingsPage.summary(model.settings, aetherEngineLinked: aetherEngineLinked),
                                     systemImage: "film")
                     }
@@ -124,20 +153,27 @@ struct SettingsView: View {
                 }
             }
             Section("Data") {
-                NavigationLink { DownloadSettingsPage(services: services) } label: {
+                link(.downloads) {
                     SettingsRow(title: "Downloads", summary: "", systemImage: "arrow.down.circle")
                 }
-                NavigationLink { ImageCacheSettingsPage() } label: {
+                link(.imageCache) {
                     SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
                 }
                 .accessibilityIdentifier("settings.section.imageCache")
-                NavigationLink { DataSettingsPage(model: model) } label: {
+                if let folder = services.sharedFolder {
+                    link(.syncFolder) {
+                        SettingsRow(title: "Sync folder", summary: syncFolderName ?? "Off", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .onAppear { syncFolderName = folder.folderName }
+                    .accessibilityIdentifier("settings.section.syncFolder")
+                }
+                link(.data) {
                     SettingsRow(title: "Clear data", summary: "History, library, settings", systemImage: "trash")
                 }
                 .accessibilityIdentifier("settings.section.data")
             }
             Section("About") {
-                NavigationLink { AboutSettingsPage(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked) } label: {
+                link(.about) {
                     SettingsRow(title: "About", summary: "Version \(SettingsViewModel.appVersion)", systemImage: "info.circle")
                 }
                 .accessibilityIdentifier("settings.section.about")
@@ -181,6 +217,52 @@ struct SettingsView: View {
                 return
             }
             setGhost(!ghostIsOn)
+        }
+    }
+
+    /// Mac shows the chosen page beside the list; iPhone pushes it.
+    private static var selectsBesideList: Bool {
+        #if targetEnvironment(macCatalyst)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// A row that opens `destination`. Beside the list, the chosen row is lit.
+    private func link<Label: View>(_ destination: SettingsDestination, @ViewBuilder label: () -> Label) -> some View {
+        NavigationLink(value: destination, label: label)
+            .listRowBackground(SettingsRowBackground(isSelected: Self.selectsBesideList && router.settingsSelection == destination))
+    }
+
+    @ViewBuilder
+    private func page(_ destination: SettingsDestination) -> some View {
+        switch destination {
+        case .addons: AddonsView(services: services)
+        case .addonSpeed: AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } })
+        case .widgets: WidgetsManagerView(services: services)
+        case .playback: PlaybackSettingsPage(model: model)
+        case .player: PlayerSettingsPage(model: model)
+        case .appearance: AppearanceSettingsPage(model: model)
+        case .lazyLoad: LazyLoadSettingsPage()
+        case .haptics:
+            #if targetEnvironment(macCatalyst)
+            EmptyView()
+            #else
+            HapticsSettingsPage(model: model)
+            #endif
+        case .reviews: ReviewServicesPage(model: model, services: services)
+        case .imdb: IMDbRatingsPage(status: datasetStatus)
+        case .trakt: TraktAccountView(services: services)
+        case .continueRefresh: AccountsSettingsPage(model: model)
+        case .server: ServerSettingsPage(model: model)
+        case .fallback: FallbackSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked)
+        case .downloads: DownloadSettingsPage(services: services)
+        case .imageCache: ImageCacheSettingsPage()
+        case .syncFolder:
+            if let folder = services.sharedFolder { SyncFolderSettingsPage(folder: folder, services: services) }
+        case .data: DataSettingsPage(model: model)
+        case .about: AboutSettingsPage(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked)
         }
     }
 
@@ -241,6 +323,7 @@ struct SettingsView: View {
         if model.settings.usesHeroPosters { on.append("Hero artwork on posters") }
         if model.settings.showsPosterRatings { on.append("Ratings on posters") }
         if model.settings.showsColouredRatingLogos { on.append("Coloured logos") }
+        if model.settings.showsBestDiscOnPosters { on.append("Best disc on posters") }
         return on.isEmpty ? "Default appearance" : on.joined(separator: ", ")
     }
 
@@ -301,14 +384,21 @@ struct SettingsRow: View {
 
 /// A native list with app-owned row backgrounds, so its corners can be adjusted independently.
 struct SettingsList<Content: View>: View {
+    /// Mac Settings' choice of page. With one, each row draws its own background, so the chosen row can be lit (see `SettingsView`).
+    var selection: Binding<SettingsDestination?>? = nil
     @ViewBuilder let content: () -> Content
     @Environment(\.layoutMetrics) private var metrics
 
     var body: some View {
-        List {
-            content()
-                .listRowBackground(SettingsRowBackground())
-                .listRowSeparator(.hidden)
+        List(selection: selection) {
+            if selection == nil {
+                content()
+                    .listRowBackground(SettingsRowBackground())
+                    .listRowSeparator(.hidden)
+            } else {
+                content()
+                    .listRowSeparator(.hidden)
+            }
         }
         .listStyle(.grouped)
         .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
@@ -317,11 +407,13 @@ struct SettingsList<Content: View>: View {
 }
 
 struct SettingsRowBackground: View {
+    /// The page shown beside the list (Mac Settings).
+    var isSelected = false
     @Environment(\.layoutMetrics) private var metrics
 
     var body: some View {
         RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .settingsRows), style: .continuous)
-            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+            .fill(isSelected ? AnyShapeStyle(TintShapeStyle().opacity(0.35)) : AnyShapeStyle(Color(uiColor: .secondarySystemGroupedBackground)))
     }
 }
 
@@ -662,6 +754,53 @@ private struct DataSettingsPage: View {
             Button("Cancel", role: .cancel) {}
         } message: { scope in
             Text(scope.warning)
+        }
+    }
+}
+
+/// The folder the Home layout is shared through with the user's other devices, such as one in iCloud Drive (see `SyncedWidgetStore`).
+private struct SyncFolderSettingsPage: View {
+    let folder: SharedFolder
+    let services: AppServices
+    @State private var folderName: String?
+    @State private var isChoosing = false
+    @State private var failed = false
+
+    var body: some View {
+        SettingsList {
+            Section {
+                LabeledContent("Folder", value: folderName ?? "None")
+                Button(folderName == nil ? "Choose folder" : "Change folder") { isChoosing = true }
+                    .accessibilityIdentifier("settings.syncFolder.choose")
+                if folderName != nil {
+                    Button("Stop syncing", role: .destructive) {
+                        folder.forget()
+                        folderName = nil
+                    }
+                    .accessibilityIdentifier("settings.syncFolder.stop")
+                }
+                if failed {
+                    Label("That folder can't be used.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
+        .settingsPage("Sync folder")
+        .onAppear { folderName = folder.folderName }
+        .fileImporter(isPresented: $isChoosing, allowedContentTypes: [.folder]) { result in
+            guard case .success(let url) = result else { return }
+            do {
+                try folder.choose(url)
+                folderName = folder.folderName
+                failed = false
+                // The first look at the folder: its layout comes in, or this device's layout starts it.
+                Task { _ = await services.widgets.takeInSharedLayout() }
+            } catch {
+                failed = true
+            }
         }
     }
 }

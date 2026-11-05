@@ -200,8 +200,11 @@ struct CollectionRow: View {
                      onSeeAll: widget.id == "auto.genres" ? { router.showSearchBrowse() } : nil) {
                 ForEach(items) { item in
                     NavigationLink(value: CatalogListRequest(title: item.title, sources: item.sources, presentation: WidgetPresentation())) {
-                        CollectionTile(title: item.title, imageURL: item.imageURL ?? photos[HomeViewModel.tilePhotoKey(widgetID: widget.id, tile: item)],
-                                       aspect: item.imageAspect.cardAspect, hideTitle: item.hideTitle)
+                        // A tile named for a streaming service, without a picture of its own, shows the service's logo.
+                        let provider = item.imageURL == nil ? StreamProvider(tileTitle: item.title) : nil
+                        CollectionTile(title: item.title,
+                                       imageURL: item.imageURL ?? photos[HomeViewModel.tilePhotoKey(widgetID: widget.id, tile: item)],
+                                       provider: provider, aspect: item.imageAspect.cardAspect, hideTitle: item.hideTitle)
                     }
                     .buttonStyle(PressableCardStyle.poster)
                     .titleTapHaptic()
@@ -243,7 +246,7 @@ struct ContinueWatchingRow: View {
                         } label: {
                             Text(title)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.hoverPlain)
                         .headingStyle()
                         .foregroundStyle(.primary)
                         .lineLimit(1)

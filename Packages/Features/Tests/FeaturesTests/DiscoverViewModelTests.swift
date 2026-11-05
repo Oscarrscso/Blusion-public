@@ -133,6 +133,20 @@ import StremioKitTestSupport
         #expect(model.items.isEmpty)
     }
 
+    @Test func genresLeaveOutOrdersAndYearsAndRepeats() {
+        func catalog(_ id: String, _ options: [String]) -> CatalogDescriptor {
+            CatalogDescriptor(type: "movie", id: id, extra: [ExtraDescriptor(name: "genre", options: options)])
+        }
+        let genres = DiscoverViewModel.genres(of: [
+            catalog("sorts", ["Date Added ↓", "Date Added ↑", "Title A-Z", "Title Z-A", "Actions"]),
+            catalog("library", ["Recently Added", "Oldest Added", "Film Name", "Release Date (Newest)", "Release Date (Oldest)"]),
+            catalog("years", ["2024", "2023", "1990s"]),
+            catalog("genres", ["Thriller", "Action", "Top Rated", "Sci-Fi", "Comedy"]),
+            catalog("more", ["action", "Drama", "Film-Noir"]),
+        ])
+        #expect(genres == ["Action", "Comedy", "Drama", "Film-Noir", "Sci-Fi", "Thriller"])
+    }
+
     @Test func yearSpanLabelWordsTheSpanLikeTheLibraryChips() throws {
         let model = DiscoverViewModel(services: services(try MockServer.shared()))
         #expect(model.yearSpanLabel == nil)

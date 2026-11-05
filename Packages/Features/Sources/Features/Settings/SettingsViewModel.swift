@@ -71,6 +71,7 @@ public final class SettingsViewModel {
         openSubtitlesPasswordText = settings.openSubtitlesPassword ?? ""
         services.posterRatings.isEnabled = settings.showsPosterRatings
         services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
+        services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
         let addons = await services.registry.addons
         installedAddonCount = addons.count
         addonNames = Dictionary(addons.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -174,6 +175,14 @@ public final class SettingsViewModel {
         settings = await services.settings.load()
         settings.showsColouredRatingLogos = value
         services.posterRatings.showsColouredLogos = value
+        await services.settings.save(settings)
+    }
+
+    /// Also switches the disc marks in the store the posters read.
+    public func setShowsBestDiscOnPosters(_ value: Bool) async {
+        settings = await services.settings.load()
+        settings.showsBestDiscOnPosters = value
+        services.posterRatings.showsBestDisc = value
         await services.settings.save(settings)
     }
 
