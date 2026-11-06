@@ -18,12 +18,13 @@ struct WidgetBuilderView: View {
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.dismiss) private var dismiss
 
-    /// Makes a row, spotlight or banner when `widget` is nil (a TMDB list of popular movies), or changes `widget`.
-    init(mode: WidgetBuilderModel.Mode, widget: HomeWidget?, manager: WidgetsManagerViewModel, services: AppServices) {
+    /// Makes a widget in `style` when `widget` is nil (a TMDB list of popular movies), or changes `widget`.
+    init(mode: WidgetBuilderModel.Mode, widget: HomeWidget?, style: WidgetStyle = .row, manager: WidgetsManagerViewModel,
+         services: AppServices) {
         self.mode = mode
         self.manager = manager
         self.services = services
-        _model = State(initialValue: WidgetBuilderModel(mode: mode, widget: widget, manager: manager, services: services))
+        _model = State(initialValue: WidgetBuilderModel(mode: mode, widget: widget, style: style, manager: manager, services: services))
     }
 
     var body: some View {
@@ -32,6 +33,7 @@ struct WidgetBuilderView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     if model.needsTMDbToken { tokenNotice }
                     SentenceCard(model: model)
+                    StyleMenu(model: model)
                     PillList(model: model)
                     if mode == .edit { removeButton }
                 }
@@ -341,8 +343,8 @@ private struct PillList: View {
         Group(title: "Dates and availability", tint: .green, fields: [.period, .release, .region, .providers]),
         // The people who made it: orange.
         Group(title: "People and studios", tint: .orange, fields: [.cast, .crew, .companies]),
-        // How the widget looks on Home: teal.
-        Group(title: "Appearance", tint: .teal, fields: [.title, .limit, .style, .cards, .posters]),
+        // How the widget looks on Home: teal. Style is not here: it has its own menu under the sentence (see `StyleMenu`).
+        Group(title: "Appearance", tint: .teal, fields: [.title, .limit, .cards, .posters]),
     ]
 
     /// A setting whose own job says more than its group's: Exclude takes titles away, so it is red wherever it sits.
@@ -351,7 +353,7 @@ private struct PillList: View {
 
     var body: some View {
         let pills = Dictionary(model.pills.map { ($0.field, $0) }, uniquingKeysWith: { first, _ in first })
-        let grouped = Set(Self.groups.flatMap(\.fields))
+        let grouped = Set(Self.groups.flatMap(\.fields) + [.style])
         // A setting added later without a group still shows, at the end, rather than vanishing.
         let ungrouped = model.pills.filter { !grouped.contains($0.field) }
         GlassEffectContainer(spacing: Theme.Spacing.s) {
@@ -402,15 +404,10 @@ private struct PillList: View {
 /// width, or its half of a pair of filters, and is at least as tall as the others, so they line up. A row that cannot be used now is faded
 /// and does nothing.
 private struct PillButton: View {
-    @Environment(\.layoutMetrics) private var metrics
     let model: WidgetBuilderModel
     let pill: WidgetBuilderModel.Pill
     /// The symbol's colour, which says what kind of setting this is. The name and the value stay white.
     let tint: Color
-
-    /// The least height of every row, so the rows of the list line up.
-    static let minHeight: CGFloat = 52
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16 * metrics.cornerScale(for: .panels), style: .continuous) }
 
     var body: some View {
         let isOpen = model.selectedField == pill.field
@@ -418,41 +415,84 @@ private struct PillButton: View {
             Haptics.play(.buttons)
             model.select(pill.field)
         } label: {
-            HStack(spacing: Theme.Spacing.s) {
-                // A size at which the widest symbols (three people, the masks) stay inside the box, so no icon runs into its title.
-                Image(systemName: pill.systemImage)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(pill.title)
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text(pill.value)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, Theme.Spacing.m)
-            .frame(maxWidth: .infinity, minHeight: Self.minHeight)
-            .buttonSurface(.regular.interactive(), in: shape)
-            .glassHover(shape)
-            .overlay {
-                if isOpen { shape.strokeBorder(.white, lineWidth: 1.5) }
-            }
-            .opacity(pill.isEnabled ? 1 : 0.4)
+            PillRow(title: pill.title, value: pill.value, systemImage: pill.systemImage, tint: tint,
+                    chevron: isOpen ? "chevron.up" : "chevron.down", isOpen: isOpen)
+                .opacity(pill.isEnabled ? 1 : 0.4)
         }
         .buttonStyle(.plain)
         .disabled(!pill.isEnabled)
         .accessibilityLabel("\(pill.title), \(pill.value)")
         .accessibilityIdentifier("widgetBuilder.pill.\(pill.field.rawValue)")
+    }
+}
+
+/// The widget's style, under the sentence where it is seen at once: a menu of every style, the current one checked. A choice changes the
+/// widget straight away.
+private struct StyleMenu: View {
+    let model: WidgetBuilderModel
+
+    var body: some View {
+        Menu {
+            Picker("Style", selection: Binding(get: { model.style }, set: { model.setStyle($0) })) {
+                ForEach(WidgetStyle.allCases) { style in
+                    Label(style.rawValue, systemImage: style.systemImage).tag(style)
+                }
+            }
+        } label: {
+            PillRow(title: "Style", value: model.style.rawValue, systemImage: model.style.systemImage, tint: .teal,
+                    chevron: "chevron.up.chevron.down")
+        }
+        .menuIndicator(.hidden)
+        .accessibilityLabel("Style, \(model.style.rawValue)")
+        .accessibilityIdentifier("widgetEditor.style")
+    }
+}
+
+/// A setting's row: its icon, its name over its value, and a chevron, on glass. It fills its width and is at least as tall as the others,
+/// so the rows line up. An open setting has a white outline.
+private struct PillRow: View {
+    @Environment(\.layoutMetrics) private var metrics
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+    let chevron: String
+    var isOpen = false
+
+    /// The least height of every row, so the rows of the list line up.
+    static let minHeight: CGFloat = 52
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16 * metrics.cornerScale(for: .panels), style: .continuous) }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            // A size at which the widest symbols (three people, the masks) stay inside the box, so no icon runs into its title.
+            Image(systemName: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(value)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: chevron)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, Theme.Spacing.m)
+        .frame(maxWidth: .infinity, minHeight: Self.minHeight)
+        .buttonSurface(.regular.interactive(), in: shape)
+        .glassHover(shape)
+        .overlay {
+            if isOpen { shape.strokeBorder(.white, lineWidth: 1.5) }
+        }
     }
 }
 

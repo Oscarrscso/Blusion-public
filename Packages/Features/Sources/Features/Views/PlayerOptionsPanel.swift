@@ -95,6 +95,7 @@ struct PlayerOptionsPanel: View {
                             .padding(.vertical, 12)
                     }
                     .scrollPosition($scrollPosition)
+                    .environment(\.pageReveal, proxy.pageReveal)
                     .scrollIndicators(.visible, axes: .vertical)
                     .scrollIndicatorsFlash(onAppear: true)
                     .scrollBounceBehavior(.basedOnSize)

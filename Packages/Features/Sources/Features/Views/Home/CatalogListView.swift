@@ -29,9 +29,12 @@ struct CatalogListView: View {
             scrollPage
             #endif
         }
-        // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+        // One side margin for everything on the page, in line with Back and the large title (see `LayoutMetrics.gridPage`).
         .environment(\.layoutMetrics, metrics.gridPage)
         .navigationTitle(isPhoneInLandscape ? "" : request.title)
+        // A service's page draws its own heading, the logo beside the name, which the system's title cannot hold. The navigation title stays
+        // set for VoiceOver and Back, but is not drawn twice, as the stream picker does.
+        .modifier(ServicePageTitle(isService: provider != nil))
         .pageNavigationBar(hidden: isPhoneInLandscape)
         .pageTabBar(hidden: isPhoneInLandscape)
         .onAppear { landscapeTabs?.showPageTitle(request.title) }
@@ -39,7 +42,7 @@ struct CatalogListView: View {
             // A detail covers this destination without replacing it. Keep the title for the root navigation state to restore on return.
             if !router.showsTitlePage, landscapeTabs?.pageTitle == request.title { landscapeTabs?.clearPageTitle() }
         }
-        .navigationBarTitleDisplayMode(isPhoneInLandscape ? .inline : .large)
+        .navigationBarTitleDisplayMode(isPhoneInLandscape || provider != nil ? .inline : .large)
         .task {
             guard !hasStarted else { return }
             hasStarted = true
@@ -47,10 +50,24 @@ struct CatalogListView: View {
         }
     }
 
+    /// The streaming service this page lists, when it is one (a service's tile on Search or Home opens it).
+    private var provider: StreamProvider? { StreamProvider(tileTitle: request.title) }
+
+    /// A service's heading, in the large title's place. Phone landscape names the page in its own bar instead.
+    @ViewBuilder
+    private var serviceHeading: some View {
+        if let provider, !isPhoneInLandscape {
+            ServiceHeading(provider: provider)
+        }
+    }
+
     private var scrollPage: some View {
         ScrollView {
-            content
-                .padding(.bottom, Theme.Spacing.l)
+            VStack(alignment: .leading, spacing: 0) {
+                serviceHeading
+                content
+            }
+            .padding(.bottom, Theme.Spacing.l)
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
@@ -64,7 +81,9 @@ struct CatalogListView: View {
     /// The Mac's page while the first titles load and once they have: the filters, the grid and its status in one UIKit scroll (see
     /// `MacGridPage`).
     private var macPage: some View {
-        var parts: [MacGridPage.Part] = [.full(id: "filters", view: AnyView(filters))]
+        var parts: [MacGridPage.Part] = []
+        if provider != nil { parts.append(.full(id: "heading", view: AnyView(serviceHeading))) }
+        parts.append(.full(id: "filters", view: AnyView(filters)))
         let presentation = request.presentation
         if model.items.isEmpty {
             // The first load: blank cards in the grid's own columns, card shape and gaps.
@@ -233,6 +252,43 @@ struct CatalogListView: View {
 
     private func retry() {
         Task { await model.load() }
+    }
+}
+
+/// A streaming service's page heading: the service's logo in its box, as on its stream cards, beside its name in the large title's style.
+private struct ServiceHeading: View {
+    let provider: StreamProvider
+    @Environment(\.layoutMetrics) private var metrics
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.m) {
+            StreamProviderBox(provider: provider)
+            Text(provider.name)
+                .font(.largeTitle.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, metrics.pageMargin)
+        .padding(.bottom, Theme.Spacing.m)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(provider.name)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("catalogList.serviceHeading")
+    }
+}
+
+/// Removes the drawn navigation title from a service's page, which draws its own heading.
+private struct ServicePageTitle: ViewModifier {
+    let isService: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isService {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }
 #endif

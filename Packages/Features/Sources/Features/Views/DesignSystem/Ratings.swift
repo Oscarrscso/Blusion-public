@@ -423,9 +423,9 @@ struct RatingButton: View {
             .padding(.horizontal, horizontalInset)
             .frame(maxWidth: .infinity)
             .frame(height: 28)
-            .background(isOpen ? Theme.surfaceStrong : Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
-            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
-            .pointerInteraction(cornerRadius: 999 * metrics.cornerScale(for: .filters))
+            .background(isOpen ? Theme.surfaceStrong : Theme.surface, in: ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
+            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
+            .pointerInteraction(cornerRadius: 999 * metrics.cornerScale(for: .actionButtons))
             .pointerFeedback()
         }
         .buttonStyle(.plain)

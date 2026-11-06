@@ -141,7 +141,7 @@ struct DetailActions: View {
                     .animation(.smooth(duration: 0.3), value: bestDisc)
                     .animation(.smooth(duration: 0.3), value: openedInPlayer)
             }
-            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
+            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter, tint: playColour))
             .contextMenu {
                 Button("Stream Selector", systemImage: "arrow.up.right.square") {
                     Haptics.play(.buttons)
@@ -164,7 +164,7 @@ struct DetailActions: View {
             Button {} label: {
                 Label(airs, systemImage: "calendar")
             }
-            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
+            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter, tint: playColour))
             .disabled(true)
             .accessibilityIdentifier("detail.playButton")
         } else if model.isLoading {
@@ -183,7 +183,7 @@ struct DetailActions: View {
                     }
                     .animation(.smooth(duration: 0.25), value: playsWhenLoaded)
             }
-            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
+            .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter, tint: playColour))
             .allowsHitTesting(!blocksPlay)
             .accessibilityLabel(playsWhenLoaded ? "Play, loading" : "Play")
             .accessibilityIdentifier("detail.playButton")

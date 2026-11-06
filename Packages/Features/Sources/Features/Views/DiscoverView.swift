@@ -26,7 +26,7 @@ struct DiscoverView: View {
             #endif
         }
         .task { await model.loadSources() }
-        // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+        // One side margin for everything on the page, in line with Back and the large title (see `LayoutMetrics.gridPage`).
         .environment(\.layoutMetrics, metrics.gridPage)
     }
 

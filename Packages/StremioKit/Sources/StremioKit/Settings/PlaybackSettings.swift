@@ -38,13 +38,13 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var playerPreference: PlayerPreference
     /// IMDb and Letterboxd ratings on posters.
     public var showsPosterRatings: Bool
-    /// Rating logos keep their brand colours. Off by default: they then take the text colour, so they match the rest of the screen.
+    /// Rating logos keep their brand colours. On by default; off, they take the text colour, so they match the rest of the screen.
     public var showsColouredRatingLogos: Bool
     /// Poster cards use 1200-pixel hero artwork; details reuse it while loading the full-resolution image.
     public var usesHeroPosters: Bool = false
-    /// Film posters carry a 4K or Blu-ray mark beside their ratings when Best Blurays names that disc as the film's best. Off by default:
+    /// Film posters carry a 4K or Blu-ray mark beside their ratings when Best Blurays names that disc as the film's best. On by default:
     /// each film is looked up on bestblurays.com.
-    public var showsBestDiscOnPosters: Bool = false
+    public var showsBestDiscOnPosters: Bool = true
     /// Where a poster's disc or streamer brand sits: in the ratings pill, or on its own in a corner. Top right by default.
     public var posterMarkPlacement: PosterMarkPlacement = .topTrailing
     /// Play starts the best stream at once instead of showing the list of streams first.
@@ -70,7 +70,7 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public init(preferredResolution: Int? = nil, subtitleLanguage: String? = nil, streamingServerURL: String? = nil, fallbackEngineEnabled: Bool = true,
                 traktClientID: String? = nil, playerPreference: PlayerPreference = .infuseWhenNeeded, showsPosterRatings: Bool = true,
                 autoPlayBestStream: Bool = false, omdbAPIKey: String? = nil, tmdbReadToken: String? = nil,
-                continueWatchingRefreshSeconds: Int? = 300, showsColouredRatingLogos: Bool = false, matchesEpisodeWidthToText: Bool = false,
+                continueWatchingRefreshSeconds: Int? = 300, showsColouredRatingLogos: Bool = true, matchesEpisodeWidthToText: Bool = false,
                 autoPickWait: AutoPickWait = .allAddons, autoPickSource: StreamSourcePreference = .balanced, player: PlayerPreferences = PlayerPreferences(),
                 openSubtitlesAPIKey: String? = nil, openSubtitlesUsername: String? = nil, openSubtitlesPassword: String? = nil,
                 haptics: HapticPreferences = HapticPreferences()) {

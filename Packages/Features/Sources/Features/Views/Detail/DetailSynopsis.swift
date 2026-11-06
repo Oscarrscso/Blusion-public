@@ -12,6 +12,8 @@ struct DetailSynopsis: View {
     /// How many lines the synopsis shows while folded.
     var foldedLines = 3
     var isLoading = false
+    @Environment(\.pageReveal) private var reveal
+    private static let revealID = "detail.synopsis"
     private static let textColour = UIColor(red: 214 / 255.0, green: 211 / 255.0, blue: 204 / 255.0, alpha: 1)
 
     var body: some View {
@@ -36,6 +38,7 @@ struct DetailSynopsis: View {
                     .accessibilityAddTraits(folds ? .isButton : [])
                     .accessibilityHint(folds ? (isExpanded ? "Collapses the synopsis" : "Expands the synopsis") : "")
             }
+            .id(Self.revealID)
             .transition(.opacity)
         } else if isLoading {
             DetailSkeletonParagraph(lines: foldedLines)
@@ -45,10 +48,11 @@ struct DetailSynopsis: View {
         }
     }
 
-    /// Opens or folds the synopsis, with the app's light tap, once for each tap.
+    /// Opens or folds the synopsis, with the app's light tap, once for each tap. Opened, it comes into view, as a rating's reviews do.
     private func toggleDescription() {
         Haptics.play(.buttons)
         withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() }
+        if isExpanded { reveal?.show(Self.revealID) }
     }
 }
 #endif

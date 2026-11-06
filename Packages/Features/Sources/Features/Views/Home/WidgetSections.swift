@@ -51,7 +51,13 @@ struct WidgetRow: View {
     private var rowBody: some View {
         let widget = section.widget
         let presentation = row.presentation
-        if case .loaded(let items) = section.state, !items.isEmpty {
+        if case .loaded(let items) = section.state, !items.isEmpty, let layout = row.layout {
+            LayoutRow(layout: layout, title: widget.title, hideTitle: widget.hideTitle, items: items, presentation: presentation,
+                      onSeeAll: {
+                          Haptics.play(.titles)
+                          router.homePath.append(seeAllRequest)
+                      }, menu: AnyView(rowMenu))
+        } else if case .loaded(let items) = section.state, !items.isEmpty {
             let shelf = MediaRow(widget.title, hideTitle: widget.hideTitle, onSeeAll: {
                 Haptics.play(.titles)
                 router.homePath.append(seeAllRequest)
@@ -74,8 +80,13 @@ struct WidgetRow: View {
             Group {
                 switch section.state {
                 case .idle, .loading:
-                    RowPlaceholder(header: widget.hideTitle ? .none : .title(widget.title), aspect: presentation.aspectRatio.cardAspect,
-                                   size: presentation.cardStyle.cardSize)
+                    if let layout = row.layout {
+                        LayoutRowPlaceholder(layout: layout, title: widget.hideTitle ? nil : widget.title,
+                                             size: presentation.cardStyle.cardSize)
+                    } else {
+                        RowPlaceholder(header: widget.hideTitle ? .none : .title(widget.title), aspect: presentation.aspectRatio.cardAspect,
+                                       size: presentation.cardStyle.cardSize)
+                    }
                 case .failed(let error):
                     RowFrame(title: widget.title, hideTitle: widget.hideTitle) {
                         InlineErrorView(error.shortDescription, retry: onRetry)
@@ -107,7 +118,8 @@ struct WidgetRow: View {
     private var rowMenu: some View {
         let widget = section.widget
         let presentation = row.presentation
-        if presentation.aspectRatio == .poster, let onSetBetterPosters {
+        // Of the layouts, only the mosaic draws the posters Better Posters changes.
+        if presentation.aspectRatio == .poster, row.layout == nil || row.layout == .mosaic, let onSetBetterPosters {
             Toggle("Better Posters", isOn: Binding(get: { presentation.usesBetterPosters }, set: onSetBetterPosters))
                 .accessibilityIdentifier("board.betterPosters.\(widget.id)")
             Divider()

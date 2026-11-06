@@ -30,7 +30,7 @@ struct SearchView: View {
                 EditorialSearchPage(model: model, services: services, results: resultItems, isLoading: isLoadingResults,
                                     selectedType: $selectedType)
             } else {
-                // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+                // One side margin for everything on the page, in line with Back and the large title (see `LayoutMetrics.gridPage`).
                 standardPage
                     .environment(\.layoutMetrics, metrics.gridPage)
             }

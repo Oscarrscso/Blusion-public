@@ -890,17 +890,19 @@ public struct RootTabView: View {
                 }
             }
             #endif
-            Tab(value: LaunchRoute.Tab.search, role: .search) {
+            // A tab like the rest, not the search role's separate bubble, so the tab bar is one connected bar. Search puts the cursor in its
+            // field on every arrival itself (see `SearchView.focusField`).
+            Tab(value: LaunchRoute.Tab.search) {
                 NavigationStack(path: $router.searchPath) {
                     SearchView(services: services, initialQuery: initialQuery)
                         .appDestinations(services: services, path: \.searchPath)
                 }
                 .zoomTransitions()
+            } label: {
+                tabItem("Search", "magnifyingglass")
             }
         }
         .modifier(TabBarStyle())
-        // Choosing Search goes straight to its field, with the keyboard up.
-        .tabViewSearchActivation(.searchTabSelection)
         .scrollEdgeEffectHidden(isPhoneLandscape || Self.isMacCatalyst, for: .top)
         .scrollEdgeEffectHidden(isPhoneInLandscape, for: .bottom)
         .pageTopBar(hidden: isPhoneLandscape)

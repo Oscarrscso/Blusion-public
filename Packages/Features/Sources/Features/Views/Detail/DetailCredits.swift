@@ -160,10 +160,10 @@ private struct CreditGroupMenu: View {
         .padding(.horizontal, 12)
         .frame(height: 28)
         // The tint belongs to the glass inside the label, just like Sort and AI, so it travels with the system menu animation.
-        .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
+        .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
         .animation(.smooth(duration: 0.3), value: playColourHex)
-        .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
-        .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .artwork)))
+        .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
+        .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
     }
 }
 #endif

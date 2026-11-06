@@ -481,6 +481,9 @@ struct WidgetFieldPanel: View {
                         }
                     }
                 }
+            }
+            // Every style but the spotlight draws cards whose size this sets, the carousel and the layouts included.
+            if model.style != .spotlight {
                 labelled("Size") {
                     FlowLayout(spacing: Theme.Spacing.s) {
                         ForEach(WidgetPresentation.CardStyle.allCases, id: \.self) { size in
@@ -490,6 +493,8 @@ struct WidgetFieldPanel: View {
                         }
                     }
                 }
+            }
+            if model.style == .row {
                 Toggle("Numbered (top list)", isOn: presentationBinding(\.showsRank))
                     .accessibilityIdentifier("widgetEditor.numbered")
             }

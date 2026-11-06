@@ -8,6 +8,7 @@ struct DetailInformation: View {
     let model: DetailViewModel
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @State private var isExpanded = false
+    @Environment(\.pageReveal) private var reveal
 
     /// How many rows show until the section is opened.
     private static let foldedRows = 5
@@ -46,15 +47,20 @@ struct DetailInformation: View {
             .accessibilityAddTraits(folds ? .isButton : [])
             .accessibilityHint(folds ? (isExpanded ? "Shows fewer details" : "Shows more details") : "")
         }
+        .id(Self.revealID)
         .detailLoadingTransition(model.isLoadingFacts)
         .detailLoadingTransition(model.isLoading)
     }
 
-    /// Opens or folds the rows as a review does: the light tap, then one tick for each row that comes into view or leaves it.
+    private static let revealID = "detail.information"
+
+    /// Opens or folds the rows as a review does: the light tap, then one tick for each row that comes into view or leaves it. Opened,
+    /// the section comes into view, as a rating's reviews do.
     private func toggle(hiddenRows: Int) {
         Haptics.play(.buttons)
         Haptics.lines(hiddenRows, over: .seconds(DetailReviews.foldDuration))
         withAnimation(.snappy(duration: DetailReviews.foldDuration)) { isExpanded.toggle() }
+        if isExpanded { reveal?.show(Self.revealID) }
     }
 
     /// Keep known values visible. Reserve common pending fields in their final row order;

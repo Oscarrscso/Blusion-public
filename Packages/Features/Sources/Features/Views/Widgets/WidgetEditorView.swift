@@ -11,6 +11,8 @@ struct WidgetEditorView: View {
     let model: WidgetsManagerViewModel
     let services: AppServices
     let mode: Mode
+    /// The style a new widget starts in, chosen before this screen opens.
+    private var style: WidgetStyle = .row
     @State private var widget: HomeWidget
     /// False while the title follows the source's name (the field then shows it as a placeholder).
     @State private var titleIsCustom = true
@@ -26,10 +28,11 @@ struct WidgetEditorView: View {
         _widget = State(initialValue: widget)
     }
 
-    /// Makes a new row, spotlight or banner, which `WidgetBuilderView` builds from its own default source.
-    init(model: WidgetsManagerViewModel, services: AppServices) {
+    /// Makes a new widget in `style`, which `WidgetBuilderView` builds from its own default source.
+    init(style: WidgetStyle, model: WidgetsManagerViewModel, services: AppServices) {
         self.model = model
         self.services = services
+        self.style = style
         mode = .create
         _widget = State(initialValue: HomeWidget(title: "", content: .row(RowConfiguration(source: .unsupported(kind: "")))))
     }
@@ -43,8 +46,8 @@ struct WidgetEditorView: View {
 
     var body: some View {
         if WidgetEditorView.row(of: widget) != nil {
-            WidgetBuilderView(mode: mode == .create ? .create : .edit, widget: mode == .create ? nil : widget, manager: model,
-                              services: services)
+            WidgetBuilderView(mode: mode == .create ? .create : .edit, widget: mode == .create ? nil : widget, style: style,
+                              manager: model, services: services)
         } else {
             form
         }

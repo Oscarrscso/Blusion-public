@@ -316,6 +316,9 @@ private struct HeroPage: View {
     }
 
     private var isInWindow: Bool { sectionIsVisible && distance == 0 }
+    /// The page on show keeps its picture while Home is scrolled past the spotlight, so a hard swipe back to the top never meets the
+    /// spotlight while its picture decodes again, black at the top of the screen. Only that one picture is kept.
+    private var keepsPicture: Bool { distance == 0 }
     /// The nearest two pages jump the queue; the next one waits behind them.
     private var loadPriority: TaskPriority { distance <= 1 ? .high : .medium }
 
@@ -450,7 +453,7 @@ private struct HeroPage: View {
                     .allowsHitTesting(false)
             }
         }
-        .heroPointerHighlight()
+        // No hover highlight: the showcase stays as it is under the pointer, and its page chevrons are its hover feedback.
         .coordinateSpace(name: "hero/\(item.identity)")
         .task(id: "\(ratings.reviewServicesRevision)|\(isInWindow)") {
             guard isInWindow else { return }
@@ -481,9 +484,9 @@ private struct HeroPage: View {
             await PlayColourStore.shared.read(identity: item.identity, pictures: PlayColourStore.pictures(for: item),
                                               logos: PlayColourStore.logos(for: item))
         }
-        .task(id: "\(heroURL?.absoluteString ?? "-")|\(heroPixelSize)|\(logoURL?.absoluteString ?? "-")|\(artworkChecked)|\(isInWindow)|\(distance <= 1)") {
+        .task(id: "\(heroURL?.absoluteString ?? "-")|\(heroPixelSize)|\(logoURL?.absoluteString ?? "-")|\(artworkChecked)|\(keepsPicture)|\(distance <= 1)") {
             // Out of the window the page lets go of its picture (its logo stays in the shared store) so memory stays bounded.
-            guard isInWindow else { hero.release(keeping: []); return }
+            guard keepsPicture else { hero.release(keeping: []); return }
             // After a rotation the other orientation's picture goes too.
             hero.release(keeping: heroURL.map { [($0, heroPixelSize)] } ?? [])
             await hero.load(priority: loadPriority, picture: heroURL, pictureSize: heroPixelSize, logo: logoURL, logoSize: HeroLoader.logoPixelSize)
@@ -559,7 +562,7 @@ private struct HeroPage: View {
     private var artwork: some View {
         Color.clear
             .overlay {
-                if isInWindow {
+                if keepsPicture {
                     HeroPicture(slot: pictureSlot, isRevealed: isRevealed, contentMode: .fill, preview: item,
                                 standInFromBackdrop: HeroCarousel.isMacCatalyst)
                         .modifier(DetailHeroScrollZoom(scroll: heroScroll))

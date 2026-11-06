@@ -543,6 +543,13 @@ private let tvManifest = Manifest(id: "test.tv", name: "TV Catalogs", version: "
                                                    genre: "Drama")
         #expect(tiles[1].sources == [.addonCatalog(dramaReference)])
         #expect(Set(tiles.map(\.id)).count == 3)
+
+        let picked = WidgetsManagerViewModel.makeGenreCollection(title: "Movie Genres", choice: popular, genres: ["Comedy", "Action"])
+        guard case .collection(let pickedTiles) = picked.content else {
+            Issue.record("makeGenreCollection should make a collection")
+            return
+        }
+        #expect(pickedTiles.map(\.title) == ["Action", "Comedy"], "the ticked genres, in the catalog's order")
     }
 }
 

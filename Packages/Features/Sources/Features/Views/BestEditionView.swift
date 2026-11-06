@@ -15,6 +15,8 @@ struct BestEditionView: View {
     private var panelRadius: CGFloat { rowHeight > 0 ? rowHeight / 2 : Theme.Radius.surface }
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pageReveal) private var reveal
+    private static let revealID = "streams.bestEdition.panel"
 
     var body: some View {
         if model.canFindBestEdition {
@@ -60,12 +62,15 @@ struct BestEditionView: View {
                 }
             }
             .glassCardSurface(cornerRadius: panelRadius)
+            .id(Self.revealID)
         }
     }
 
-    /// Opens or folds the panel, with the same motion either way.
+    /// Opens or folds the panel, with the same motion either way. Opened, it comes into view, as a rating's reviews do.
     private func toggle() {
+        Haptics.play(.buttons)
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.28)) { isExpanded.toggle() }
+        if isExpanded { reveal?.show(Self.revealID) }
     }
 
     /// The one line the row shows while it is folded: the release it names, or where the lookup stands.

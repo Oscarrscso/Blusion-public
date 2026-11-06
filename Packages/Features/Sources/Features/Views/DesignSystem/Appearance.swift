@@ -57,7 +57,7 @@ extension AppearancePreferences {
 }
 
 extension AppearancePreferences {
-    /// The tint, or nil to keep the asset catalogue's accent, which the default (Blusion) is.
+    /// The tint, or nil to keep the asset catalogue's accent, which Blusion is.
     var accentColour: Color? {
         accent == .blusion ? nil : accentRGB.colour
     }

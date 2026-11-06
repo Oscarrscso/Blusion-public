@@ -11,9 +11,18 @@ struct PrimaryActionButtonStyle: PrimitiveButtonStyle {
     var minWidth: CGFloat = 0
     var glass: Glass?
     var height: CGFloat?
+    /// The colour the glass is tinted with, which a Flat finish fills with instead (`Theme.playControlColour`). Nil is the plain grey.
+    var tint: Color?
 
     func makeBody(configuration: Configuration) -> some View {
-        PrimaryActionButton(configuration: configuration, fillsWidth: fillsWidth, minWidth: minWidth, glass: glass, height: height)
+        PrimaryActionButton(configuration: configuration, fillsWidth: fillsWidth, minWidth: minWidth, glass: glass, height: height,
+                            tint: tint)
+    }
+
+    /// A fixed-height main action's shape: the system's continuous rounded rectangle, at Play's corners' share of a capsule's radius. The
+    /// system's own shape, not a custom one, so the glass's press and the hold menu's lift take the same corners as the button.
+    static func shape(height: CGFloat, metrics: LayoutMetrics) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: height / 2 * min(metrics.cornerScale(for: .playButton), 1), style: .continuous)
     }
 }
 
@@ -26,10 +35,12 @@ private struct PrimaryActionButton: View {
     let minWidth: CGFloat
     let glass: Glass?
     let height: CGFloat?
+    let tint: Color?
     @Environment(\.controlSize) private var controlSize
 
     var body: some View {
         if let height {
+            let shape = PrimaryActionButtonStyle.shape(height: height, metrics: metrics)
             Button(role: configuration.role) {
                 Haptics.play(.buttons)
                 configuration.trigger()
@@ -39,10 +50,11 @@ private struct PrimaryActionButton: View {
                     .padding(.horizontal, Theme.Spacing.s)
                     .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil)
                     .frame(height: height)
-                    .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton))))
-                    .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
+                    .contentShape([.interaction, .contextMenuPreview, .hoverEffect], shape), in: shape)
+                    .glassHover(shape)
             }
             .buttonStyle(.plain)
+            .contentShape(.contextMenuPreview, shape)
         } else {
         #if targetEnvironment(macCatalyst)
         // Match the navigation control and the round actions beside Play.
@@ -80,15 +92,23 @@ private struct PrimaryActionButton: View {
     }
 
     /// Play's own fill: solid white or the accent when Appearance sets one (Colour → Play button), with dark or light text to suit;
-    /// otherwise the tinted glass it was given. A Flat finish leaves the label alone, in that white or accent.
+    /// otherwise the tinted glass it was given. The Flat finish (`.solid`) never draws glass: an artwork Play is the other buttons' flat
+    /// grey under its tint. The Plain finish (`.flat`) leaves the label alone, in that white or accent.
     @ViewBuilder
-    private func filled<Label: View>(_ label: Label) -> some View {
-        let shape = ScaledCapsule(scale: metrics.cornerScale(for: .playButton))
+    private func filled<Label: View>(_ label: Label, in shape: RoundedRectangle) -> some View {
         if appearance.buttonFinish == .flat {
             let colour = solidFill?.fill ?? .white
             label.foregroundStyle(colour).tint(colour)
         } else if let solid = solidFill {
             label.foregroundStyle(solid.text).tint(solid.text).background(solid.fill, in: shape)
+        } else if appearance.buttonFinish == .solid {
+            label.foregroundStyle(.white).tint(.white)
+                .background {
+                    ZStack {
+                        shape.fill(.white.opacity(0.14))
+                        if let tint { shape.fill(tint) }
+                    }
+                }
         } else {
             label.glassEffect(glass ?? .regular.interactive(), in: shape)
         }

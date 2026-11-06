@@ -415,7 +415,7 @@ public final class WidgetsManagerViewModel {
     /// A short summary for a widget's row in the manager list: "Row · Popular Movies · Cinemeta", "Collection · 12 tiles", and so on.
     public func summary(of widget: HomeWidget) -> String {
         switch widget.content {
-        case .row(let row): return "Row · \(describe(row.source))"
+        case .row(let row): return "\(row.layout.map { WidgetStyle($0).rawValue } ?? "Row") · \(describe(row.source))"
         case .hero(let row): return "Spotlight · \(describe(row.source))"
         case .banner(let row): return "Carousel · \(describe(row.source))"
         case .collection(let tiles): return "Collection · \(WidgetsManagerViewModel.plural(tiles.count, "tile"))"
@@ -459,7 +459,9 @@ public final class WidgetsManagerViewModel {
 
     private static func kindName(of widget: HomeWidget) -> String {
         switch widget.content {
-        case .row(let row): return row.presentation.showsRank ? "Numbered row" : "Row"
+        case .row(let row):
+            if let layout = row.layout { return WidgetStyle(layout).rawValue }
+            return row.presentation.showsRank ? "Numbered row" : "Row"
         case .hero: return "Spotlight"
         case .banner: return "Carousel"
         case .collection: return "Collection"
@@ -570,10 +572,12 @@ public final class WidgetsManagerViewModel {
         return HomeWidget(title: choice.title, content: .banner(row))
     }
 
-    /// A collection with one tile per genre of the catalog. Each tile opens that genre's grid.
-    public static func makeGenreCollection(title: String, choice: CatalogChoice) -> HomeWidget {
+    /// A collection with one tile per genre of the catalog, or per genre in `genres` (in the catalog's order). Each tile opens that genre's
+    /// grid.
+    public static func makeGenreCollection(title: String, choice: CatalogChoice, genres: [String]? = nil) -> HomeWidget {
         var seen = Set<String>()
-        let tiles = choice.genres.filter { seen.insert($0).inserted }.map { genre in
+        let kept: Set<String>? = genres.map { Set($0) }
+        let tiles = choice.genres.filter { kept?.contains($0) ?? true }.filter { seen.insert($0).inserted }.map { genre in
             CollectionItem(id: "\(choice.id)/\(genre)", title: genre, imageAspect: .wide, sources: [.addonCatalog(catalogReference(choice, genre: genre))])
         }
         return HomeWidget(title: title, content: .collection(tiles))

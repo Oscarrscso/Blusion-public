@@ -171,14 +171,17 @@ struct StreamPickerView: View {
         if isEmbedded {
             behaviour(list(scrollTo: scrollToRow).accessibilityIdentifier("streams.list"))
         } else {
-            #if targetEnvironment(macCatalyst)
-            // The reader wraps the picker's own scroll view, which holds the rows, so the keyboard can scroll them.
+            // The reader wraps the picker's own scroll view, which holds the rows, so the keyboard can scroll them (Mac), and an opened
+            // section comes into view.
             ScrollViewReader { proxy in
-                behaviour(page(scrollTo: { proxy.scrollTo($0, anchor: .center) }))
+                #if targetEnvironment(macCatalyst)
+                let scrollTo: ((AnyHashable) -> Void)? = { proxy.scrollTo($0, anchor: .center) }
+                #else
+                let scrollTo: ((AnyHashable) -> Void)? = nil
+                #endif
+                behaviour(page(scrollTo: scrollTo))
+                    .environment(\.pageReveal, proxy.pageReveal)
             }
-            #else
-            behaviour(page(scrollTo: nil))
-            #endif
         }
     }
 
@@ -1031,28 +1034,36 @@ struct StreamPickerView: View {
     @ViewBuilder
     private var links: some View {
         if !model.links.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.snappy(duration: 0.25)) { isNotesExpanded.toggle() }
-                } label: {
-                    Text("Notes from your addons")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.hoverPlain)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityValue(isNotesExpanded ? "Expanded" : "Collapsed")
-                if isNotesExpanded {
-                    VStack(spacing: Theme.Spacing.m) {
-                        ForEach(model.links) { item in streamButton(item, isRecommended: false, order: 8) }
+            PageRevealReader { reveal in
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        // Opened, the notes come into view, as a rating's reviews do.
+                        Haptics.play(.buttons)
+                        withAnimation(.snappy(duration: 0.25)) { isNotesExpanded.toggle() }
+                        if isNotesExpanded { reveal?.show(Self.notesRevealID) }
+                    } label: {
+                        Text("Notes from your addons")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
-                    .padding(.top, Theme.Spacing.s)
+                    .buttonStyle(.hoverPlain)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityValue(isNotesExpanded ? "Expanded" : "Collapsed")
+                    if isNotesExpanded {
+                        VStack(spacing: Theme.Spacing.m) {
+                            ForEach(model.links) { item in streamButton(item, isRecommended: false, order: 8) }
+                        }
+                        .padding(.top, Theme.Spacing.s)
+                    }
                 }
+                .id(Self.notesRevealID)
             }
             .font(.subheadline.weight(.medium))
             .padding(.horizontal, streamMargin)
         }
     }
+
+    private static let notesRevealID = "streams.notes"
 
     /// One stream as a card on the title page's surface: the top plays it, the technical details fold away underneath. `order` is the
     /// card's place in the list, which sets when its entrance animation starts. `isKeyboardFocused` (Mac) draws its edge bolder.

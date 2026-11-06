@@ -516,9 +516,9 @@ private struct AppearanceCornersPage: View {
             Section("All Corners") {
                 controls.slider("Roundness", \.cornerScale, in: AppearancePreferences.cornerScaleRange, step: 0.1,
                                 low: "square", high: "circle", id: "corners")
-                controls.toggle("Include circular buttons", \.includesCircularButtons, id: "circularCorners")
+                controls.toggle("Reshape round buttons", \.includesCircularButtons, id: "circularCorners")
             }
-            Section("Per Element") {
+            Section("Each Part") {
                 ForEach(AppearancePreferences.CornerGroup.allCases) { group in
                     DisclosureGroup {
                         Toggle("Same as all corners", isOn: Binding(get: {
@@ -536,8 +536,8 @@ private struct AppearanceCornersPage: View {
                                             low: "square", high: "circle", id: "corners.\(group.rawValue)")
                         }
                     } label: {
-                        LabeledContent(group.label, value: controls.current.cornerOverrides[group.rawValue]
-                            .map(percent) ?? "All · \(percent(controls.current.cornerScale))")
+                        // A part with its own roundness shows it; one that follows All Corners says so, rather than repeating its number.
+                        LabeledContent(group.label, value: controls.current.cornerOverrides[group.rawValue].map(percent) ?? "Same as All")
                     }
                 }
             }

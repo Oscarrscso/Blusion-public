@@ -404,7 +404,6 @@ struct MediaCardLink: View {
     let usesBetterPosters: Bool
     private var stretches = false
     @Environment(\.zoomScope) private var zoomScope
-    @Environment(TitleActions.self) private var actions: TitleActions?
     @AppStorage(DefaultsSettingsStore.Keys.usesHeroPosters) private var usesHeroPosters = false
     @Environment(\.heroPosterOverride) private var heroPosterOverride
 
@@ -434,8 +433,31 @@ struct MediaCardLink: View {
         .simultaneousGesture(TapGesture().onEnded { Haptics.play(.titles) })
         .prewarmsHeroArtwork(item)
         .help(item.name)
+        .titleCardMenu(item)
+    }
+
+    /// The link takes the width it is offered, as a grid column does. See `MediaCard.stretched()`.
+    func stretched() -> MediaCardLink {
+        var copy = self
+        copy.stretches = true
+        return copy
+    }
+}
+
+extension View {
+    /// The Mac's right-click menu on a card that opens a title: Library, Watched and Share. Nothing on iPhone, where a card's hold is its own.
+    func titleCardMenu(_ item: MetaPreview) -> some View {
+        modifier(TitleCardMenu(item: item))
+    }
+}
+
+private struct TitleCardMenu: ViewModifier {
+    let item: MetaPreview
+    @Environment(TitleActions.self) private var actions: TitleActions?
+
+    func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
-        .contextMenu {
+        content.contextMenu {
             if let actions {
                 Button(actions.isSaved(item) ? "Remove from Library" : "Add to Library", systemImage: "bookmark") {
                     Task { await actions.toggleSaved(item) }
@@ -460,14 +482,9 @@ struct MediaCardLink: View {
                 }
             }
         }
+        #else
+        content
         #endif
-    }
-
-    /// The link takes the width it is offered, as a grid column does. See `MediaCard.stretched()`.
-    func stretched() -> MediaCardLink {
-        var copy = self
-        copy.stretches = true
-        return copy
     }
 }
 

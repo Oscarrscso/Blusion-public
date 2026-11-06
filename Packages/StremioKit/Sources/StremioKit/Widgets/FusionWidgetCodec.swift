@@ -120,7 +120,8 @@ public enum FusionWidgetCodec {
             return RowConfiguration(source: source, presentation: presentation,
                                     limit: Read.integer(object["limit"]) ?? 20, cacheTTL: Read.integer(object["cacheTTL"]) ?? 3600,
                                     shuffle: Read.decoded(WidgetShuffle.self, object["blusionShuffle"]),
-                                    randomSource: Read.decoded(RandomSource.self, object["blusionRandomSource"]))
+                                    randomSource: Read.decoded(RandomSource.self, object["blusionRandomSource"]),
+                                    layout: Read.text(object["blusionLayout"]).flatMap(RowLayout.init(rawValue:)))
         }
 
         mutating func collection(_ object: [String: Any]) -> [CollectionItem]? {
@@ -365,6 +366,7 @@ public enum FusionWidgetCodec {
         // Blusion's own keys, written only when set, so an exported widget imports back with its shuffle and random source.
         if let shuffle = row.shuffle, let value = jsonObject(shuffle) { object["blusionShuffle"] = value }
         if let random = row.randomSource, let value = jsonObject(random) { object["blusionRandomSource"] = value }
+        if let layout = row.layout { object["blusionLayout"] = layout.rawValue }
     }
 
     private static func jsonObject(_ value: some Encodable) -> Any? {

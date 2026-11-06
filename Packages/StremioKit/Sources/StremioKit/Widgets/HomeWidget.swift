@@ -45,18 +45,22 @@ public struct RowConfiguration: Sendable, Codable, Equatable, Hashable {
     /// Set when the row takes its items from a source picked at random, which Home then shows in place of `source` (see
     /// `WidgetShuffling.pickingSources`). Written only when set.
     public var randomSource: RandomSource?
+    /// One of Blusion's own layouts for a row, drawn in place of its shelf of cards. Nil is the shelf. Written only when set, so a build
+    /// that does not know a layout reads the row as a shelf.
+    public var layout: RowLayout?
 
     public init(source: WidgetSource, presentation: WidgetPresentation = WidgetPresentation(), limit: Int = 20, cacheTTL: Int = 3600,
-                shuffle: WidgetShuffle? = nil, randomSource: RandomSource? = nil) {
+                shuffle: WidgetShuffle? = nil, randomSource: RandomSource? = nil, layout: RowLayout? = nil) {
         self.source = source
         self.presentation = presentation
         self.limit = min(max(limit, 1), 100)
         self.cacheTTL = min(max(cacheTTL, 0), 86_400)
         self.shuffle = shuffle
         self.randomSource = randomSource
+        self.layout = layout
     }
 
-    private enum CodingKeys: String, CodingKey { case source, presentation, limit, cacheTTL, shuffle, randomSource }
+    private enum CodingKeys: String, CodingKey { case source, presentation, limit, cacheTTL, shuffle, randomSource, layout }
 
     /// Clamps stored values the same way `init` does, so an edited or newer file cannot break paging.
     public init(from decoder: Decoder) throws {
@@ -67,8 +71,25 @@ public struct RowConfiguration: Sendable, Codable, Equatable, Hashable {
                   cacheTTL: try container.decodeIfPresent(Int.self, forKey: .cacheTTL) ?? 3600,
                   // A shuffle or random source this version cannot read (written by a newer one) is left out, not the whole widget.
                   shuffle: (try? container.decodeIfPresent(WidgetShuffle.self, forKey: .shuffle)) ?? nil,
-                  randomSource: (try? container.decodeIfPresent(RandomSource.self, forKey: .randomSource)) ?? nil)
+                  randomSource: (try? container.decodeIfPresent(RandomSource.self, forKey: .randomSource)) ?? nil,
+                  // A layout from a newer build reads as the shelf.
+                  layout: (try? container.decodeIfPresent(RowLayout.self, forKey: .layout)) ?? nil)
     }
+}
+
+/// Blusion's own layouts for a row (Blusion only; Fusion files carry them as `blusionLayout` and show a classic row).
+public enum RowLayout: String, Sendable, Codable, CaseIterable {
+    /// Pages of five posters, one of them twice the size of the rest, on alternating sides.
+    case mosaic
+    /// Cover Flow: the middle poster facing the viewer between two stacks turned towards it, each over its own reflection, with the
+    /// middle one's name under them.
+    case flow
+    /// Tilted rows of small posters drifting past in opposite directions, each of which can be dragged along by itself.
+    case wall
+    /// Wide cards whose backdrops slide slower than the cards as they scroll, carrying the title's logo, details and synopsis.
+    case parallax
+    /// Posters standing like book spines; the one picked opens out to its whole cover.
+    case spines
 }
 
 /// How a row's cards look. The defaults are Blusion's poster grid.

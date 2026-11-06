@@ -34,6 +34,8 @@ struct DetailReviews: View {
     /// True while an opened card is moving into place, until it is centred. Only a swipe made after that folds the card.
     @State private var settling = false
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.pageReveal) private var reveal
+    private static let summaryRevealID = "detail.reviews.summaryPanel"
 
     var body: some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
@@ -56,7 +58,10 @@ struct DetailReviews: View {
                 .accessibilityValue(reviewSort.rawValue)
                 .accessibilityIdentifier("detail.reviews.sort")
                 Button {
+                    // Opened, the summary comes into view, as a rating's reviews do.
+                    Haptics.play(.buttons)
                     withAnimation(.snappy(duration: 0.25)) { showsAISummary.toggle() }
+                    if showsAISummary { reveal?.show(Self.summaryRevealID) }
                 } label: {
                     reviewHeadingControl("sparkles")
                 }
@@ -93,6 +98,7 @@ struct DetailReviews: View {
                     }
                 }
                 .padding(.horizontal, contentMargin)
+                .id(Self.summaryRevealID)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
             ScrollViewReader { proxy in

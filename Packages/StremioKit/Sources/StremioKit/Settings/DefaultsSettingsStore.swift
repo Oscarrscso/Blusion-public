@@ -76,7 +76,8 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 showsPosterRatings: posterRatings, autoPlayBestStream: defaults.bool(forKey: Keys.autoPlayBestStream),
                                 omdbAPIKey: omdbAPIKey, tmdbReadToken: tmdbReadToken,
                                 continueWatchingRefreshSeconds: defaults.object(forKey: Keys.continueWatchingRefreshSeconds) as? Int ?? 300,
-                                showsColouredRatingLogos: defaults.bool(forKey: Keys.showsColouredRatingLogos),
+                                showsColouredRatingLogos: defaults.object(forKey: Keys.showsColouredRatingLogos) as? Bool
+                                    ?? PlaybackSettings().showsColouredRatingLogos,
                                 matchesEpisodeWidthToText: defaults.bool(forKey: Keys.matchesEpisodeWidthToText),
                                 autoPickWait: AutoPickWait(storedValue: defaults.string(forKey: Keys.autoPickWait)),
                                 autoPickSource: defaults.string(forKey: Keys.autoPickSource).flatMap(StreamSourcePreference.init(rawValue:)) ?? .balanced,
@@ -87,7 +88,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         result.downloadsAllowCellular = defaults.bool(forKey: Keys.downloadsAllowCellular)
         result.dataSaver = defaults.bool(forKey: Keys.dataSaver)
         result.usesHeroPosters = defaults.bool(forKey: Keys.usesHeroPosters)
-        result.showsBestDiscOnPosters = defaults.bool(forKey: Keys.showsBestDiscOnPosters)
+        result.showsBestDiscOnPosters = defaults.object(forKey: Keys.showsBestDiscOnPosters) as? Bool ?? PlaybackSettings().showsBestDiscOnPosters
         result.posterMarkPlacement = defaults.string(forKey: Keys.posterMarkPlacement).flatMap(PosterMarkPlacement.init(rawValue:)) ?? .topTrailing
         result.downloadsDeleteWhenWatched = defaults.bool(forKey: Keys.downloadsDeleteWhenWatched)
         return result

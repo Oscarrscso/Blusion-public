@@ -312,7 +312,7 @@ struct HomeView: View {
     }
 
     /// One round glass button that opens the widgets page, where widgets are added and edited: the navigation bar's button, in the
-    /// page so that it scrolls away with it. It shows the app's icon, filling the circle.
+    /// page so that it scrolls away with it. It shows the app's icon, filling the circle, and stays a circle whatever Corners says.
     private var customizeButton: some View {
         Button {
             router.showWidgets()
@@ -325,8 +325,8 @@ struct HomeView: View {
                 // A little larger than the circle, so the icon's own bevelled rim falls outside it; every point of the star stays inside.
                 .scaleEffect(1.1)
                 .clipShape(.circle)
-                .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .buttonSurface(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
                 .pointerFeedback()
         }
         .buttonStyle(.plain)

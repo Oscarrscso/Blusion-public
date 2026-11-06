@@ -3,10 +3,11 @@ import SwiftUI
 import StremioKit
 import UIKit
 
-/// A hold menu's ways to play at a chosen quality, below a divider: Highest Quality, marked with the film's best disc when Best Blurays
-/// names one (no mark for a title that is only streamed), then Data Saver. Play, an episode's card and a Continue Watching card share it.
+/// A hold menu's ways to play at a chosen quality, below a divider: Highest Quality, beside the remux symbol and, when Best Blurays names
+/// the film's best disc, that disc's mark after it (none for a title that is only streamed), then Data Saver. Play, an episode's card and a
+/// Continue Watching card share it.
 struct PlayQualityMenuItems: View {
-    /// The film's best disc, as the device keeps Best Blurays' answer. Nil shows no mark.
+    /// The film's best disc, as the device keeps Best Blurays' answer. Nil shows the remux symbol alone.
     let disc: BestDiscFormat?
     let play: (PlayQuality) -> Void
 
@@ -16,10 +17,10 @@ struct PlayQualityMenuItems: View {
             Haptics.play(.buttons)
             play(.highest)
         } label: {
-            if let image = PlayQualityMenu.discImage(disc) {
+            if let image = PlayQualityMenu.highestImage(disc) {
                 Label { Text(PlayQualityMenu.highestTitle) } icon: { Image(uiImage: image) }
             } else {
-                Text(PlayQualityMenu.highestTitle)
+                Label(PlayQualityMenu.highestTitle, systemImage: QualityBadge.remuxSymbol)
             }
         }
         Button(PlayQualityMenu.dataSaverTitle, systemImage: PlayQualityMenu.dataSaverSymbol) {
@@ -37,7 +38,7 @@ enum PlayQualityMenu {
     static let dataSaverSymbol = "leaf"
 
     static func menu(disc: BestDiscFormat?, play: @escaping (PlayQuality) -> Void) -> UIMenu {
-        let highest = UIAction(title: highestTitle, image: discImage(disc)) { _ in
+        let highest = UIAction(title: highestTitle, image: highestImage(disc) ?? UIImage(systemName: QualityBadge.remuxSymbol)) { _ in
             Task { @MainActor in
                 Haptics.play(.buttons)
                 play(.highest)
@@ -50,6 +51,23 @@ enum PlayQualityMenu {
             }
         }
         return UIMenu(options: .displayInline, children: [highest, dataSaver])
+    }
+
+    /// Highest Quality's mark when the film's best disc is known: the remux symbol, then the disc's mark. Nil without a disc, where the menu
+    /// shows the remux symbol on its own as a plain symbol.
+    static func highestImage(_ disc: BestDiscFormat?) -> UIImage? {
+        guard let logo = discImage(disc),
+              let glyph = UIImage(systemName: QualityBadge.remuxSymbol,
+                                  withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)) else { return nil }
+        let gap: CGFloat = 4
+        let height = max(logo.size.height, glyph.size.height)
+        let size = CGSize(width: (glyph.size.width + gap + logo.size.width).rounded(.up), height: height.rounded(.up))
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            glyph.draw(in: CGRect(x: 0, y: (height - glyph.size.height) / 2, width: glyph.size.width, height: glyph.size.height))
+            logo.draw(in: CGRect(x: glyph.size.width + gap, y: (height - logo.size.height) / 2, width: logo.size.width,
+                                 height: logo.size.height))
+        }
+        .withRenderingMode(.alwaysTemplate)
     }
 
     /// The disc's mark, the logo the stream rows use, at a menu glyph's height. The logos are wide, so they are drawn to fit a small box

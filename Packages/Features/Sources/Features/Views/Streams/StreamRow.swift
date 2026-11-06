@@ -462,10 +462,13 @@ struct StreamTechnicalDetails: View {
     let item: RankedStream
     @State private var isExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pageReveal) private var reveal
 
     var body: some View {
         foldingRow
     }
+
+    private var revealID: String { "stream.details.\(item.id)" }
 
     /// The row across the card's foot that opens and folds the details, then the details when open.
     private var foldingRow: some View {
@@ -476,7 +479,10 @@ struct StreamTechnicalDetails: View {
                 .padding(.horizontal, StreamCardMetrics.padding)
                 .accessibilityHidden(true)
             Button {
+                // Opened, the details come into view, as a rating's reviews do.
+                Haptics.play(.buttons)
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { isExpanded.toggle() }
+                if isExpanded { reveal?.show(revealID) }
             } label: {
                 HStack(spacing: Theme.Spacing.xs) {
                     Text("Technical details")
@@ -502,6 +508,7 @@ struct StreamTechnicalDetails: View {
                 details
             }
         }
+        .id(revealID)
     }
 
     /// Every fact, then the addon's description.

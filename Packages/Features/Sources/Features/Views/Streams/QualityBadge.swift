@@ -130,9 +130,12 @@ extension QualityBadge {
         }
     }
 
+    /// The remux symbol, on the remux marker and beside the hold menu's Highest Quality.
+    static let remuxSymbol = "aqi.medium"
+
     /// The remux marker: "REMUX" beside its symbol, or "RMX" where the row is narrow (iPhone in portrait).
     static func remux(compact: Bool) -> QualityBadge {
-        QualityBadge(compact ? "RMX" : "REMUX", symbol: "aqi.medium", spokenAs: "REMUX")
+        QualityBadge(compact ? "RMX" : "REMUX", symbol: remuxSymbol, spokenAs: "REMUX")
     }
 
     /// The high dynamic range marker: "Dolby Vision" or "HDR", or "DV" for Dolby Vision where the row is narrow (iPhone in portrait).

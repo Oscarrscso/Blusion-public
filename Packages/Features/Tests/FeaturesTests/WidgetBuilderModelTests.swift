@@ -142,6 +142,21 @@ private let popularPrefix = "Make a movie list sorted by Popular and "
         #expect(saved?[cw + 1].id == model.widget.id)
     }
 
+    @Test func aNewWidgetStartsInTheStyleChosenFirst() async throws {
+        let (manager, _) = try await loadedManager()
+        let spotlight = WidgetBuilderModel(mode: .create, widget: nil, style: .spotlight, manager: manager,
+                                           lookups: fakeLookups(CallLog()), region: "IE")
+        #expect(spotlight.style == .spotlight && spotlight.hidesTitle && spotlight.row.limit == 8)
+        #expect(spotlight.query == TMDbDiscoverQuery() && spotlight.widget.title == "Popular Movies")
+        let mosaic = WidgetBuilderModel(mode: .create, widget: nil, style: .mosaic, manager: manager,
+                                        lookups: fakeLookups(CallLog()), region: "IE")
+        #expect(mosaic.style == .mosaic && mosaic.row.layout == .mosaic && mosaic.row.limit == 20)
+        let saved = rowWidget(title: "Saved", .tmdbDiscover(TMDbDiscoverQuery()))
+        let edit = WidgetBuilderModel(mode: .edit, widget: saved, style: .wall, manager: manager, lookups: fakeLookups(CallLog()),
+                                      region: "IE")
+        #expect(edit.style == .row, "a saved widget keeps its own style")
+    }
+
     @Test func anEditKeepsTheWidgetsIDAndCommitsAnUpdate() async throws {
         let original = rowWidget(id: "w1", title: "Old", .tmdbDiscover(TMDbDiscoverQuery()))
         let (manager, services) = try await loadedManager(widgets: [original])

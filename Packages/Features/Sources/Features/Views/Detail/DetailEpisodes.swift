@@ -39,24 +39,12 @@ struct DetailEpisodes: View {
     /// The height of the season picker and of the episode-width toggle, so the two sit level on one line.
     private static let secondaryControlHeight: CGFloat = 32
 
-    /// The Shuffle symbol, unseen, behind the season picker's and the width toggle's labels. The glass around a label is the label's height
-    /// plus the same padding, and Shuffle's symbol stands half a point taller than the season name and the width symbol, so with it behind
-    /// them all three glass shapes are the same height. The season name is wider than it, and the width toggle keeps its fixed square.
-    private static var glassHeightReference: some View {
-        Image(systemName: "shuffle").font(.caption.weight(.semibold)).hidden().accessibilityHidden(true)
-    }
-
-    /// The round glass beside the season picker, at the picker's height. On Mac the system's own glass button is a third shorter than the
-    /// picker and lights only its symbol on hover, so there the glass is drawn as the round actions beside Play are: fixed to the picker's
-    /// height, and lit with the pointer.
+    /// The round glass beside the season picker, fixed to the picker's height and drawn as the round actions beside Play are, so all three
+    /// stand exactly level. The system's own glass button sizes itself from its symbol: a point taller than the picker on iPhone, a third
+    /// shorter on Mac, where it also lights only its symbol on hover.
     private struct SeasonRowCircle: ViewModifier {
         func body(content: Content) -> some View {
-            #if targetEnvironment(macCatalyst)
             content.buttonStyle(FixedGlassButtonStyle(size: DetailEpisodes.secondaryControlHeight))
-            #else
-            content.glassCircleButton(.regular)
-                .frame(width: DetailEpisodes.secondaryControlHeight, height: DetailEpisodes.secondaryControlHeight)
-            #endif
         }
     }
 
@@ -160,18 +148,15 @@ struct DetailEpisodes: View {
                 .accessibilityIdentifier("detail.seasonWatched")
             }
         } label: {
-            ZStack {
-                Self.glassHeightReference
-                HStack(spacing: 4) {
-                    Text(model.selectedSeason == 0 ? "Specials" : "Season \(model.selectedSeason ?? 1)").font(.subheadline.weight(.semibold))
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
-                }
+            HStack(spacing: 4) {
+                Text(model.selectedSeason == 0 ? "Specials" : "Season \(model.selectedSeason ?? 1)").font(.subheadline.weight(.semibold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
             .frame(height: Self.secondaryControlHeight)
-            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
-            .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
-            .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
+            .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
+            .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
         .frame(height: Self.secondaryControlHeight)
@@ -258,13 +243,10 @@ struct DetailEpisodes: View {
         return Button {
             Task { await model.setMatchesEpisodeWidthToText(!isWide) }
         } label: {
-            ZStack {
-                Self.glassHeightReference
-                Image(systemName: isWide ? "rectangle" : "rectangle.split.3x1")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .contentTransition(.symbolEffect(.replace))
-            }
+            Image(systemName: isWide ? "rectangle" : "rectangle.split.3x1")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .contentTransition(.symbolEffect(.replace))
         }
         .modifier(SeasonRowCircle())
         .titleTapHaptic()

@@ -6,9 +6,13 @@ import Testing
     @Test func theDefaultsAreTheOriginalLook() {
         let appearance = AppearancePreferences()
         #expect(appearance.isDefault)
-        #expect(appearance.accent == .blusion)
-        #expect(appearance.background == .black)
-        #expect(appearance.cardScale == 1 && appearance.cornerScale == 1 && appearance.spacingScale == 1)
+        #expect(appearance.preset == .original)
+        #expect(appearance.accent == .olive)
+        #expect(appearance.background == .graphite)
+        #expect(appearance.buttonFinish == .solid && appearance.playStyle == .artwork)
+        #expect(appearance.cardScale == 1 && appearance.cornerScale == 0 && appearance.spacingScale == 0.3)
+        #expect(appearance.cornerScale(for: .artwork) == 0 && appearance.cornerScale(for: .playButton) == 0)
+        #expect(appearance.cornerOverrides.isEmpty && appearance.progressThickness == .thin)
         #expect(appearance.phoneGridColumns == 3)
         #expect(!appearance.showsPosterTitles)
         #expect(appearance.captionLines == 1 && appearance.showsCaptionDetails)
@@ -17,7 +21,7 @@ import Testing
         #expect(appearance.heroAutoAdvance == 0 && appearance.showsPageDots)
         #expect(appearance.animationSpeed == .standard)
         #expect(appearance.startTab.tab == .home)
-        #expect(appearance.backgroundRGB == AppearancePreferences.RGB(red: 0, green: 0, blue: 0))
+        #expect(appearance.backgroundRGB == AppearancePreferences.Background.graphite.rgb)
     }
 
     @Test func aSaveRoundTripsThroughItsRawValue() throws {
@@ -59,10 +63,11 @@ import Testing
     }
 
     @Test func aFieldThatCannotBeReadFallsBackOnItsOwn() throws {
-        let saved = #"{"accent":"neon","background":"graphite","phoneGridColumns":9,"cardSize":4,"captionLines":0,"heroAutoAdvance":7}"#
+        let saved = #"{"accent":"neon","background":"navy","phoneGridColumns":9,"cardSize":4,"captionLines":0,"heroAutoAdvance":7}"#
         let appearance = try #require(AppearancePreferences(rawValue: saved))
-        #expect(appearance.accent == .blusion)
-        #expect(appearance.background == .graphite)
+        #expect(appearance.accent == .olive)
+        #expect(appearance.background == .navy)
+        #expect(appearance.cornerScale == 0 && appearance.spacingScale == 0.3)
         #expect(appearance.cardScale == AppearancePreferences.cardScaleRange.upperBound)
         #expect(appearance.phoneGridColumns == AppearancePreferences.phoneGridColumnRange.upperBound)
         #expect(appearance.captionLines == 1)
@@ -129,7 +134,11 @@ import Testing
         #expect(arthouse.cornerScale(for: .filters) == 0 && arthouse.cornerScale(for: .actionButtons) == 1)
         #expect(arthouse.uppercaseCaptions && arthouse.artworkTone == .mono && arthouse.layout == .editorial)
         #expect(AppearancePreferences.Preset.appleTV.applied(to: arthouse).layout == .standard)
-        #expect(AppearancePreferences.Preset.original.applied(to: arthouse).cornerOverrides.isEmpty)
+        #expect(AppearancePreferences.Preset.original.applied(to: arthouse).cornerOverrides == AppearancePreferences().cornerOverrides)
+        // The other presets keep their own background, finish and gaps.
+        #expect(arthouse.background == .black && arthouse.buttonFinish == .glass && arthouse.spacingScale == 1.25)
+        let plex = AppearancePreferences.Preset.plex.applied(to: appearance)
+        #expect(plex.spacingScale == 1 && plex.background == .charcoal)
     }
 
     @Test func presetsSetPlayTheButtonsFinishHeadingsAndHover() throws {
@@ -144,7 +153,7 @@ import Testing
         look.headingColour = .accent
         let restored = try #require(AppearancePreferences(rawValue: look.rawValue))
         #expect(restored == look)
-        #expect(look.restoringDefaults(of: .colour).playStyle == .artwork && look.restoringDefaults(of: .colour).buttonFinish == .glass)
+        #expect(look.restoringDefaults(of: .colour).playStyle == .artwork && look.restoringDefaults(of: .colour).buttonFinish == .solid)
         #expect(look.restoringDefaults(of: .text).headingColour == .primary)
     }
 

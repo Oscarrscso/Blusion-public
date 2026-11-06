@@ -8,8 +8,8 @@ import Foundation
 /// Saved as one JSON string under `defaultsKey` in the standard defaults, so screens read it with `@AppStorage` and follow a change at
 /// once. The root applies it (`appliesAppearance()`); cards and grids read it through `LayoutMetrics`. Every field decodes on its own, so
 /// a value added later keeps older saves loading, and the fields that used to be fixed steps (card size, corners, spacing, the outline
-/// switch) read the old steps into the new values. The defaults live here and nowhere else, and they draw the app exactly as it was drawn
-/// before these settings existed.
+/// switch) read the old steps into the new values. The defaults live here and nowhere else: Olive on Graphite, flat buttons, square
+/// corners, the tightest gaps and a thin progress line.
 public struct AppearancePreferences: Sendable, Equatable, Codable {
     public static let defaultsKey = "settings.appearance"
 
@@ -285,13 +285,13 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         /// What the group rounds, in the words the listener sees it by.
         public var label: String {
             switch self {
-            case .artwork: "Posters & Cards"
+            case .artwork: "Posters, Cards & Photos"
             case .playButton: "Play Button"
-            case .actionButtons: "Glass Buttons"
-            case .filters: "Filters, Chips & Badges"
+            case .actionButtons: "Other Buttons"
+            case .filters: "Pickers, Chips & Badges"
             case .reviews: "Review Cards"
             case .panels: "Stream Cards & Panels"
-            case .playerControls: "Video Player"
+            case .playerControls: "Player Controls"
             case .settingsPreview: "Appearance Preview"
             case .settingsRows: "Settings Rows"
             }
@@ -391,13 +391,19 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         public var label: String { rawValue.capitalized }
     }
 
-    /// What the buttons are made of: Liquid Glass, flat fills for a look whose app draws no glass, or no fill at all (Flat: every
-    /// button, Play included, is its label alone).
+    /// What the buttons are made of: Liquid Glass, flat fills for a look whose app draws no glass (shown as Flat), or no fill at all
+    /// (shown as Plain: every button, Play included, is its label alone). The saved values keep their first names.
     public enum ButtonFinish: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
         case glass, solid, flat
 
         public var id: String { rawValue }
-        public var label: String { rawValue.capitalized }
+        public var label: String {
+            switch self {
+            case .glass: "Glass"
+            case .solid: "Flat"
+            case .flat: "Plain"
+            }
+        }
     }
 
     /// The colour of shelf and section headings.
@@ -599,7 +605,13 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         /// `appearance` with this preset's look.
         public func applied(to appearance: AppearancePreferences) -> AppearancePreferences {
             var look = AppearancePreferences()
-            if self != .original { look.cornerOverrides = Self.controlCorners }
+            if self != .original {
+                // The other presets build on black, glass buttons and the standard gaps unless they set their own.
+                look.background = .black
+                look.buttonFinish = .glass
+                look.spacingScale = 1
+                look.cornerOverrides = Self.controlCorners
+            }
             switch self {
             case .original:
                 break
@@ -811,16 +823,16 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
     // MARK: - Colour
 
-    public var accent: Accent = .blusion
+    public var accent: Accent = .olive
     /// The accent when `accent` is `.custom`. Kept when another accent is chosen, so going back to Custom finds it again.
     public var customAccent = RGB(red: 0.42, green: 0.51, blue: 1)
-    public var background: Background = .black
+    public var background: Background = .graphite
     /// The background when `background` is `.custom`. Kept like the custom accent.
     public var customBackground = RGB(red: 0.06, green: 0.06, blue: 0.08)
     /// How much of the accent the Tinted background has, as a share of the accent's own brightness (`tintStrengthRange`).
     public var tintStrength: Double = 0.11
     public var playStyle: PlayStyle = .artwork
-    public var buttonFinish: ButtonFinish = .glass
+    public var buttonFinish: ButtonFinish = .solid
 
     // MARK: - Text
 
@@ -844,7 +856,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     /// Every card's width in shelves and wide grids, as a share of the layout's own (`cardScaleRange`).
     public var cardScale: Double = 1
     /// The roundness of posters, cards, tiles and stills, as a share of their own radius (`cornerScaleRange`). Zero is square.
-    public var cornerScale: Double = 1
+    public var cornerScale: Double = 0
     /// Missing entries follow the global corner scale; overrides are absolute, not multiplied by it.
     public var cornerOverrides: [String: Double] = [:]
     public var includesCircularButtons = false
@@ -853,7 +865,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         cornerOverrides[group.rawValue] ?? cornerScale
     }
     /// The gaps between cards and between shelves, as a share of the layout's own (`spacingScaleRange`).
-    public var spacingScale: Double = 1
+    public var spacingScale: Double = 0.3
     /// Poster columns of a grid (Library, Discover, See All) on a phone held upright.
     public var phoneGridColumns = 3
     /// Every poster carries its title and a grey line underneath, as landscape and square cards do.
@@ -867,7 +879,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var outline: Outline = .standard
     public var artworkTone: ArtworkTone = .natural
     public var progressColour: ProgressColour = .white
-    public var progressThickness: ProgressThickness = .standard
+    public var progressThickness: ProgressThickness = .thin
     /// The minutes left beside the progress line on Continue cards.
     public var showsTimeLeft = true
 
@@ -1009,12 +1021,14 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
         // Card size, corners and spacing were fixed steps saved by name; a save from then reads the step's value.
         cardScale = clamp(read(.cardSize, legacy(.legacyCardScale, Self.legacyCardScales) ?? 1), Self.cardScaleRange, 1)
-        cornerScale = clamp(read(.cornerScale, legacy(.legacyCorners, Self.legacyCornerScales) ?? 1), Self.cornerScaleRange, 1)
+        cornerScale = clamp(read(.cornerScale, legacy(.legacyCorners, Self.legacyCornerScales) ?? cornerScale), Self.cornerScaleRange,
+                            cornerScale)
         cornerOverrides = read(.cornerOverrides, cornerOverrides).filter { key, value in
             CornerGroup(rawValue: key) != nil && value.isFinite
         }.mapValues { min(max($0, Self.cornerScaleRange.lowerBound), Self.cornerScaleRange.upperBound) }
         includesCircularButtons = read(.includesCircularButtons, includesCircularButtons)
-        spacingScale = clamp(read(.spacing, legacy(.legacyDensity, Self.legacySpacingScales) ?? 1), Self.spacingScaleRange, 1)
+        spacingScale = clamp(read(.spacing, legacy(.legacyDensity, Self.legacySpacingScales) ?? spacingScale), Self.spacingScaleRange,
+                             spacingScale)
         phoneGridColumns = min(max(read(.phoneGridColumns, phoneGridColumns), Self.phoneGridColumnRange.lowerBound),
                                Self.phoneGridColumnRange.upperBound)
         showsPosterTitles = read(.showsPosterTitles, showsPosterTitles)

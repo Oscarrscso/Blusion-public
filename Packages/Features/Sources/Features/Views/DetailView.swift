@@ -302,6 +302,8 @@ struct DetailView: View {
                 }
                 .scrollIndicators(.visible, axes: .vertical)
                 .scrollIndicatorsFlash(onAppear: true)
+                // A section opened on the page (the synopsis, Information, a stream's details) comes into view, as a rating's reviews do.
+                .environment(\.pageReveal, proxy.pageReveal)
                 .contentMargins(.top, 0, for: .scrollContent)
                 .contentMargins(.bottom, bottomExtra, for: .scrollContent)
                 // Phone landscape: scrolling down tucks the landscape bar away to Home, as on every other page.

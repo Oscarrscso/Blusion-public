@@ -87,21 +87,22 @@ public final class WidgetBuilderModel {
     private static let noTokenMessage = "Add a TMDB Read Access Token in Settings to choose from TMDB's lists."
     private static let unreachableMessage = "TMDB couldn't be reached."
 
-    /// The builder for a new widget (a TMDB list of popular movies unless `widget` is given) or for a saved one. `region` is the device's
-    /// region, which the region and provider pills use when the query names none.
-    public convenience init(mode: Mode, widget: HomeWidget? = nil, manager: WidgetsManagerViewModel, services: AppServices,
-                            region: String = Locale.current.region?.identifier ?? "US") {
-        self.init(mode: mode, widget: widget, manager: manager, lookups: .live(services: services), region: region)
+    /// The builder for a new widget (a TMDB list of popular movies in `style` unless `widget` is given) or for a saved one. `region` is the
+    /// device's region, which the region and provider pills use when the query names none.
+    public convenience init(mode: Mode, widget: HomeWidget? = nil, style: WidgetStyle = .row, manager: WidgetsManagerViewModel,
+                            services: AppServices, region: String = Locale.current.region?.identifier ?? "US") {
+        self.init(mode: mode, widget: widget, style: style, manager: manager, lookups: .live(services: services), region: region)
     }
 
     /// The same builder with its TMDb calls supplied, so the tests can answer them without the network.
-    init(mode: Mode, widget: HomeWidget?, manager: WidgetsManagerViewModel, lookups: WidgetBuilderLookups, region: String) {
+    init(mode: Mode, widget: HomeWidget?, style: WidgetStyle = .row, manager: WidgetsManagerViewModel, lookups: WidgetBuilderLookups,
+         region: String) {
         self.mode = mode
         self.manager = manager
         self.lookups = lookups
         self.deviceRegion = region.uppercased()
         let fallback = HomeWidget(title: "Popular Movies", content: .row(RowConfiguration(source: .tmdbDiscover(TMDbDiscoverQuery()))))
-        var shown = widget ?? fallback
+        var shown = widget ?? WidgetStyle.restyled(fallback, as: style)
         if Self.rowOf(shown.content) == nil { shown.content = .row(RowConfiguration(source: .unsupported(kind: ""))) }
         self.widget = shown
         let source = Self.rowOf(shown.content)?.source ?? .unsupported(kind: "")

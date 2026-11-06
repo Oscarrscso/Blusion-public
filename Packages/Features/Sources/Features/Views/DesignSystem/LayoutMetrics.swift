@@ -96,9 +96,9 @@ struct LayoutMetrics: Equatable, Sendable {
         return metrics
     }
 
-    /// The side margin of the grid pages (Discover, Library, See All, Search): the gap between cards, so a grid's outer edges match the
-    /// gaps inside it, and the filters and headings above it keep to the same edge.
-    var gridPageMargin: CGFloat { cardSpacing }
+    /// The side margin of the grid pages (Discover, Library, See All, Search): the gap between cards, but never less than
+    /// `Theme.Spacing.l`, so the grid, and the filters and headings above it, keep to the same edge as Back and the large title.
+    var gridPageMargin: CGFloat { max(cardSpacing, Theme.Spacing.l) }
 
     /// These metrics for a grid page, whose page margin is `gridPageMargin`. The page hands them to everything on it.
     var gridPage: LayoutMetrics {

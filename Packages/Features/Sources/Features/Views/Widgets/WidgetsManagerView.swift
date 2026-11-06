@@ -14,7 +14,8 @@ struct WidgetsManagerView: View {
     @Environment(\.layoutMetrics) private var metrics
     let services: AppServices
     @State private var model: WidgetsManagerViewModel
-    @State private var creating: NewWidgetRoute?
+    /// The style of the new widget whose screen is pushed.
+    @State private var creating: WidgetStyle?
     @State private var openedWidget: HomeWidget?
     @State private var showsGenreCollection = false
     @State private var showsImport = false
@@ -88,7 +89,13 @@ struct WidgetsManagerView: View {
     private var addMenu: some View {
         // Adding a widget shows the cards, so the new one is not hidden with the rest.
         Menu {
-            Button("New Widget", systemImage: "rectangle.stack.badge.plus") { hidesWidgets = false; creating = .widget }
+            // The style comes first: the new widget opens already in it.
+            Menu("New Widget", systemImage: "rectangle.stack.badge.plus") {
+                ForEach(WidgetStyle.allCases) { style in
+                    Button(style.rawValue, systemImage: style.systemImage) { hidesWidgets = false; creating = style }
+                }
+            }
+            .accessibilityIdentifier("widgets.add.widget")
             Button("Genre Collection", systemImage: "square.grid.2x2") { hidesWidgets = false; showsGenreCollection = true }
                 .disabled(model.catalogChoices.allSatisfy { $0.genres.isEmpty })
             Button("Streaming Services", systemImage: "play.tv") {
@@ -480,11 +487,12 @@ struct WidgetsManagerView: View {
             if !old.isEmpty, !Set(new).isSubset(of: old) { withAnimation { hidesWidgets = false } }
         }
         .navigationDestination(item: $openedWidget) { WidgetEditorView(widget: $0, model: model, services: services) }
-        .navigationDestination(item: $creating) { _ in WidgetEditorView(model: model, services: services) }
+        .navigationDestination(item: $creating) { WidgetEditorView(style: $0, model: model, services: services) }
         .sheet(isPresented: $showsGenreCollection) {
             NavigationStack {
-                WidgetSourcePicker(model: model, genresOnly: true, showsCancel: true) { choice, _ in
-                    Task { await model.add(WidgetsManagerViewModel.makeGenreCollection(title: "Genres", choice: choice)) }
+                GenreCollectionPicker(model: model) { choice, genres in
+                    let title = GenreCollectionPicker.title(for: choice)
+                    Task { await model.add(WidgetsManagerViewModel.makeGenreCollection(title: title, choice: choice, genres: genres)) }
                     showsGenreCollection = false
                 }
             }
@@ -900,7 +908,7 @@ private struct WidgetCard: View {
         switch widget.content {
         case .hero: "Hero"
         case .banner: "Carousel"
-        case .row(let row): row.presentation.showsRank ? "Row Numbered" : "Row Classic"
+        case .row(let row): row.layout.map { WidgetStyle($0).rawValue } ?? (row.presentation.showsRank ? "Row Numbered" : "Row Classic")
         case .collection: "Collection"
         case .continueWatching: "Continue Watching"
         case .unsupported: "Unsupported"
@@ -932,11 +940,6 @@ private struct WidgetCard: View {
     }
 }
 
-/// A screen pushed to make a new widget.
-private enum NewWidgetRoute: Hashable, Identifiable {
-    case widget
-    var id: Self { self }
-}
 /// A group of rows on the widgets page: an optional heading over rows on one rounded surface, as a settings list draws them.
 private struct WidgetsPageGroup<Content: View>: View {
     @Environment(\.layoutMetrics) private var metrics
