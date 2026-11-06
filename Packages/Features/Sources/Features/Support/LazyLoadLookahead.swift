@@ -30,9 +30,14 @@ enum LazyLoadLookahead {
         levels[min(max(level, 1), levels.count) - 1].titles
     }
 
+    /// Titles kept ready at `level` as the app uses them: the nearest level while Optimisation saves power (see `OptimisationSettings`).
+    static func activeTitles(atLevel level: Int, savesPower: Bool = OptimisationSettings.savesPower()) -> Int {
+        titles(atLevel: savesPower ? 1 : level)
+    }
+
     /// Titles ahead of the end at which the next page loads, and titles on each side of the screen that are kept loaded.
     static func titlesAhead(in defaults: UserDefaults = .standard) -> Int {
-        titles(atLevel: level(in: defaults))
+        activeTitles(atLevel: level(in: defaults), savesPower: OptimisationSettings.savesPower(in: defaults))
     }
 
     /// The index in a list of `count` titles from which an appearing title loads the next page: every title at or after it does.

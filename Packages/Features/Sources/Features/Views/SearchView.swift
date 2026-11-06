@@ -11,18 +11,50 @@ struct SearchView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(\.appAppearance) private var appearance
+    private let services: AppServices
     private let initialQuery: String?
     /// The id of the page's content, which its scroll goes back to when its tab's item is tapped.
     private static let topID = "search.top"
 
     init(services: AppServices, initialQuery: String? = nil) {
         _model = State(initialValue: SearchViewModel(services: services, history: services.searchHistory))
+        self.services = services
         self.initialQuery = initialQuery
     }
 
+    /// The standard page, or the editorial one (the Arthouse preset), over the same search.
     var body: some View {
+        Group {
+            if appearance.showsEditorialPages {
+                EditorialSearchPage(model: model, services: services, results: resultItems, isLoading: isLoadingResults,
+                                    selectedType: $selectedType)
+            } else {
+                // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+                standardPage
+                    .environment(\.layoutMetrics, metrics.gridPage)
+            }
+        }
+        // Coming from another tab, Search starts on an empty field.
+        .onChange(of: router.searchBrowseRevision) { model.query = "" }
+        .onChange(of: model.query) { model.queryDidChange() }
+        .task {
+            await model.refreshAvailability()
+            model.prewarmAI()
+        }
+        .onChange(of: router.tab) { old, _ in
+            if old == .settings { Task { await model.refreshAvailability() } }
+        }
+        .task {
+            guard let initialQuery, model.query.isEmpty else { return }
+            model.query = initialQuery
+            await model.submit()
+        }
+    }
+
+    private var standardPage: some View {
         @Bindable var model = model
-        ScrollViewReader { proxy in
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: metrics.shelfSpacing) {
                     #if targetEnvironment(macCatalyst)
@@ -31,13 +63,13 @@ struct SearchView: View {
                         .focused($isSearchFocused)
                         .submitLabel(.search)
                         .onSubmit { Task { await model.submit() } }
-                        .padding(.horizontal, metrics.pageMargin)
+                        .padding(.horizontal, metrics.gridPageMargin)
                     #endif
                     if model.isOffline {
                         OfflineBanner()
                     } else if !model.failures.isEmpty {
                         WrappingStack { ForEach(model.failures) { ErrorChip(text: $0.text) } }
-                            .padding(.horizontal, metrics.pageMargin)
+                            .padding(.horizontal, metrics.gridPageMargin)
                             .accessibilityIdentifier("search.failures")
                     }
                     if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -69,8 +101,6 @@ struct SearchView: View {
                         placement: .navigationBarDrawer(displayMode: .always), prompt: "Shows, Movies, and More")
             .searchFocused($isSearchFocused)
             #endif
-            // Coming from another tab, Search starts on an empty field.
-            .onChange(of: router.searchBrowseRevision) { model.query = "" }
             // Every arrival on Search, and every tap on its button, puts the cursor in the field and brings the keyboard up. The field
             // stays where it is, under the title.
             .onChange(of: router.searchFocusRevision, initial: true) { focusField() }
@@ -81,20 +111,7 @@ struct SearchView: View {
                     isSearchPresented = false
                 }
             }
-            .onChange(of: model.query) { model.queryDidChange() }
             .onSubmit(of: .search) { Task { await model.submit() } }
-            .task {
-                await model.refreshAvailability()
-                model.prewarmAI()
-            }
-            .onChange(of: router.tab) { old, _ in
-                if old == .settings { Task { await model.refreshAvailability() } }
-            }
-            .task {
-                guard let initialQuery, model.query.isEmpty else { return }
-                model.query = initialQuery
-                await model.submit()
-            }
             .accessibilityIdentifier("search.results")
             // A tap on Search's tab item goes back to its first page, and scrolls it to the top.
             .onChange(of: router.tabTapRevisions[.search, default: 0]) { _, _ in
@@ -154,7 +171,7 @@ struct SearchView: View {
             SectionHeader(title)
             LazyVGrid(columns: metrics.wideGridColumns, spacing: metrics.cardSpacing) { tiles() }
         }
-        .padding(.horizontal, metrics.pageMargin)
+        .padding(.horizontal, metrics.gridPageMargin)
     }
 
     private var resultItems: [MetaPreview] {
@@ -183,7 +200,7 @@ struct SearchView: View {
                 if model.aiAvailable { Text("AI").tag("ai") }
             }
             .pickerStyle(.segmented)
-            .navigationAlignedWidth(margin: metrics.pageMargin)
+            .navigationAlignedWidth(margin: metrics.gridPageMargin)
             .accessibilityIdentifier("search.filters")
 
             if !resultItems.isEmpty {
@@ -211,7 +228,7 @@ struct SearchView: View {
                     Spacer()
                     Button("Retry") { model.retryAI() }
                 }
-                .padding(.horizontal, metrics.pageMargin)
+                .padding(.horizontal, metrics.gridPageMargin)
                 .accessibilityIdentifier("search.ai.retry")
             }
         }

@@ -78,15 +78,19 @@ struct DownloadsView: View {
     }
 }
 
+/// Settings → Downloads: when downloads may run and be removed, and the space they take.
 struct DownloadSettingsPage: View {
     let services: AppServices
     @State private var cellular = false
     @State private var deleteWatched = false
     @State private var confirmsDelete = false
     var body: some View {
-        Form {
+        SettingsList {
             Section {
-                Toggle("Cellular Downloads", isOn: Binding(get: { cellular }, set: { value in
+                // A Mac has no cellular connection to allow.
+                #if !targetEnvironment(macCatalyst)
+                Toggle("Use cellular data", isOn: Binding(get: { cellular }, set: { value in
+                    Haptics.play(.choices)
                     cellular = value
                     Task {
                         var settings = await services.settings.load()
@@ -95,7 +99,10 @@ struct DownloadSettingsPage: View {
                         await services.downloads?.preferencesChanged()
                     }
                 }))
-                Toggle("Delete When Watched", isOn: Binding(get: { deleteWatched }, set: { value in
+                .accessibilityIdentifier("settings.downloads.cellular")
+                #endif
+                Toggle("Delete after watching", isOn: Binding(get: { deleteWatched }, set: { value in
+                    Haptics.play(.choices)
                     deleteWatched = value
                     Task {
                         var settings = await services.settings.load()
@@ -103,20 +110,33 @@ struct DownloadSettingsPage: View {
                         await services.settings.save(settings)
                     }
                 }))
-                LabeledContent("Storage Used", value: ByteCountFormatter.string(fromByteCount: services.downloads?.storageBytes ?? 0, countStyle: .file))
-                Button("Delete All", role: .destructive) { confirmsDelete = true }
+                .accessibilityIdentifier("settings.downloads.deleteWatched")
+            }
+            Section {
+                LabeledContent("Storage used", value: storageText)
+                    .accessibilityIdentifier("settings.downloads.storage")
+                Button("Delete All Downloads", role: .destructive) { confirmsDelete = true }
+                    .accessibilityIdentifier("settings.downloads.deleteAll")
             }
         }
-        .navigationTitle("Downloads")
+        .scrollIndicators(.visible, axes: .vertical)
+        .scrollIndicatorsFlash(onAppear: true)
+        .settingsPage("Downloads")
         .task {
             let settings = await services.settings.load()
             cellular = settings.downloadsAllowCellular; deleteWatched = settings.downloadsDeleteWhenWatched
             await services.downloads?.start()
         }
-        .confirmationDialog("Delete All Downloads?", isPresented: $confirmsDelete, titleVisibility: .visible) {
-            Button("Delete All", role: .destructive) { Task { await services.downloads?.deleteAll() } }
+        .confirmationDialog("Delete all downloads?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("Delete All Downloads", role: .destructive) { Task { await services.downloads?.deleteAll() } }
+            Button("Cancel", role: .cancel) {}
         }
         .downloadErrors(services.downloads)
+    }
+
+    private var storageText: String {
+        let bytes = services.downloads?.storageBytes ?? 0
+        return bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : "None"
     }
 }
 

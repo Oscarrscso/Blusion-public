@@ -40,9 +40,7 @@ public enum TitleInformation {
         rows.append(("Budget", money(facts?.budget)))
         rows.append(("Box office", money(facts?.revenue)))
         for kind in TitlePrices.Kind.allCases {
-            for quality in TitlePrices.Quality.allCases.reversed() {
-                rows.append((priceLabel(kind, quality), price(prices?.cheapest(kind, quality) ?? [])))
-            }
+            rows.append((kind.label, prices.flatMap { priceRow(kind, $0) }))
         }
         rows.append(("Age rating", certification))
         rows.append(("Average rating", averageRating))
@@ -52,9 +50,19 @@ public enum TitleInformation {
         }
     }
 
-    /// A price row's label: "Rent 4K", "Buy SD".
-    public static func priceLabel(_ kind: TitlePrices.Kind, _ quality: TitlePrices.Quality) -> String {
-        "\(kind.label) \(quality.label)"
+    /// A kind's row: qualities that cost the same share one price, lowest quality first ("SD, HD, 4K: €17.98 · ..." ).
+    private static func priceRow(_ kind: TitlePrices.Kind, _ prices: TitlePrices) -> String? {
+        var groups: [(price: String, qualities: [String])] = []
+        for quality in TitlePrices.Quality.allCases {
+            guard let text = price(prices.cheapest(kind, quality)) else { continue }
+            if let index = groups.firstIndex(where: { $0.price == text }) {
+                groups[index].qualities.append(quality.label)
+            } else {
+                groups.append((price: text, qualities: [quality.label]))
+            }
+        }
+        guard !groups.isEmpty else { return nil }
+        return groups.map { "\($0.qualities.joined(separator: ", ")): \($0.price)" }.joined(separator: " · ")
     }
 
     /// "€3.99" when every store asks the same; otherwise each price, cheapest first, with the stores that ask it ("€3.49 Amazon Video ·

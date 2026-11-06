@@ -69,6 +69,10 @@ public final class StreamPickerViewModel {
     public var startsAutomaticallyAnyway = false
     /// Applies only to a single explicit Play-with-Infuse picker, not persisted Settings.
     public var automaticPlayerOverride: ExternalPlayer?
+    /// A quality chosen for this play from a hold menu (Highest Quality, Data Saver). Nil follows Settings. Set before loading.
+    public var quality: PlayQuality?
+    /// Every ranking here: Settings', or the quality chosen for this play.
+    private var rankingPreferences: RankingPreferences { settings.rankingPreferences(for: quality) }
 
     /// Extensions a file can carry for Infuse to name it by. Release names often end in something else ("...H.265-playWEB"), so only these
     /// count as the file's extension.
@@ -105,7 +109,7 @@ public final class StreamPickerViewModel {
         links = Self.linksToOffer(in: listing.items)
         // One ranking for every automatic choice: the best of what has arrived so far, and the completed one once every addon has answered.
         // It ranks only the watchable routes the saved player policy allows, so Auto Pick never bypasses that policy with an Infuse hand-off.
-        let best = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        let best = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: rankingPreferences)
         bestAssessment = listing.isLoading ? nil : best
         bestToPlay = best?.item
     }
@@ -122,7 +126,7 @@ public final class StreamPickerViewModel {
                                      decodesAV1InHardware: services.decodesAV1InHardware)
         config.installedPlayers = installedPlayers
         if automaticPlayerOverride == .infuse { config.playerPreference = .infuse }
-        listing = StreamListing(asking: asked, config: config, preferences: settings.rankingPreferences)
+        listing = StreamListing(asking: asked, config: config, preferences: rankingPreferences)
         nobodyCanAnswer = asked.isEmpty
         hasLoaded = true
         guard !asked.isEmpty else { return }
@@ -219,6 +223,8 @@ public final class StreamPickerViewModel {
                 bestEdition = .idle
                 return
             }
+            // The film's posters and title page then show its disc without asking the site again.
+            await services.posterRatings.rememberBestEdition(result, imdbID: request.id)
             switch result {
             case .edition(let edition): bestEdition = .found(edition)
             case .pageWithoutEdition(let title, let url): bestEdition = .listedWithoutEdition(title: title, url: url)
@@ -278,7 +284,8 @@ public final class StreamPickerViewModel {
     /// What the start made when the streams open begins with: the previous session's own stream, and someone else's stream never.
     /// Without a session to resume, the best stream, as always.
     public var automaticStartCandidate: RankedStream? {
-        resumeSnapshot != nil ? matchedResumeStream() : bestToPlay
+        // A quality chosen for this play asks for a release by that quality, not the session's own file.
+        resumeSnapshot != nil && quality == nil ? matchedResumeStream() : bestToPlay
     }
 
     /// Select only streams that this external player can really accept, using the existing quality ranking.
@@ -290,7 +297,7 @@ public final class StreamPickerViewModel {
             return player.canPlay(streamURL: url, headers: item.stream.behaviorHints.proxyHeaders?.request ?? [:])
         }
         return AutoStreamRanking.best(from: eligible, duration: request.expectedDuration,
-                                      preferences: settings.rankingPreferences)?.item
+                                      preferences: rankingPreferences)?.item
     }
 
     /// The saved session to hand to the player when it opens `item`, if `item` is the session's stream.
@@ -356,7 +363,7 @@ public final class StreamPickerViewModel {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
         }
         guard !Task.isCancelled else { return nil }
-        let assessment = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        let assessment = AutoStreamRanking.best(from: listing.items, duration: request.expectedDuration, preferences: rankingPreferences)
         logAutomaticChoice()
         guard let pick = assessment else {
             autoPickMessage = "No streams are ready for automatic playback. Choose a stream manually."
@@ -433,7 +440,7 @@ public final class StreamPickerViewModel {
 
     /// Logs why the automatic choice is what it is, one line per reason, for each release in ranked order. Debug only: nothing is shown.
     private func logAutomaticChoice() {
-        let ranked = AutoStreamRanking.ranked(listing.items, duration: request.expectedDuration, preferences: settings.rankingPreferences)
+        let ranked = AutoStreamRanking.ranked(listing.items, duration: request.expectedDuration, preferences: rankingPreferences)
         for explanation in AutoStreamRanking.explain(ranked) {
             autoPickLog.debug("\(explanation.rank, privacy: .public). \(explanation.title, privacy: .private): \(explanation.reasons.joined(separator: "; "), privacy: .public)")
         }
@@ -443,14 +450,14 @@ public final class StreamPickerViewModel {
     /// that Auto Pick would rank below another.
     public func nextPlayable(after item: RankedStream) -> RankedStream? {
         let others = listing.playable.filter { $0.id != item.id }
-        return AutoStreamRanking.best(from: others, duration: request.expectedDuration, preferences: settings.rankingPreferences)?.item
+        return AutoStreamRanking.best(from: others, duration: request.expectedDuration, preferences: rankingPreferences)?.item
     }
 
     /// For binge-watching: the best stream of the previous episode's group, under the same ranking as Auto Pick. The addon the previous episode
     /// came from only breaks near-ties (`AutoStreamRanking.preferenceBonus`).
     public func bingeChoice(continuing previous: BingeContext?) async -> Choice? {
         guard let pick = BingeSelection.pick(from: listing.items, continuing: previous, duration: request.expectedDuration,
-                                             preferences: settings.rankingPreferences) else { return nil }
+                                             preferences: rankingPreferences) else { return nil }
         return await choose(pick)
     }
 

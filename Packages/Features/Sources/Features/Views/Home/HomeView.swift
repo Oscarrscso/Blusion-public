@@ -28,6 +28,11 @@ struct HomeView: View {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(TitleActions.self) private var actions: TitleActions?
+    #if targetEnvironment(macCatalyst)
+    /// The Mac's navigation, which hides as Home scrolls down and comes back as it scrolls up (see `MacNavigationScrollState`).
+    @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
+    @State private var navigationScrollID = UUID()
+    #endif
     /// The widget editor opened from a row's menu.
     @State private var editing: HomeWidget?
     /// What a Continue Watching card's tap does, and the card whose streams are loading on Home.
@@ -115,9 +120,11 @@ struct HomeView: View {
     private var continueStarter: some View {
         if let launch = launcher.launch {
             StreamPickerView(request: launch.request, services: services, isEmbedded: true, isRevealed: false, isHeadless: true,
+                             forcesAutomaticStart: launch.quality != nil,
                              onAutomaticStart: { started in
                                  _ = launcher.finish(launch.id, started: started)
-                             })
+                             },
+                             quality: launch.quality)
                 .id(launch.id)
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
@@ -218,14 +225,18 @@ struct HomeView: View {
                               scrollToTop: router.tabTapRevisions[.home, default: 0], jumpToTop: router.spotlightRevision,
                               onScrollingChange: { [scroll] scrolling in
                                   if scroll.isScrolling != scrolling { scroll.isScrolling = scrolling }
-                              }, onScrollOffset: { [heroScroll, scroll, heroIsFirst] offset in
+                              }, onScrollOffset: { [heroScroll, scroll, heroIsFirst, navigation, navigationScrollID] offset, maxOffset in
+                                  navigation?.update(offset: offset, maxOffset: maxOffset, from: navigationScrollID)
                                   heroScroll.offset = offset
                                   let pull = heroIsFirst ? max(0, -offset) : 0
                                   if scroll.heroPull != pull { scroll.heroPull = pull }
                               })
             .accessibilityIdentifier("board.rows")
             .modifier(BelowScreenArtwork(model: model))
-            .onDisappear { scroll.isScrolling = false }
+            .onDisappear {
+                scroll.isScrolling = false
+                navigation?.forget(navigationScrollID)
+            }
             .screenBackground()
             .ignoresSafeArea(.container, edges: ignoredEdges)
     }
@@ -314,7 +325,7 @@ struct HomeView: View {
                 // A little larger than the circle, so the icon's own bevelled rim falls outside it; every point of the star stays inside.
                 .scaleEffect(1.1)
                 .clipShape(.circle)
-                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .pointerFeedback()
         }
@@ -493,14 +504,15 @@ private struct VisibleHomeSection: ViewModifier {
 private struct BelowScreenArtwork: ViewModifier {
     let model: HomeViewModel
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+    @AppStorage(OptimisationSettings.homePreloadKey) private var homePreload = OptimisationSettings.homePreloadMatchesLazyLoad
 
     func body(content: Content) -> some View {
         content.modifier(BufferedArtwork(shelves: shelves))
     }
 
-    /// The loaded cards of the queued rows, in page order, for as many titles as the Lazy load setting keeps ready.
+    /// The loaded cards of the queued rows, in page order, for as many titles as Optimisation's Home preloading keeps ready.
     private var shelves: [ArtworkShelf] {
-        var remaining = LazyLoadLookahead.titles(atLevel: lookaheadLevel)
+        var remaining = OptimisationSettings.homeTitles(saved: homePreload, level: lookaheadLevel)
         var result: [ArtworkShelf] = []
         for section in model.sections where model.queuedRowIDs.contains(section.id) {
             guard remaining > 0, case .row(let row) = section.widget.content, case .loaded(let items) = section.state else { continue }

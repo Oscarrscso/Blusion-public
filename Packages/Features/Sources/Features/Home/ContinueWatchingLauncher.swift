@@ -22,6 +22,8 @@ final class ContinueWatchingLauncher {
         let request: StreamRequest
         let preview: MetaPreview
         let sourceID: String
+        /// A quality chosen from the card's hold menu. The best stream at it starts, whatever Auto Pick's switch says.
+        var quality: PlayQuality?
     }
 
     /// The streams loading or started for a card. Kept once a stream has started: the player it opened, or an alert about it, belongs to
@@ -67,6 +69,15 @@ final class ContinueWatchingLauncher {
         launch = Launch(itemID: itemID, request: request, preview: preview, sourceID: sourceID)
         isResolving = true
         return .resolveHere
+    }
+
+    /// Highest Quality or Data Saver from a card's hold menu: the streams load here, as with Auto Pick on, and the best at that quality
+    /// starts. False while another card's streams are loading.
+    func open(itemID: String, request: StreamRequest, preview: MetaPreview, sourceID: String, quality: PlayQuality) -> Bool {
+        guard !isResolving, !isChecking else { return false }
+        launch = Launch(itemID: itemID, request: request, preview: preview, sourceID: sourceID, quality: quality)
+        isResolving = true
+        return true
     }
 
     /// The picker for `id` started a stream (`started`), or had nothing to start. True when the title's page should now open with the

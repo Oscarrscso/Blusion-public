@@ -11,6 +11,7 @@ struct CatalogListView: View {
     /// The first load starts once; coming back to this screen keeps what is loaded instead of asking the addon again.
     @State private var hasStarted = false
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(\.layoutMetrics) private var metrics
     @Environment(LandscapeTabBarState.self) private var landscapeTabs: LandscapeTabBarState?
     @Environment(AppRouter.self) private var router
 
@@ -22,11 +23,14 @@ struct CatalogListView: View {
     var body: some View {
         Group {
             #if targetEnvironment(macCatalyst)
-            if model.items.isEmpty { scrollPage } else { macPage }
+            // The first load is the Mac page too, so its placeholders are laid out by the grid the titles fill.
+            if model.items.isEmpty && !isLoading { scrollPage } else { macPage }
             #else
             scrollPage
             #endif
         }
+        // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+        .environment(\.layoutMetrics, metrics.gridPage)
         .navigationTitle(isPhoneInLandscape ? "" : request.title)
         .pageNavigationBar(hidden: isPhoneInLandscape)
         .pageTabBar(hidden: isPhoneInLandscape)
@@ -57,33 +61,43 @@ struct CatalogListView: View {
     }
 
     #if targetEnvironment(macCatalyst)
-    /// The Mac's page once titles have loaded: the filters, the grid and its status in one UIKit scroll (see `MacGridPage`).
+    /// The Mac's page while the first titles load and once they have: the filters, the grid and its status in one UIKit scroll (see
+    /// `MacGridPage`).
     private var macPage: some View {
         var parts: [MacGridPage.Part] = [.full(id: "filters", view: AnyView(filters))]
-        if case .failed(let error) = model.state {
-            parts.append(.full(id: "error", view: AnyView(InlineErrorView(error.message, retry: retry)
-                .padding(.horizontal, Theme.screenPadding)
-                .padding(.bottom, Theme.Spacing.l))))
-        }
-        if model.visibleItems.isEmpty, model.state != .loadingMore {
-            parts.append(.full(id: "noMatches", view: AnyView(noMatches)))
+        let presentation = request.presentation
+        if model.items.isEmpty {
+            // The first load: blank cards in the grid's own columns, card shape and gaps.
+            parts.append(.placeholders(id: "placeholders", aspect: presentation.aspectRatio.cardAspect))
         } else {
-            let presentation = request.presentation
-            parts.append(.grid(MacTitleGrid(id: "grid", items: model.visibleItems, aspect: presentation.aspectRatio.cardAspect,
-                                            usesBetterPosters: presentation.usesBetterPosters,
-                                            onLastAppear: { Task { await model.loadMore() } }) { _, item in
-                AnyView(MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, showsRating: presentation.showsRatings,
-                                      usesBetterPosters: presentation.usesBetterPosters).stretched())
-            }))
-        }
-        if model.state == .loadingMore {
-            parts.append(.full(id: "spinner", view: AnyView(Spinner().frame(maxWidth: .infinity).padding(.vertical, Theme.Spacing.l))))
+            if case .failed(let error) = model.state {
+                parts.append(.full(id: "error", view: AnyView(InlineErrorView(error.message, retry: retry)
+                    .padding(.horizontal, Theme.screenPadding)
+                    .padding(.bottom, Theme.Spacing.l))))
+            }
+            if model.visibleItems.isEmpty, model.state != .loadingMore {
+                parts.append(.full(id: "noMatches", view: AnyView(noMatches)))
+            } else {
+                // Fills the width, as Discover's grid does, so the last column ends on the right margin at every window width.
+                parts.append(.grid(MacTitleGrid(id: "grid", items: model.visibleItems, aspect: presentation.aspectRatio.cardAspect,
+                                                fillsWidth: true, usesBetterPosters: presentation.usesBetterPosters,
+                                                onLastAppear: { Task { await model.loadMore() } }) { _, item in
+                    AnyView(MediaCardLink(item: item, aspect: presentation.aspectRatio.cardAspect, showsRating: presentation.showsRatings,
+                                          usesBetterPosters: presentation.usesBetterPosters).stretched())
+                }))
+            }
+            if model.state == .loadingMore {
+                parts.append(.full(id: "spinner", view: AnyView(Spinner().frame(maxWidth: .infinity).padding(.vertical, Theme.Spacing.l))))
+            }
         }
         return MacGridPage(parts: parts)
             .environment(\.heroPosterOverride, request.presentation.usesHeroPosters)
             .accessibilityIdentifier("catalogList.grid")
             .screenBackground()
     }
+
+    /// True while the list loads its titles.
+    private var isLoading: Bool { model.state == .loading || model.state == .loadingMore }
     #endif
 
     private var noMatches: some View {
@@ -117,7 +131,7 @@ struct CatalogListView: View {
                 } else {
                     MediaGrid(items: model.visibleItems, aspect: request.presentation.aspectRatio.cardAspect,
                               showsRating: request.presentation.showsRatings, onLastAppear: { Task { await model.loadMore() } },
-                              usesBetterPosters: request.presentation.usesBetterPosters)
+                              usesBetterPosters: request.presentation.usesBetterPosters, fillsWidth: true)
                         .environment(\.heroPosterOverride, request.presentation.usesHeroPosters)
                         .accessibilityIdentifier("catalogList.grid")
                 }
@@ -206,7 +220,7 @@ struct CatalogListView: View {
                 // Keep the filter bar in its final position during the first load. Its default “Auto” sort is already usable, and the
                 // posters replace placeholders without being pushed down when the controls arrive.
                 filters
-                MediaGridPlaceholder(aspect: request.presentation.aspectRatio.cardAspect)
+                MediaGridPlaceholder(aspect: request.presentation.aspectRatio.cardAspect, fillsWidth: true)
             }
         case .loaded:
             EmptyStateView("Nothing here yet", systemImage: "square.stack", message: "This list is empty right now.")

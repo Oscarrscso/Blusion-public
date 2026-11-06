@@ -67,7 +67,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
         case playerGestures
         /// A shelf card's edge passing the screen's edge as a shelf scrolls.
         case shelves
-        /// The Home banner turning to another page.
+        /// The Home spotlight turning to another page.
         case banner
         /// The run of ticks under a review that unfolds or folds.
         case reviews
@@ -87,7 +87,7 @@ public struct HapticPreferences: Sendable, Equatable, Codable {
             case .playerOptions: "Player options"
             case .playerGestures: "Player gestures"
             case .shelves: "Poster shelves"
-            case .banner: "Home banner"
+            case .banner: "Home spotlight"
             case .reviews: "Reviews"
             case .saved: "Saved"
             }

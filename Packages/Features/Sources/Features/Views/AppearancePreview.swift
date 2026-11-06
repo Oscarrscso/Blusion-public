@@ -7,11 +7,11 @@ import StremioKit
 /// included while it is still being dragged. It stands in for help text: the page explains itself by showing the result.
 ///
 /// Each part of Appearance shows the part of the app it changes: cards and text on most pages, the spotlight on Home's, an episode and
-/// the sections' order on Title Pages', and a moving dot on Motion & Navigation's.
+/// the sections' order on Title Pages', a moving dot on Motion & Navigation's, and the pieces the pointer lights on Hover's.
 struct AppearancePreview: View {
     @Environment(\.layoutMetrics) private var metrics
     enum Kind {
-        case cards, corners, home, titlePage, motion
+        case cards, corners, home, titlePage, motion, hover
     }
 
     let appearance: AppearancePreferences
@@ -47,6 +47,7 @@ private struct AppearancePreviewContent: View {
         case .home: home
         case .titlePage: titlePage
         case .motion: MotionPreview()
+        case .hover: hover
         }
     }
 
@@ -118,7 +119,7 @@ private struct AppearancePreviewContent: View {
     private var accentControls: some View {
         HStack(spacing: Theme.Spacing.m) {
             Button {} label: { Label("Add", systemImage: "plus") }
-                .buttonStyle(.glassProminent)
+                .finishedProminentButtonStyle(appearance.buttonFinish)
             Toggle("Switch", isOn: .constant(true))
                 .labelsHidden()
             Text("See All")
@@ -195,6 +196,58 @@ private struct AppearancePreviewContent: View {
             }
             .padding(.horizontal, Theme.Spacing.l)
             .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: Hover
+
+    /// What the Mac's hover lights, each piece answering the pointer at the chosen speed: the navigation control's segments, poster
+    /// cards, Play and the glass buttons, filter menus and a link. The second of each is drawn lit as well, so a value shows while its
+    /// slider is dragged and the pointer is on the slider.
+    private var hover: some View {
+        VStack(alignment: .leading, spacing: metrics.headerSpacing) {
+            HoverSegmentsPreview()
+                .padding(.horizontal, Theme.Spacing.l)
+            heading("Top Picks")
+                .padding(.top, metrics.controlSpacing)
+            shelf {
+                ForEach(0..<4, id: \.self) { index in
+                    Button {} label: { poster(index) }
+                        .buttonStyle(PressableCardStyle.poster)
+                        .environment(\.showsHover, index == 1)
+                }
+            }
+            // A lifted card and its shadow reach past the shelf's edges.
+            .scrollClipDisabled()
+            .accessibilityHidden(true)
+            GlassEffectContainer(spacing: TitleHero.actionGap) {
+                HStack(spacing: TitleHero.actionGap) {
+                    Button {} label: { Label("Play", systemImage: "play.fill") }
+                        .buttonStyle(PrimaryActionButtonStyle(height: CircleActionButton.diameter))
+                    CircleActionButton(title: "Save", systemImage: "bookmark", exactSize: true) {}
+                        .environment(\.showsHover, true)
+                    CircleActionButton(title: "Watched", systemImage: "eye", exactSize: true) {}
+                    CircleActionButton(title: "Trailer", systemImage: "play.rectangle", exactSize: true) {}
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.xs)
+            .accessibilityHidden(true)
+            HStack(spacing: metrics.controlSpacing) {
+                Button {} label: {
+                    FilterMenuLabel("Sort", systemImage: "arrow.up.arrow.down", minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+                }
+                Button {} label: {
+                    FilterMenuLabel("Genre", systemImage: "tag", minHeight: BrowseFilterBar<EmptyView>.menuHeight)
+                }
+                .environment(\.showsHover, true)
+                Button("See All") {}
+                    .buttonStyle(.hoverPlain)
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Theme.Spacing.l)
+            .accessibilityHidden(true)
         }
     }
 
@@ -297,7 +350,7 @@ private struct SpotlightPreview: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .frame(height: 190 * appearance.heroScale)
+        .frame(height: 190)
         .overlay { BottomFade(length: 0.45) }
         .overlay(alignment: .bottom) {
             if appearance.showsPageDots {
@@ -368,6 +421,62 @@ private struct EpisodePreview: View {
         }
         .padding(.horizontal, Theme.Spacing.l)
         .accessibilityHidden(true)
+    }
+}
+
+/// The navigation control's segments, lit under the pointer as the Mac's navigation control lights them (`MacPageNavigation`), with
+/// the second drawn lit as well.
+private struct HoverSegmentsPreview: View {
+    @Environment(\.appAppearance.hover) private var hover
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selection = 0
+    @State private var hoveredSegment: Int?
+    private static let titles = ["Home", "Discover", "Library"]
+    private static let shownSegment = 1
+    private static let height: CGFloat = 32
+
+    var body: some View {
+        GeometryReader { geometry in
+            let segmentWidth = geometry.size.width / CGFloat(Self.titles.count)
+            Picker("Navigation", selection: $selection) {
+                ForEach(Self.titles.indices, id: \.self) { Text(Self.titles[$0]).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                ZStack {
+                    light(at: Self.shownSegment, width: segmentWidth, height: geometry.size.height)
+                    if let hoveredSegment, hoveredSegment != Self.shownSegment {
+                        light(at: hoveredSegment, width: segmentWidth, height: geometry.size.height)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .animation(hover.animation(0.15, reduceMotion: reduceMotion), value: hoveredSegment)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    guard segmentWidth > 0, geometry.frame(in: .local).contains(location) else {
+                        hoveredSegment = nil
+                        return
+                    }
+                    hoveredSegment = min(Self.titles.count - 1, Int(location.x / segmentWidth))
+                case .ended:
+                    hoveredSegment = nil
+                }
+            }
+        }
+        .frame(height: Self.height)
+        .accessibilityHidden(true)
+    }
+
+    private func light(at segment: Int, width: CGFloat, height: CGFloat) -> some View {
+        Capsule()
+            .fill(.white.opacity(hover.segmentFillOpacity))
+            .overlay { Capsule().strokeBorder(.white.opacity(hover.segmentRimOpacity), lineWidth: 1) }
+            .frame(width: max(0, width - 4), height: Self.height - 4)
+            .position(x: width * (CGFloat(segment) + 0.5), y: height / 2)
     }
 }
 

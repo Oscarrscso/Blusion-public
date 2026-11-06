@@ -14,8 +14,8 @@ import UIKit
 struct LayoutMetrics: Equatable, Sendable {
     /// True for the wide layout (Mac window, iPad): sidebar navigation, left-aligned hero, readable-width text columns.
     var isRegular: Bool
-    /// Horizontal inset of page content, the same on every page (Home, Discover, Library, Search, title pages): headings, filters and
-    /// grids sit inside it, and shelves scroll edge to edge with their first and last cards inset by it.
+    /// Horizontal inset of page content (Home, title pages): headings, filters and grids sit inside it, and shelves scroll edge to edge
+    /// with their first and last cards inset by it. The grid pages use the gap between cards instead (`gridPage`).
     var pageMargin: CGFloat
     /// Vertical gap between two shelves (or sections) on a page.
     var shelfSpacing: CGFloat
@@ -59,8 +59,6 @@ struct LayoutMetrics: Equatable, Sendable {
     }
     /// Poster columns of a grid on a phone held upright (Appearance's Columns).
     var phonePosterColumns: Int = 3
-    /// Appearance's Spotlight height, as a share of the spotlight's own on Home.
-    var heroScale: CGFloat = 1
 
     static let compact = LayoutMetrics(
         isRegular: false, pageMargin: Theme.Spacing.l, shelfSpacing: 28, headerSpacing: 10, cardSpacing: 12,
@@ -77,7 +75,7 @@ struct LayoutMetrics: Equatable, Sendable {
     var continueCardWidth: CGFloat { ((isRegular ? 256 : 210) * cardScale).rounded() }
 
     /// These metrics as Settings → Appearance asks: cards scaled by the card size, gaps by the spacing, all corners by the corners,
-    /// the phone's poster grid at the chosen number of columns, and Home's spotlight at its height. The defaults change nothing.
+    /// and the phone's poster grid at the chosen number of columns. The defaults change nothing.
     func customised(by appearance: AppearancePreferences) -> LayoutMetrics {
         var metrics = self
         let size = CGFloat(appearance.cardScale)
@@ -95,7 +93,17 @@ struct LayoutMetrics: Equatable, Sendable {
         metrics.cornerOverrides = appearance.cornerOverrides
         metrics.includesCircularButtons = appearance.includesCircularButtons
         metrics.phonePosterColumns = appearance.phoneGridColumns
-        metrics.heroScale = CGFloat(appearance.heroScale)
+        return metrics
+    }
+
+    /// The side margin of the grid pages (Discover, Library, See All, Search): the gap between cards, so a grid's outer edges match the
+    /// gaps inside it, and the filters and headings above it keep to the same edge.
+    var gridPageMargin: CGFloat { cardSpacing }
+
+    /// These metrics for a grid page, whose page margin is `gridPageMargin`. The page hands them to everything on it.
+    var gridPage: LayoutMetrics {
+        var metrics = self
+        metrics.pageMargin = gridPageMargin
         return metrics
     }
 
@@ -120,14 +128,14 @@ struct LayoutMetrics: Equatable, Sendable {
         min(max(height * heroHeightFraction, 380), heroMaxHeight)
     }
 
-    /// Home's spotlight: `heroHeight(forContainerHeight:)` in landscape and on the Mac, the title page's picture height in portrait, each
-    /// at Appearance's Spotlight height and never taller than the container.
+    /// Home's spotlight: `heroHeight(forContainerHeight:)` in landscape and on the Mac (never taller than the container), and in portrait
+    /// exactly the title page's picture height plus the caption band. Home's picture and its title page's are always the same size, so
+    /// opening a title never resizes it: no setting or preset may scale either one.
     func spotlightHeight(isLandscape: Bool, containerWidth: CGFloat, containerHeight: CGFloat, captionBelow: CGFloat) -> CGFloat {
         if isLandscape {
-            return min(containerHeight, heroHeight(forContainerHeight: containerHeight) * heroScale + 100)
+            return min(containerHeight, heroHeight(forContainerHeight: containerHeight) + 100)
         }
-        let portrait = TitleHero.height(width: containerWidth, metrics: self) + captionBelow
-        return heroScale == 1 ? portrait : min(containerHeight, (portrait - captionBelow) * heroScale + captionBelow)
+        return TitleHero.height(width: containerWidth, metrics: self) + captionBelow
     }
 
     /// The columns of a poster grid: three on a phone (or Appearance's Columns), as many as fit on a wide screen, at the card size.

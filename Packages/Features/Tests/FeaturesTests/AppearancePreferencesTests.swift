@@ -14,7 +14,7 @@ import Testing
         #expect(appearance.captionLines == 1 && appearance.showsCaptionDetails)
         #expect(appearance.outline == .standard && appearance.artworkTone == .natural)
         #expect(appearance.headingFont == .matchText && appearance.headingWeight == .bold && appearance.headingSize == .standard)
-        #expect(appearance.heroScale == 1 && appearance.heroAutoAdvance == 0 && appearance.showsPageDots)
+        #expect(appearance.heroAutoAdvance == 0 && appearance.showsPageDots)
         #expect(appearance.animationSpeed == .standard)
         #expect(appearance.startTab.tab == .home)
         #expect(appearance.backgroundRGB == AppearancePreferences.RGB(red: 0, green: 0, blue: 0))
@@ -34,6 +34,8 @@ import Testing
         appearance.letterSpacing = .wider
         appearance.headingFont = .monospaced
         appearance.headingWeight = .black
+        appearance.headingWidth = .expanded
+        appearance.headingSpacing = .wider
         appearance.uppercaseHeadings = true
         appearance.cardScale = 1.35
         appearance.cornerScale = 0
@@ -43,12 +45,12 @@ import Testing
         appearance.outline = .strong
         appearance.artworkTone = .mono
         appearance.progressColour = .accent
-        appearance.heroScale = 0.7
         appearance.heroAutoAdvance = 12
         appearance.spoilerTitles = true
         appearance.sectionOrder = .castFirst
         appearance.animationSpeed = .off
         appearance.startTab = .library
+        appearance.layout = .editorial
         let restored = try #require(AppearancePreferences(rawValue: appearance.rawValue))
         #expect(restored == appearance)
         #expect(!restored.isDefault)
@@ -94,21 +96,56 @@ import Testing
         #expect(AppearancePreferences.saved(in: defaults).isDefault)
     }
 
-    @Test func aPresetIsRecognisedAndLeavesTheRestAlone() {
+    @Test func aPresetIsRecognisedAndLeavesTheListenersOwnChoicesAlone() {
         var appearance = AppearancePreferences()
         appearance.showsReviews = false
         appearance.startTab = .discover
         appearance.heroAutoAdvance = 8
-        #expect(appearance.preset == .original)
-        let midnight = AppearancePreferences.Preset.midnight.applied(to: appearance)
-        #expect(midnight.preset == .midnight)
-        #expect(midnight.background == .midnight)
-        #expect(!midnight.showsReviews)
-        #expect(midnight.startTab == .discover)
-        #expect(midnight.heroAutoAdvance == 8)
-        var custom = midnight
+        appearance.animationSpeed = .off
+        appearance.textSize = .accessibility2
+        #expect(appearance.preset == nil)
+        let disney = AppearancePreferences.Preset.disneyPlus.applied(to: appearance)
+        #expect(disney.preset == .disneyPlus)
+        #expect(disney.accent == .royal && disney.background == .navy)
+        // The app's own spotlight and tab bar come with it.
+        #expect(disney.heroAutoAdvance == 5 && !disney.phoneTabTitles && !disney.minimisesTabBar)
+        #expect(!disney.showsReviews)
+        #expect(disney.startTab == .discover)
+        #expect(disney.animationSpeed == .off)
+        #expect(disney.textSize == .accessibility2)
+        var custom = disney
         custom.accent = .green
         #expect(custom.preset == nil)
+    }
+
+    @Test func aPresetShapesTheArtworkAndKeepsTheControlsRound() {
+        var appearance = AppearancePreferences()
+        appearance.cornerOverrides = [AppearancePreferences.CornerGroup.reviews.rawValue: 2]
+        let netflix = AppearancePreferences.Preset.netflix.applied(to: appearance)
+        #expect(netflix.cornerScale(for: .artwork) == 0.4 && netflix.cornerScale(for: .reviews) == 0.4)
+        #expect(netflix.cornerScale(for: .playButton) == 0.3 && netflix.cornerScale(for: .filters) == 1)
+        #expect(AppearancePreferences.Preset.appleTV.applied(to: appearance).cornerScale(for: .playButton) == 1)
+        let arthouse = AppearancePreferences.Preset.arthouse.applied(to: appearance)
+        #expect(arthouse.cornerScale(for: .filters) == 0 && arthouse.cornerScale(for: .actionButtons) == 1)
+        #expect(arthouse.uppercaseCaptions && arthouse.artworkTone == .mono && arthouse.layout == .editorial)
+        #expect(AppearancePreferences.Preset.appleTV.applied(to: arthouse).layout == .standard)
+        #expect(AppearancePreferences.Preset.original.applied(to: arthouse).cornerOverrides.isEmpty)
+    }
+
+    @Test func presetsSetPlayTheButtonsFinishHeadingsAndHover() throws {
+        let netflix = AppearancePreferences.Preset.netflix.applied(to: AppearancePreferences())
+        #expect(netflix.playStyle == .white && netflix.buttonFinish == .solid && !netflix.hover.showsRim)
+        let letterboxd = AppearancePreferences.Preset.letterboxd.applied(to: AppearancePreferences())
+        #expect(letterboxd.headingColour == .secondary && letterboxd.playStyle == .accent && letterboxd.hover.cardLift == 0)
+        let appleTV = AppearancePreferences.Preset.appleTV.applied(to: netflix)
+        #expect(appleTV.buttonFinish == .glass && appleTV.playStyle == .white)
+        #expect(AppearancePreferences.Preset.original.applied(to: letterboxd).hover == AppearancePreferences.Hover())
+        var look = netflix
+        look.headingColour = .accent
+        let restored = try #require(AppearancePreferences(rawValue: look.rawValue))
+        #expect(restored == look)
+        #expect(look.restoringDefaults(of: .colour).playStyle == .artwork && look.restoringDefaults(of: .colour).buttonFinish == .glass)
+        #expect(look.restoringDefaults(of: .text).headingColour == .primary)
     }
 
     @Test func everyPresetIsItsOwn() {
@@ -122,9 +159,9 @@ import Testing
         var appearance = AppearancePreferences()
         appearance.customAccent = .init(red: 1, green: 0, blue: 0)
         appearance.customBackground = .init(red: 0, green: 0.1, blue: 0)
-        let neon = AppearancePreferences.Preset.neon.applied(to: appearance)
-        #expect(neon.customAccent == appearance.customAccent)
-        #expect(neon.customBackground == appearance.customBackground)
+        let arthouse = AppearancePreferences.Preset.arthouse.applied(to: appearance)
+        #expect(arthouse.customAccent == appearance.customAccent)
+        #expect(arthouse.customBackground == appearance.customBackground)
     }
 
     @Test func restoringASectionLeavesTheOthers() {
@@ -178,5 +215,41 @@ import Testing
         #expect(looks.looks[0].appearance.accent == .mint)
         let restored = try #require(AppearanceLooks(rawValue: looks.rawValue))
         #expect(restored == looks)
+    }
+
+    @Test func hoverDefaultsAreTheOriginalFeedback() {
+        let hover = AppearancePreferences().hover
+        #expect(hover.buttonBrightness == 0.15 && abs(hover.buttonScale - 1.025) < 0.0001)
+        #expect(hover.glassFillOpacity == 0.18 && hover.glassRimOpacity == 0.35)
+        #expect(abs(hover.segmentFillOpacity - 0.16) < 0.0001 && abs(hover.segmentRimOpacity - 0.3) < 0.0001)
+        #expect(abs(hover.cardFillOpacity - 0.08) < 0.0001 && abs(hover.cardScale - 1.04) < 0.0001 && hover.castsShadow)
+        #expect(hover.glowOpacity == 0.04 && hover.usesSystemHighlight && hover.duration(0.12) == 0.12)
+    }
+
+    @Test func hoverRoundTripsAndAnOldSaveReadsTheDefaults() throws {
+        var appearance = AppearancePreferences()
+        appearance.hover.brightness = 0.3
+        appearance.hover.showsRim = false
+        appearance.hover.speed = .instant
+        let restored = try #require(AppearancePreferences(rawValue: appearance.rawValue))
+        #expect(restored == appearance)
+        #expect(restored.hover.glassRimOpacity == 0 && restored.hover.duration(0.12) == nil)
+
+        let old = try #require(AppearancePreferences(rawValue: #"{"accent":"mint"}"#))
+        #expect(old.hover == AppearancePreferences.Hover())
+        let clamped = try #require(AppearancePreferences(rawValue: #"{"hover":{"brightness":9,"isEnabled":false}}"#))
+        #expect(clamped.hover.brightness == AppearancePreferences.Hover.brightnessRange.upperBound && clamped.hover.buttonScale == 1)
+    }
+
+    @Test func restoringHoverLeavesTheRestAndPresetsSetTheirOwnHover() {
+        var appearance = AppearancePreferences()
+        appearance.accent = .mint
+        appearance.hover.cardLift = 0.1
+        #expect(!appearance.isDefault(.hover))
+        let restored = appearance.restoringDefaults(of: .hover)
+        #expect(restored.isDefault(.hover) && restored.accent == .mint)
+        // A preset brings its app's hover; Arthouse's is the original feedback.
+        #expect(AppearancePreferences.Preset.arthouse.applied(to: appearance).hover == AppearancePreferences.Hover())
+        #expect(AppearancePreferences.Preset.disneyPlus.applied(to: appearance).hover.rimStrength == 1)
     }
 }

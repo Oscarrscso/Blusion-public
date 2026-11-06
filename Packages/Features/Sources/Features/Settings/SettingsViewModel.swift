@@ -30,10 +30,6 @@ public final class SettingsViewModel {
 
     public private(set) var settings = PlaybackSettings()
     public var serverURLText = ""
-    /// The Trakt client ID as typed. `commitTraktClientID()` saves it.
-    public var traktClientIDText = ""
-    public var omdbAPIKeyText = ""
-    public var tmdbReadTokenText = ""
     public var openSubtitlesAPIKeyText = ""
     public var openSubtitlesUsernameText = ""
     public var openSubtitlesPasswordText = ""
@@ -63,15 +59,13 @@ public final class SettingsViewModel {
         Haptics.apply(settings.haptics)
         #endif
         serverURLText = settings.streamingServerURL ?? ""
-        traktClientIDText = settings.traktClientID ?? ""
-        omdbAPIKeyText = settings.omdbAPIKey ?? ""
-        tmdbReadTokenText = settings.tmdbReadToken ?? ""
         openSubtitlesAPIKeyText = settings.openSubtitlesAPIKey ?? ""
         openSubtitlesUsernameText = settings.openSubtitlesUsername ?? ""
         openSubtitlesPasswordText = settings.openSubtitlesPassword ?? ""
         services.posterRatings.isEnabled = settings.showsPosterRatings
         services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
         services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
+        services.posterRatings.markPlacement = settings.posterMarkPlacement
         let addons = await services.registry.addons
         installedAddonCount = addons.count
         addonNames = Dictionary(addons.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
@@ -85,6 +79,12 @@ public final class SettingsViewModel {
     public func setPreferredResolution(_ value: Int?) async {
         settings = await services.settings.load()
         settings.preferredResolution = value
+        await services.settings.save(settings)
+    }
+
+    public func setDataSaver(_ value: Bool) async {
+        settings = await services.settings.load()
+        settings.dataSaver = value
         await services.settings.save(settings)
     }
 
@@ -186,36 +186,18 @@ public final class SettingsViewModel {
         await services.settings.save(settings)
     }
 
+    /// Also moves the marks on the posters on screen.
+    public func setPosterMarkPlacement(_ value: PosterMarkPlacement) async {
+        settings = await services.settings.load()
+        settings.posterMarkPlacement = value
+        services.posterRatings.markPlacement = value
+        await services.settings.save(settings)
+    }
+
     public func setUsesHeroPosters(_ value: Bool) async {
         settings = await services.settings.load()
         settings.usesHeroPosters = value
         await services.settings.save(settings)
-    }
-
-    /// Saves the Trakt client ID as typed, without surrounding spaces. A blank field removes it.
-    public func commitTraktClientID() async {
-        settings = await services.settings.load()
-        let trimmed = traktClientIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.traktClientID = trimmed.isEmpty ? nil : trimmed
-        await services.settings.save(settings)
-    }
-
-    public func commitReviewCredentials() async {
-        settings = await services.settings.load()
-        let omdb = omdbAPIKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let tmdb = tmdbReadTokenText.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.omdbAPIKey = omdb.isEmpty ? nil : omdb
-        settings.tmdbReadToken = tmdb.isEmpty ? nil : tmdb
-        await services.settings.save(settings)
-        let saved = await services.settings.load()
-        await services.posterRatings.setReviewServices(
-            omdb: saved.omdbAPIKey.map { OMDbRatings(client: services.client, apiKey: $0) },
-            tmdb: saved.tmdbReadToken.map { TMDbRatings(client: services.client, readAccessToken: $0) }, refreshCache: true)
-        if saved.omdbAPIKey == settings.omdbAPIKey, saved.tmdbReadToken == settings.tmdbReadToken {
-            lastMessage = "Review services saved. Ratings will refresh as you browse."
-        } else {
-            lastMessage = "Review credentials could not be saved to secure storage. Try saving them again."
-        }
     }
 
     public func refreshRatings() async {
@@ -230,6 +212,11 @@ public final class SettingsViewModel {
         let trimmed = serverURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.streamingServerURL = trimmed.isEmpty ? nil : trimmed
         await services.settings.save(settings)
+    }
+
+    /// Clears the last confirmation, so a page opened later does not show another page's message.
+    public func clearMessage() {
+        lastMessage = nil
     }
 
     public func clear(_ scope: DataResetService.Scope) async {

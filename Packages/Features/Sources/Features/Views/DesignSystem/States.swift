@@ -84,7 +84,7 @@ struct InlineErrorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let retry {
                 Button("Try again", action: retry)
-                    .buttonStyle(.glass)
+                    .buttonStyle(.hoverGlass)
                     .controlSize(.small)
                     .pointerFeedback()
                     .accessibilityIdentifier("inlineError.retry")
@@ -114,7 +114,7 @@ struct SkeletonRow: View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: metrics.cardSpacing) {
                 ForEach(0..<max(count, 0), id: \.self) { _ in
-                    SkeletonShapes(aspect: aspect, size: size, showsTitle: showsTitle)
+                    CardPlaceholder(aspect: aspect, size: size, showsTitle: showsTitle)
                 }
             }
             .shimmering()
@@ -153,42 +153,6 @@ struct SkeletonShelf: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
-    }
-}
-
-/// The grey shapes of one card without any motion, so a row can share a single shimmer across them. The caption lines are real
-/// (hidden) text, so their height follows Dynamic Type exactly as the card's does.
-private struct SkeletonShapes: View {
-    let aspect: CardAspect
-    let size: CardSize
-    let showsTitle: Bool?
-    @Environment(\.layoutMetrics) private var metrics
-    @Environment(\.appAppearance) private var appearance
-
-    var body: some View {
-        let width = size.width(for: aspect, metrics: metrics)
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            RoundedRectangle(cornerRadius: aspect.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
-                .fill(Theme.surface)
-                .frame(width: width, height: width / aspect.ratio)
-            if showsTitle ?? aspect.showsCaption(appearance) {
-                // The same lines the card's caption keeps (Appearance's Title lines and grey line).
-                VStack(alignment: .leading, spacing: 2) {
-                    line(font: Theme.Typography.cardTitle, width: width * 0.78, lines: appearance.captionLines)
-                    if appearance.showsCaptionDetails {
-                        line(font: Theme.Typography.cardSubtitle, width: width * 0.46)
-                    }
-                }
-            }
-        }
-    }
-
-    private func line(font: Font, width: CGFloat, lines: Int = 1) -> some View {
-        Text(" ")
-            .font(font)
-            .lineLimit(lines, reservesSpace: true)
-            .frame(width: width)
-            .background { RoundedRectangle(cornerRadius: 3 * metrics.cornerScale(for: .artwork), style: .continuous).fill(Theme.surface).padding(.vertical, 3) }
     }
 }
 

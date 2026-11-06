@@ -6,7 +6,7 @@ import Foundation
 /// changed, and the newer copy is used the next time it is drawn. BetterPosters draws ratings on its posters, which move, so its posters are
 /// checked after a day; other artwork rarely changes and is checked after two weeks.
 enum ImageCachePolicy {
-    /// The disk cache sizes the Image cache page offers, in megabytes, and the one used until another is chosen.
+    /// The disk cache sizes Optimisation offers, in megabytes, and the one used until another is chosen.
     static let diskSizeOptions = [256, 512, 1024, 2048]
     static let defaultDiskMegabytes = 1024
     /// Where the chosen size is kept.
@@ -22,10 +22,15 @@ enum ImageCachePolicy {
     /// full-resolution episode stills outgrew) and at most 1 GB. Pictures on screen are held by their views as well, so going over it only
     /// drops pictures nothing shows, and they are decoded again from disk when next needed. Without it, a Mac with 8 GB kept every hero
     /// (about 21 MB each at 3072 pixels) and still opened since launch until the whole system ran short of memory.
-    static func decodedBytes(physicalMemory: UInt64) -> Int {
-        let floor: UInt64 = 256 * 1024 * 1024
-        let ceiling: UInt64 = 1024 * 1024 * 1024
-        return Int(min(max(physicalMemory / 8, floor), ceiling))
+    /// Optimisation's Picture memory moves it: Low holds a sixteenth (128 MB to 512 MB), High a quarter (512 MB to 2 GB).
+    static func decodedBytes(physicalMemory: UInt64, level: Int = OptimisationSettings.defaultPictureMemory) -> Int {
+        let megabyte: UInt64 = 1024 * 1024
+        let (share, floor, ceiling): (UInt64, UInt64, UInt64) = switch level {
+        case 1: (16, 128 * megabyte, 512 * megabyte)
+        case 3: (4, 512 * megabyte, 2048 * megabyte)
+        default: (8, 256 * megabyte, 1024 * megabyte)
+        }
+        return Int(min(max(physicalMemory / share, floor), ceiling))
     }
 
     /// How long a picture from `url` is used before it is checked for a newer copy.

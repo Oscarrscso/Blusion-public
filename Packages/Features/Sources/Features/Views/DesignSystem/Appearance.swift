@@ -37,6 +37,26 @@ extension AppearancePreferences.RGB {
 }
 
 extension AppearancePreferences {
+    /// The look as a swatch, for the preset menu and saved looks: its background with its accent at the centre, ringed like `swatch`.
+    var lookSwatch: Image {
+        let size = CGSize(width: 20, height: 20)
+        let background = backgroundRGB.uiColour
+        let accent = accentRGB.uiColour
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            let circle = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
+            background.setFill()
+            context.cgContext.fillEllipse(in: circle)
+            accent.setFill()
+            context.cgContext.fillEllipse(in: circle.insetBy(dx: 4.5, dy: 4.5))
+            UIColor(white: 1, alpha: 0.35).setStroke()
+            context.cgContext.setLineWidth(1)
+            context.cgContext.strokeEllipse(in: circle)
+        }
+        return Image(uiImage: image.withRenderingMode(.alwaysOriginal))
+    }
+}
+
+extension AppearancePreferences {
     /// The tint, or nil to keep the asset catalogue's accent, which the default (Blusion) is.
     var accentColour: Color? {
         accent == .blusion ? nil : accentRGB.colour
@@ -100,6 +120,20 @@ extension AppearancePreferences {
         }
     }
 
+    /// Headings' width: their own, or the text's.
+    var headingFontWidth: Font.Width? {
+        switch headingWidth.width {
+        case nil: systemFontWidth
+        case .compressed: .compressed
+        case .condensed: .condensed
+        case .standard: .standard
+        case .expanded: .expanded
+        }
+    }
+
+    /// Headings' letter spacing in points: their own, or the text's.
+    var headingTracking: CGFloat { CGFloat((headingSpacing.spacing ?? letterSpacing).points) }
+
     /// The font of shelf and section headings. The default is the app's own, `Theme.Typography.shelfTitle`: Title 2, bold.
     var headingTypeface: Font {
         let style: Font.TextStyle = switch headingSize {
@@ -150,7 +184,7 @@ extension View {
         modifier(AppearanceLookModifier(appearance: appearance, motion: motion))
     }
 
-    /// A shelf or section heading in Appearance's heading style: its font, size, weight and case.
+    /// A shelf or section heading in Appearance's heading style: its font, size, weight, width, letter spacing and case.
     func headingStyle() -> some View {
         modifier(HeadingStyleModifier())
     }
@@ -200,10 +234,18 @@ private struct AppearanceLookModifier: ViewModifier {
 private struct HeadingStyleModifier: ViewModifier {
     @Environment(\.appAppearance) private var appearance
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let styled = content
             .font(appearance.headingTypeface)
+            .fontWidth(appearance.headingFontWidth)
+            .tracking(appearance.headingTracking)
             .textCase(appearance.uppercaseHeadings ? .uppercase : nil)
+        switch appearance.headingColour {
+        case .primary: styled
+        case .secondary: styled.foregroundStyle(.secondary)
+        case .accent: styled.foregroundStyle(.tint)
+        }
     }
 }
 

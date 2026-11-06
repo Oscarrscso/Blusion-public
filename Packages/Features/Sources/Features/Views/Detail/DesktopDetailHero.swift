@@ -35,6 +35,8 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     private static var textWidth: CGFloat { TitleHero.macBlockWidth }
     /// The widest and tallest the title's logo is on this page.
     private static var logoBox: CGSize { CGSize(width: 420, height: 120) }
+    /// The least height a wide, thin logo is drawn at; it may grow to the title column's width to reach it.
+    private static var logoMinHeight: CGFloat { 64 }
     /// The page's width from which the synopsis and the information sit side by side.
     private static var twoColumnWidth: CGFloat { 900 }
     /// The information's column beside the synopsis, and the gap between them.
@@ -123,7 +125,9 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     /// The metadata line, the same text as iPhone's, set over the picture's left edge. Like iPhone's, it drops genres before the rating.
     private var metaLine: some View {
         // Compact and left aligned, joined by dots: the spread line put its parts across the whole hero width.
-        MetaLine(model.heroMetaLine, genres: model.heroMetaGenres, identifier: "detail.metaLine")
+        TitleMarkReader(item: model.detail.preview) { mark in
+            MetaLine(model.heroMetaLine, genres: model.heroMetaGenres, identifier: "detail.metaLine", mark: mark)
+        }
     }
 
     /// The overview, cut to three lines and not expandable: its full text, and More, are in the details below the hero.
@@ -137,7 +141,8 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
     }
 
     private var titleArt: some View {
-        HeroTitleArt(name: model.detail.name, slot: logoSlot, alignment: .leading, compact: false, logoBox: Self.logoBox)
+        HeroTitleArt(name: model.detail.name, slot: logoSlot, alignment: .leading, compact: false, logoBox: Self.logoBox,
+                     logoMinHeight: Self.logoMinHeight, logoStretchWidth: Self.textWidth)
             .frame(maxWidth: .infinity, alignment: .leading)
             // Hidden rather than removed, so the layout does not move when the title appears.
             .opacity(isRevealed ? 1 : 0)

@@ -19,6 +19,10 @@ public final class TitleRatings: Identifiable {
     public internal(set) var tmdbURL: URL?
     /// The film's best disc by Best Blurays, for the poster's disc mark. Nil until the site has answered, and when it names none.
     public internal(set) var bestDisc: BestDiscFormat?
+    /// The first service the title streams on in the viewer's region, the mark shown when there is no disc. From TMDb.
+    public internal(set) var streamer: TMDbWatchService?
+    /// True once Best Blurays has answered for the film, so a film with no disc can ask for its streamer instead.
+    @ObservationIgnored var discChecked = false
     @ObservationIgnored var catalogIMDb: Double?
     @ObservationIgnored var datasetIMDb: Double?
 
@@ -108,9 +112,16 @@ public final class PosterRatingsStore {
     }
     /// Read by the rating logos: their brand colours when on, the text colour when off. Mirrors the saved setting.
     public var showsColouredLogos = false
-    /// Film posters show their best disc beside the ratings, looked up on bestblurays.com. Mirrors the saved setting.
+    /// Posters show the film's best disc beside the ratings, looked up on bestblurays.com, or else the service the title streams on, from
+    /// TMDb. Mirrors the saved setting.
     public var showsBestDisc = false {
         didSet { if showsBestDisc, !oldValue { Task { startLookups() } } }
+    }
+    /// Where posters put that mark. Mirrors the saved setting.
+    public var markPlacement = PosterMarkPlacement.topTrailing
+    /// True when ratings or a mark sit along a poster's bottom edge, so a logo drawn over the poster keeps clear of them.
+    public var occupiesPosterBottom: Bool {
+        isEnabled || showsBestDisc && markPlacement != .topLeading && markPlacement != .topTrailing
     }
 
     @ObservationIgnored private var entries: [String: TitleRatings] = [:]
@@ -150,6 +161,8 @@ public final class PosterRatingsStore {
     @ObservationIgnored private var tmdb: TMDbRatings?
     @ObservationIgnored private let bestBlurays: BestBluraysClient?
     @ObservationIgnored private let cache: any RatingsCache
+    /// Disc and streamer marks, a few bytes a title, apart from the ratings so they are kept for many more titles.
+    @ObservationIgnored private let marks: TitleMarksCache
     /// IMDb's ratings dataset kept on the device. Read for every IMDb title shown, with no network.
     @ObservationIgnored private let dataset: (any IMDbDataset)?
     /// Counts dataset installs. A title looked up under an older count is looked up again the next time it is asked for.
@@ -162,7 +175,7 @@ public final class PosterRatingsStore {
     public nonisolated init(isEnabled: Bool = true, letterboxd: LetterboxdRatings? = nil, cache: (any RatingsCache)? = nil,
                             maxConcurrentLookups: Int = 3, now: @escaping @Sendable () -> Date = { Date() },
                             omdb: OMDbRatings? = nil, tmdb: TMDbRatings? = nil, dataset: (any IMDbDataset)? = nil,
-                            bestBlurays: BestBluraysClient? = nil, logger: AddonLogger = .silent) {
+                            bestBlurays: BestBluraysClient? = nil, marks: TitleMarksCache? = nil, logger: AddonLogger = .silent) {
         self._isEnabled = isEnabled
         self.dataset = dataset
         self.letterboxd = letterboxd
@@ -170,6 +183,7 @@ public final class PosterRatingsStore {
         self.omdb = omdb
         self.tmdb = tmdb
         self.cache = cache ?? InMemoryRatingsCache()
+        self.marks = marks ?? TitleMarksCache(fileURL: nil, region: Locale.current.region?.identifier ?? "US")
         self.maxConcurrentLookups = max(1, maxConcurrentLookups)
         self.now = now
         self.logger = logger
@@ -195,8 +209,12 @@ public final class PosterRatingsStore {
             entries[item.identity] = entry
         }
         let wantsDisc = showsBestDisc && bestBlurays != nil && item.type == "movie" && source == nil
-        guard !isClearing, isEnabled || includeReviews || wantsDisc, LetterboxdRatings.isIMDbID(item.id) else { return entry }
+        // A film asks for its streamer only once Best Blurays names no disc for it; a series has no disc to wait for.
+        let wantsStreamer = showsBestDisc && tmdb != nil && source == nil
+            && (item.type == "series" || item.type == "movie" && (bestBlurays == nil || entry.discChecked && entry.bestDisc == nil))
+        guard !isClearing, isEnabled || includeReviews || wantsDisc || wantsStreamer, LetterboxdRatings.isIMDbID(item.id) else { return entry }
         if wantsDisc { enqueue(item, provider: .bestBlurays, includeReviews: false) }
+        if wantsStreamer { enqueue(item, provider: .streaming, includeReviews: false) }
         guard isEnabled || includeReviews else { return entry }
         if source == nil || source == .imdb { lookUpInDataset(item, entry: entry) }
         if letterboxd != nil, item.type == "movie", source == nil || source == .letterboxd {
@@ -292,10 +310,50 @@ public final class PosterRatingsStore {
         reviewServicesRevision += 1
     }
 
+    /// The film's best disc as the device last heard it from Best Blurays, for the Highest Quality mark in Play's hold menu. Nil for a
+    /// series, and for a film the site has not been asked about or names no disc for. Asks no one.
+    public func knownBestDisc(for item: MetaPreview) async -> BestDiscFormat? {
+        guard item.type == "movie", LetterboxdRatings.isIMDbID(item.id) else { return nil }
+        if let disc = entries[item.identity]?.bestDisc { return disc }
+        return await marks.record(for: item.id)?.disc
+    }
+
+    /// The streamer the title's poster mark shows, from memory or the marks kept on this device, so the title page can name it at once
+    /// rather than after its own lookups.
+    public func knownStreamer(for item: MetaPreview) async -> TMDbWatchService? {
+        guard LetterboxdRatings.isIMDbID(item.id) else { return nil }
+        if let streamer = entries[item.identity]?.streamer { return streamer }
+        return await marks.record(for: item.id)?.streamer
+    }
+
+    /// Keeps the disc the stream picker found, so the film's posters and title page show it without asking the site again.
+    public func rememberBestEdition(_ result: BestBlurayResult, imdbID: String) async {
+        await marks.storeDisc(Self.disc(in: result), for: imdbID, checkedAt: now())
+        await showMarks(imdbID: imdbID)
+    }
+
+    /// Keeps the streamer the title page found, so its posters show it without asking TMDb again. Only for the region marks are kept for.
+    public func rememberWatch(_ watch: TMDbTitleWatch, imdbID: String, region: String) async {
+        guard region == marks.region else { return }
+        await marks.storeStreamer(watch.streaming.first, for: imdbID, checkedAt: now())
+        await showMarks(imdbID: imdbID)
+    }
+
+    private func showMarks(imdbID: String) async {
+        guard let record = await marks.record(for: imdbID) else { return }
+        for entry in entries.values where entry.id.hasSuffix("/\(imdbID)") { applyMark(record, to: entry) }
+    }
+
+    private static func disc(in result: BestBlurayResult) -> BestDiscFormat? {
+        if case .edition(let edition) = result { return edition.discFormat }
+        return nil
+    }
+
     /// Cancel before clearing, so an old answer cannot restore cleared data.
     public func forgetAll() async {
         await cancelLookups()
         await cache.clear()
+        await marks.clear()
         heroArtworkByID.removeAll()
         heroArtworkTasks.removeAll()
         certificationByID.removeAll()
@@ -308,6 +366,8 @@ public final class PosterRatingsStore {
             entry.tmdb = nil
             entry.tmdbURL = nil
             entry.bestDisc = nil
+            entry.streamer = nil
+            entry.discChecked = false
         }
         omdbPausedUntil = nil
         omdbError = nil
@@ -349,17 +409,20 @@ public final class PosterRatingsStore {
         // Cache reads never wait for a network worker slot.
         cacheTasks[lookup.id] = Task { [self] in
             defer { cacheTasks[lookup.id] = nil; cachePriorities.remove(lookup.id) }
-            let cached = await cache.value(for: lookup.cacheKey)
-            guard !Task.isCancelled else { return }
-            if let cached {
+            var expires: Date?
+            if lookup.provider.isMark {
+                // A ratings refresh does not ask bestblurays.com or TMDb again for every title on screen: a fresh mark is kept.
+                expires = await readMark(lookup)
+            } else if let cached = await cache.value(for: lookup.cacheKey) {
+                guard !Task.isCancelled else { return }
                 apply(cached, lookup: lookup)
-                let expires = cached.fetchedAt.addingTimeInterval(cacheLifetime(cached, provider: lookup.provider))
-                // A ratings refresh does not ask bestblurays.com again for every film on screen: a fresh disc answer is kept.
-                if !ignoresCachedFreshness || lookup.provider == .bestBlurays, now() < expires {
-                    nextLookupAt[lookup.id] = expires
-                    queued.remove(lookup.id)
-                    return
-                }
+                if !ignoresCachedFreshness { expires = cached.fetchedAt.addingTimeInterval(cacheLifetime(cached, provider: lookup.provider)) }
+            }
+            guard !Task.isCancelled else { return }
+            if let expires, now() < expires {
+                nextLookupAt[lookup.id] = expires
+                queued.remove(lookup.id)
+                return
             }
             var ready = lookup
             ready.includeReviews = includeReviews || cachePriorities.contains(lookup.id)
@@ -375,6 +438,12 @@ public final class PosterRatingsStore {
             tasks[lookup.id] = Task { [self] in
                 defer { tasks[lookup.id] = nil; queued.remove(lookup.id); startLookups() }
                 do {
+                    if lookup.provider.isMark {
+                        let expires = try await lookUpMark(lookup)
+                        guard !Task.isCancelled else { return }
+                        nextLookupAt[lookup.id] = expires ?? now().addingTimeInterval(900)
+                        return
+                    }
                     let answer: CachedRating
                     switch lookup.provider {
                     case .letterboxd:
@@ -388,14 +457,8 @@ public final class PosterRatingsStore {
                         // The allowance and any refusal are checked here, off the view's redraw path.
                         guard let omdb, !isOMDbPaused, omdb.usage.today() < OMDbUsage.dailyLimit else { return }
                         answer = CachedRating(rating: nil, fetchedAt: now(), reviews: try await omdb.ratings(imdbID: lookup.item.id))
-                    case .bestBlurays:
-                        guard let bestBlurays else { return }
-                        let item = lookup.item
-                        let year = item.releaseInfo?.firstMatch(of: /[0-9]{4}/).map { String($0.output) }
-                        let result = try await bestBlurays.bestEdition(imdbID: item.id, title: item.name, year: year)
-                        var disc: BestDiscFormat?
-                        if case .edition(let edition) = result { disc = edition.discFormat }
-                        answer = CachedRating(rating: nil, fetchedAt: now(), bestDisc: disc)
+                    case .bestBlurays, .streaming:
+                        return
                     }
                     guard !Task.isCancelled else { return }
                     await cache.store(answer, for: lookup.cacheKey)
@@ -405,7 +468,7 @@ public final class PosterRatingsStore {
                     if lookup.provider == .tmdb { reviewServiceIssue = nil }
                 } catch {
                     guard !Task.isCancelled else { return }
-                    nextLookupAt[lookup.id] = now().addingTimeInterval(lookup.provider == .bestBlurays ? 900 : 60)
+                    nextLookupAt[lookup.id] = now().addingTimeInterval(lookup.provider.isMark ? 900 : 60)
                     let mapped = AddonError.from(error)
                     logger.log(.warning, "\(lookup.provider.rawValue) lookup failed for \(lookup.item.identity): \(mapped.shortDescription)")
                     if lookup.provider == .tmdb { reviewServiceIssue = Self.issueText(for: mapped) }
@@ -415,11 +478,67 @@ public final class PosterRatingsStore {
         }
     }
 
-    /// Score lookups run while ratings are on or a title page asks. Disc lookups run while disc marks are on, one film at a time, so
-    /// bestblurays.com, a community site, is never asked about several films at once.
+    /// Score lookups run while ratings are on or a title page asks. Mark lookups run while marks are on; disc lookups one film at a time,
+    /// so bestblurays.com, a community site, is never asked about several films at once.
     private func canStart(_ lookup: Lookup) -> Bool {
-        guard lookup.provider == .bestBlurays else { return isEnabled || lookup.includeReviews }
-        return showsBestDisc && !tasks.keys.contains { $0.hasPrefix("\(Provider.bestBlurays.rawValue):") }
+        switch lookup.provider {
+        case .bestBlurays: showsBestDisc && !tasks.keys.contains { $0.hasPrefix("\(Provider.bestBlurays.rawValue):") }
+        case .streaming: showsBestDisc
+        case .letterboxd, .tmdb, .omdb: isEnabled || lookup.includeReviews
+        }
+    }
+
+    /// Reads the title's marks from the mark store and shows them. Returns when this lookup's answer goes stale; nil when never asked.
+    private func readMark(_ lookup: Lookup) async -> Date? {
+        let id = lookup.item.id
+        var record = await marks.record(for: id)
+        // Disc answers kept in the ratings cache before marks had a store of their own are carried over once, not asked for again.
+        if lookup.provider == .bestBlurays, record?.discCheckedAt == nil, let old = await cache.value(for: lookup.cacheKey) {
+            await marks.storeDisc(old.bestDisc, for: id, checkedAt: old.fetchedAt)
+            record = await marks.record(for: id)
+        }
+        guard !Task.isCancelled, let record else { return nil }
+        if let entry = entries[lookup.item.identity] { applyMark(record, to: entry) }
+        switch lookup.provider {
+        case .bestBlurays:
+            guard let checked = record.discCheckedAt else { return nil }
+            if record.disc == nil, showsBestDisc, tmdb != nil { enqueue(lookup.item, provider: .streaming, includeReviews: false) }
+            // A film's best disc changes rarely: a named disc is kept a month, and "none named" a week.
+            return checked.addingTimeInterval(record.disc != nil ? 30 * 86_400 : 7 * 86_400)
+        default:
+            // Streaming catalogues change monthly: a service is kept a week, and "none" three days.
+            return record.streamerCheckedAt?.addingTimeInterval(record.streamer != nil ? 7 * 86_400 : 3 * 86_400)
+        }
+    }
+
+    /// Asks bestblurays.com or TMDb for the title's mark, keeps the answer, and shows it. Returns when the answer goes stale.
+    private func lookUpMark(_ lookup: Lookup) async throws -> Date? {
+        let item = lookup.item
+        switch lookup.provider {
+        case .bestBlurays:
+            guard let bestBlurays else { return nil }
+            let year = item.releaseInfo?.firstMatch(of: /[0-9]{4}/).map { String($0.output) }
+            let result = try await bestBlurays.bestEdition(imdbID: item.id, title: item.name, year: year)
+            guard !Task.isCancelled else { return nil }
+            await marks.storeDisc(Self.disc(in: result), for: item.id, checkedAt: now())
+        case .streaming:
+            guard let tmdb else { return nil }
+            let watch = try await tmdb.titleWatch(imdbID: item.id, type: item.type, region: marks.region)
+            guard !Task.isCancelled else { return nil }
+            await marks.storeStreamer(watch.streaming.first, for: item.id, checkedAt: now())
+        case .letterboxd, .tmdb, .omdb:
+            return nil
+        }
+        return await readMark(lookup)
+    }
+
+    /// Each write redraws the posters that show this title, so only changes are written.
+    private func applyMark(_ record: TitleMarkRecord, to entry: TitleRatings) {
+        if record.discCheckedAt != nil {
+            entry.discChecked = true
+            if entry.bestDisc != record.disc { entry.bestDisc = record.disc }
+        }
+        if record.streamerCheckedAt != nil, entry.streamer != record.streamer { entry.streamer = record.streamer }
     }
 
     /// The hero artwork already fetched for this title this session, read without waiting. Nil until a lookup for it has succeeded.
@@ -709,8 +828,8 @@ public final class PosterRatingsStore {
         case .letterboxd: hasScore = cached.rating != nil
         case .tmdb: hasScore = cached.reviews?.tmdb != nil
         case .omdb: hasScore = cached.reviews?.rottenTomatoes != nil || cached.reviews?.metacritic != nil
-        // A film's best disc changes rarely: a named disc is kept a month, and "none named" a week.
-        case .bestBlurays: return cached.bestDisc != nil ? 30 * 86_400 : 7 * 86_400
+        // Marks are kept in the mark store, with their own lifetimes (see `readMark`).
+        case .bestBlurays, .streaming: hasScore = false
         }
         return hasScore ? 7 * 86_400 : 3_600
     }
@@ -733,12 +852,16 @@ public final class PosterRatingsStore {
             // Only scores OMDb gave are set: a title it has none for keeps whatever the other providers said.
             if let score = cached.reviews?.rottenTomatoes, entry.rottenTomatoes != score { entry.rottenTomatoes = score }
             if let score = cached.reviews?.metacritic, entry.metacritic != score { entry.metacritic = score }
-        case .bestBlurays:
-            if entry.bestDisc != cached.bestDisc { entry.bestDisc = cached.bestDisc }
+        case .bestBlurays, .streaming:
+            break
         }
     }
 
-    private enum Provider: String { case letterboxd, tmdb, omdb, bestBlurays }
+    private enum Provider: String {
+        case letterboxd, tmdb, omdb, bestBlurays, streaming
+
+        var isMark: Bool { self == .bestBlurays || self == .streaming }
+    }
     private struct Lookup {
         let item: MetaPreview
         let provider: Provider
@@ -750,6 +873,7 @@ public final class PosterRatingsStore {
             case .tmdb: "tmdb:\(item.identity)"
             case .omdb: "omdb:\(item.identity)"
             case .bestBlurays: "bestblurays:\(item.id)"
+            case .streaming: "streaming:\(item.id)"
             }
         }
     }

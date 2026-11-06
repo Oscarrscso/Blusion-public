@@ -17,6 +17,8 @@ extension AppearancePreferences.LineSpacing: AppearanceOption {}
 extension AppearancePreferences.HeadingFont: AppearanceOption {}
 extension AppearancePreferences.HeadingWeight: AppearanceOption {}
 extension AppearancePreferences.HeadingSize: AppearanceOption {}
+extension AppearancePreferences.HeadingWidth: AppearanceOption {}
+extension AppearancePreferences.HeadingSpacing: AppearanceOption {}
 extension AppearancePreferences.Outline: AppearanceOption {}
 extension AppearancePreferences.ArtworkTone: AppearanceOption {}
 extension AppearancePreferences.ProgressColour: AppearanceOption {}
@@ -24,6 +26,10 @@ extension AppearancePreferences.ProgressThickness: AppearanceOption {}
 extension AppearancePreferences.SectionOrder: AppearanceOption {}
 extension AppearancePreferences.StartTab: AppearanceOption {}
 extension AppearancePreferences.AnimationSpeed: AppearanceOption {}
+extension AppearancePreferences.HoverSpeed: AppearanceOption {}
+extension AppearancePreferences.PlayStyle: AppearanceOption {}
+extension AppearancePreferences.ButtonFinish: AppearanceOption {}
+extension AppearancePreferences.HeadingColour: AppearanceOption {}
 
 /// The choices only a phone has: a phone held upright has a fixed number of poster columns (a wide window fits as many as the card size
 /// allows), and only the iPhone has a tab bar with labels to show, a bar that shrinks and the Continue Watching bar above it.
@@ -76,40 +82,52 @@ struct AppearanceSettingsPage: View {
             .listRowBackground(Color.clear)
             Section {
                 Picker("Preset", selection: preset) {
-                    if appearance.preset == nil { Text("Custom").tag(AppearancePreferences.Preset?.none) }
-                    ForEach(AppearancePreferences.Preset.allCases) { Text($0.label).tag(Optional($0)) }
+                    if appearance.preset == nil {
+                        Label { Text("Custom") } icon: { appearance.lookSwatch }
+                            .tag(AppearancePreferences.Preset?.none)
+                    }
+                    ForEach(AppearancePreferences.Preset.allCases) { preset in
+                        Label { Text(preset.label) } icon: { preset.applied(to: appearance).lookSwatch }
+                            .tag(Optional(preset))
+                    }
                 }
                 .accessibilityIdentifier("settings.appearance.preset")
             }
             Section {
-                NavigationLink { AppearanceColourPage() } label: {
+                SettingsSubpageLink(id: "appearance.Colour") { AppearanceColourPage() } label: {
                     SettingsRow(title: "Colour", summary: appearance.colourSummary, systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("settings.appearance.colour")
-                NavigationLink { AppearanceTextPage() } label: {
+                SettingsSubpageLink(id: "appearance.Text") { AppearanceTextPage() } label: {
                     SettingsRow(title: "Text", summary: appearance.textSummary, systemImage: "textformat")
                 }
                 .accessibilityIdentifier("settings.appearance.text")
-                NavigationLink { AppearanceCardsPage(model: model) } label: {
+                SettingsSubpageLink(id: "appearance.Cards") { AppearanceCardsPage(model: model) } label: {
                     SettingsRow(title: "Cards", summary: appearance.cardsSummary, systemImage: "rectangle.portrait.on.rectangle.portrait")
                 }
                 .accessibilityIdentifier("settings.appearance.cards")
-                NavigationLink { AppearanceCornersPage() } label: {
-                    SettingsRow(title: "Corners", summary: "Global \(percent(appearance.cornerScale))", systemImage: "square.on.circle")
+                SettingsSubpageLink(id: "appearance.Corners") { AppearanceCornersPage() } label: {
+                    SettingsRow(title: "Corners", summary: cornersSummary, systemImage: "square.on.circle")
                 }
                 .accessibilityIdentifier("settings.appearance.corners")
-                NavigationLink { AppearanceHomePage() } label: {
+                SettingsSubpageLink(id: "appearance.Home") { AppearanceHomePage() } label: {
                     SettingsRow(title: "Home", summary: appearance.homeSummary, systemImage: "play.house")
                 }
                 .accessibilityIdentifier("settings.appearance.home")
-                NavigationLink { AppearanceTitlePagesPage() } label: {
+                SettingsSubpageLink(id: "appearance.TitlePages") { AppearanceTitlePagesPage() } label: {
                     SettingsRow(title: "Title Pages", summary: appearance.titlePagesSummary, systemImage: "film")
                 }
                 .accessibilityIdentifier("settings.appearance.titlePages")
-                NavigationLink { AppearanceMotionPage() } label: {
+                SettingsSubpageLink(id: "appearance.Motion") { AppearanceMotionPage() } label: {
                     SettingsRow(title: "Motion & Navigation", summary: appearance.motionSummary, systemImage: "wind")
                 }
                 .accessibilityIdentifier("settings.appearance.motion")
+                #if targetEnvironment(macCatalyst)
+                SettingsSubpageLink(id: "appearance.Hover") { AppearanceHoverPage() } label: {
+                    SettingsRow(title: "Hover", summary: appearance.hoverSummary, systemImage: "cursorarrow.rays")
+                }
+                .accessibilityIdentifier("settings.appearance.hover")
+                #endif
             }
             Section("My Looks") {
                 ForEach(looks.looks) { look in lookRow(look) }
@@ -154,6 +172,12 @@ struct AppearanceSettingsPage: View {
         }
     }
 
+    /// The corners' scale, and how many elements have one of their own.
+    private var cornersSummary: String {
+        let own = appearance.cornerOverrides.count
+        return percent(appearance.cornerScale) + (own > 0 ? " · \(own) custom" : "")
+    }
+
     /// A saved look: a tap puts it on, a tick shows it is on, and a swipe or the context menu deletes it or saves the current look over it.
     private func lookRow(_ look: AppearanceLook) -> some View {
         let isOn = look.appearance == appearance
@@ -163,7 +187,7 @@ struct AppearanceSettingsPage: View {
             appearance = look.appearance
         } label: {
             HStack {
-                Label { Text(look.name).foregroundStyle(.primary) } icon: { look.appearance.accentRGB.swatch }
+                Label { Text(look.name).foregroundStyle(.primary) } icon: { look.appearance.lookSwatch }
                 Spacer()
                 if isOn {
                     Image(systemName: "checkmark")
@@ -391,6 +415,10 @@ private struct AppearanceColourPage: View {
                                     low: "circle.lefthalf.filled", high: "circle.fill", id: "tintStrength")
                 }
             }
+            Section("Buttons") {
+                controls.segmented("Play button", \.playStyle, id: "playStyle")
+                controls.segmented("Finish", \.buttonFinish, id: "buttonFinish")
+            }
         }
     }
 }
@@ -398,21 +426,22 @@ private struct AppearanceColourPage: View {
 private struct AppearanceTextPage: View {
     var body: some View {
         AppearanceSectionPage(title: "Text", section: .text, preview: .cards) { controls in
-            Section("Text") {
+            Section("Body") {
                 controls.menu("Size", \.textSize, id: "textSize")
                 controls.menu("Font", \.font, id: "font")
                 controls.menu("Width", \.fontWidth, id: "fontWidth")
                 controls.toggle("Bold", \.boldText, id: "bold")
                 controls.toggle("Italic", \.italicText, id: "italic")
-            }
-            Section("Spacing") {
                 controls.segmented("Letter spacing", \.letterSpacing, id: "letterSpacing")
                 controls.segmented("Line spacing", \.lineSpacing, id: "lineSpacing")
             }
             Section("Headings") {
                 controls.menu("Font", \.headingFont, id: "headingFont")
                 controls.menu("Weight", \.headingWeight, id: "headingWeight")
+                controls.menu("Width", \.headingWidth, id: "headingWidth")
                 controls.segmented("Size", \.headingSize, id: "headingSize")
+                controls.menu("Letter spacing", \.headingSpacing, id: "headingSpacing")
+                controls.menu("Colour", \.headingColour, id: "headingColour")
                 controls.toggle("All caps", \.uppercaseHeadings, id: "headingCaps")
             }
         }
@@ -424,7 +453,7 @@ private struct AppearanceCardsPage: View {
 
     var body: some View {
         AppearanceSectionPage(title: "Cards", section: .cards, preview: .cards) { controls in
-            Section("Size and Shape") {
+            Section("Size & Shape") {
                 controls.slider("Card size", \.cardScale, in: AppearancePreferences.cardScaleRange, step: 0.05,
                                 low: "rectangle.portrait", high: "rectangle.portrait", id: "cardSize")
                 controls.slider("Spacing", \.spacingScale, in: AppearancePreferences.spacingScaleRange, step: 0.05,
@@ -436,6 +465,7 @@ private struct AppearanceCardsPage: View {
             Section("Captions") {
                 controls.toggle("Titles under posters", \.showsPosterTitles, id: "posterTitles")
                 controls.numbers("Title lines", \.captionLines, in: AppearancePreferences.captionLineRange, id: "titleLines")
+                controls.toggle("Titles in capitals", \.uppercaseCaptions, id: "captionCaps")
                 controls.toggle("Genre and year", \.showsCaptionDetails, id: "captionDetails")
             }
             Section("Artwork") {
@@ -451,11 +481,20 @@ private struct AppearanceCardsPage: View {
                     Task { await model.setShowsPosterRatings(value) }
                 }))
                 .accessibilityIdentifier("settings.posterRatings")
-                Toggle("Best disc on posters", isOn: Binding(get: { model.settings.showsBestDiscOnPosters }, set: { value in
+                Toggle("Disc and streamer marks", isOn: Binding(get: { model.settings.showsBestDiscOnPosters }, set: { value in
                     Haptics.play(.choices)
                     Task { await model.setShowsBestDiscOnPosters(value) }
                 }))
                 .accessibilityIdentifier("settings.bestDiscOnPosters")
+                if model.settings.showsBestDiscOnPosters {
+                    Picker("Mark position", selection: Binding(get: { model.settings.posterMarkPlacement }, set: { value in
+                        Haptics.play(.choices)
+                        Task { await model.setPosterMarkPlacement(value) }
+                    })) {
+                        ForEach(PosterMarkPlacement.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .accessibilityIdentifier("settings.posterBrandLocation")
+                }
                 Toggle("Coloured rating logos", isOn: Binding(get: { model.settings.showsColouredRatingLogos }, set: { value in
                     Haptics.play(.choices)
                     Task { await model.setShowsColouredRatingLogos(value) }
@@ -474,15 +513,15 @@ private struct AppearanceCardsPage: View {
 private struct AppearanceCornersPage: View {
     var body: some View {
         AppearanceSectionPage(title: "Corners", section: .corners, preview: .corners) { controls in
-            Section("Global") {
-                controls.slider("Corners", \.cornerScale, in: AppearancePreferences.cornerScaleRange, step: 0.1,
+            Section("All Corners") {
+                controls.slider("Roundness", \.cornerScale, in: AppearancePreferences.cornerScaleRange, step: 0.1,
                                 low: "square", high: "circle", id: "corners")
                 controls.toggle("Include circular buttons", \.includesCircularButtons, id: "circularCorners")
             }
-            Section("Overrides") {
+            Section("Per Element") {
                 ForEach(AppearancePreferences.CornerGroup.allCases) { group in
                     DisclosureGroup {
-                        Toggle("Use global", isOn: Binding(get: {
+                        Toggle("Same as all corners", isOn: Binding(get: {
                             controls.current.cornerOverrides[group.rawValue] == nil
                         }, set: { follows in
                             Haptics.play(.choices)
@@ -491,14 +530,14 @@ private struct AppearanceCornersPage: View {
                             controls.appearance.wrappedValue = look
                         }))
                         if controls.current.cornerOverrides[group.rawValue] != nil {
-                            controls.slider("Corners", read: { $0.cornerScale(for: group) },
+                            controls.slider("Roundness", read: { $0.cornerScale(for: group) },
                                             write: { $0.cornerOverrides[group.rawValue] = $1 },
                                             in: AppearancePreferences.cornerScaleRange, step: 0.1,
                                             low: "square", high: "circle", id: "corners.\(group.rawValue)")
                         }
                     } label: {
                         LabeledContent(group.label, value: controls.current.cornerOverrides[group.rawValue]
-                            .map(percent) ?? "Global · \(percent(controls.current.cornerScale))")
+                            .map(percent) ?? "All · \(percent(controls.current.cornerScale))")
                     }
                 }
             }
@@ -510,8 +549,6 @@ private struct AppearanceHomePage: View {
     var body: some View {
         AppearanceSectionPage(title: "Home", section: .home, preview: .home) { controls in
             Section("Spotlight") {
-                controls.slider("Height", \.heroScale, in: AppearancePreferences.heroScaleRange, step: 0.05,
-                                low: "rectangle", high: "rectangle.portrait", id: "spotlightHeight")
                 Picker("Turn pages", selection: controls.choice(\.heroAutoAdvance)) {
                     ForEach(AppearancePreferences.heroAutoAdvanceOptions, id: \.self) { seconds in
                         Text(seconds == 0 ? "Never" : "Every \(seconds) seconds").tag(seconds)
@@ -569,12 +606,60 @@ private struct AppearanceMotionPage: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+private struct AppearanceHoverPage: View {
+    private typealias Hover = AppearancePreferences.Hover
+
+    var body: some View {
+        AppearanceSectionPage(title: "Hover", section: .hover, preview: .hover) { controls in
+            Section {
+                controls.toggle("Hover feedback", \.hover.isEnabled, id: "hover.enabled")
+            }
+            if controls.current.hover.isEnabled {
+                Section("Buttons") {
+                    controls.slider("Brightness", \.hover.brightness, in: Hover.brightnessRange, step: 0.01,
+                                    low: "sun.min", high: "sun.max", id: "hover.brightness")
+                    controls.slider("Grow", \.hover.grow, in: Hover.growRange, step: 0.005,
+                                    low: "circle", high: "circle", id: "hover.grow")
+                    controls.toggle("System highlight", \.hover.systemHighlight, id: "hover.systemHighlight")
+                }
+                Section("Glass") {
+                    controls.slider("Glass fill", \.hover.glassFill, in: Hover.fillRange, step: 0.01,
+                                    low: "capsule", high: "capsule.fill", id: "hover.glassFill")
+                    controls.toggle("Rim", \.hover.showsRim, id: "hover.rim")
+                    if controls.current.hover.showsRim {
+                        controls.slider("Rim strength", \.hover.rimStrength, in: Hover.rimRange, step: 0.05,
+                                        low: "circle.dashed", high: "circle", id: "hover.rimStrength")
+                    }
+                }
+                Section("Cards") {
+                    controls.slider("Card lift", \.hover.cardLift, in: Hover.cardLiftRange, step: 0.005,
+                                    low: "rectangle.portrait", high: "rectangle.portrait", id: "hover.cardLift")
+                    controls.toggle("Card shadow", \.hover.cardShadow, id: "hover.cardShadow")
+                    controls.toggle("Pointer glow", \.hover.showsGlow, id: "hover.glow")
+                    if controls.current.hover.showsGlow {
+                        controls.slider("Glow strength", \.hover.glowStrength, in: Hover.glowRange, step: 0.01,
+                                        low: "light.min", high: "light.max", id: "hover.glowStrength")
+                    }
+                }
+                Section("Motion") {
+                    controls.segmented("Speed", \.hover.speed, id: "hover.speed")
+                }
+            }
+        }
+    }
+}
+#endif
+
 // MARK: - Summaries
 
 /// What each part of Appearance is set to, for its row on the Appearance page.
 extension AppearancePreferences {
     var colourSummary: String {
-        "\(accent.label) · \(background.label)"
+        var parts = [accent.label, background.label]
+        if playStyle != .artwork { parts.append("\(playStyle.label) Play") }
+        if buttonFinish != .glass { parts.append("\(buttonFinish.label) buttons") }
+        return parts.joined(separator: " · ")
     }
 
     var textSummary: String {
@@ -589,6 +674,7 @@ extension AppearancePreferences {
     private var isHeadingDefault: Bool {
         let defaults = AppearancePreferences()
         return headingFont == defaults.headingFont && headingWeight == defaults.headingWeight && headingSize == defaults.headingSize
+            && headingWidth == defaults.headingWidth && headingSpacing == defaults.headingSpacing
             && uppercaseHeadings == defaults.uppercaseHeadings
     }
 
@@ -597,7 +683,7 @@ extension AppearancePreferences {
     }
 
     var homeSummary: String {
-        "Spotlight \(percent(heroScale))" + (heroAutoAdvance > 0 ? " · Every \(heroAutoAdvance) s" : "")
+        heroAutoAdvance > 0 ? "Spotlight every \(heroAutoAdvance) s" : "Spotlight stays put"
     }
 
     var titlePagesSummary: String {
@@ -615,6 +701,13 @@ extension AppearancePreferences {
         default: "\(animationSpeed.label) animation"
         }
         return "Opens on \(startTab.label) · \(speed)"
+    }
+
+    var hoverSummary: String {
+        guard hover.isEnabled else { return "Off" }
+        var parts = [hover == Hover() ? "Default" : "Custom"]
+        if hover.speed != .standard { parts.append(hover.speed.label) }
+        return parts.joined(separator: " · ")
     }
 }
 #endif

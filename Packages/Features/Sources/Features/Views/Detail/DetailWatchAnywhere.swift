@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 import StremioKit
 import SwiftUI
 
@@ -31,6 +32,7 @@ struct DetailWatchAnywhere: View {
                             .frame(width: Self.logoSize, height: Self.logoSize)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .artwork),
                                                         style: .continuous))
+                            .pointerInteraction(cornerRadius: Theme.Radius.small * metrics.cornerScale(for: .artwork))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(service.name)
@@ -41,3 +43,4 @@ struct DetailWatchAnywhere: View {
         .accessibilityLabel("Watch Anywhere")
     }
 }
+#endif

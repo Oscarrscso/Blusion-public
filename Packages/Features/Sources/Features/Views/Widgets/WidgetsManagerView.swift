@@ -22,8 +22,16 @@ struct WidgetsManagerView: View {
     @State private var showsPendingImport = false
     @State private var copied = false
     /// True while the toolbar's button has hidden every widget's card, leaving one line that says how many there are. Kept between
-    /// visits, so a long list stays out of the way until it is shown again.
-    @AppStorage("widgets.hidesRows") private var hidesWidgets = false
+    /// visits to the Mac's Widgets tab, so a long list stays out of the way until it is shown again.
+    @AppStorage("widgets.hidesRows") private var storedHidesWidgets = false
+    /// Opened from Settings, the cards start hidden on every visit; nil follows the stored choice.
+    @State private var visitHidesWidgets: Bool?
+    private var hidesWidgets: Bool {
+        get { visitHidesWidgets ?? storedHidesWidgets }
+        nonmutating set {
+            if visitHidesWidgets != nil { visitHidesWidgets = newValue } else { storedHidesWidgets = newValue }
+        }
+    }
     @Environment(\.isLandscape) private var isLandscape
 
     /// The grid's order of widget ids, as the grid shows it. It follows the saved list, and a drag changes it until the drag is saved.
@@ -43,9 +51,10 @@ struct WidgetsManagerView: View {
 
     private static let coordinateSpace = "reorderGrid"
 
-    init(services: AppServices) {
+    init(services: AppServices, startsHidden: Bool = false) {
         self.services = services
         _model = State(initialValue: WidgetsManagerViewModel(services: services))
+        _visitHidesWidgets = State(initialValue: startsHidden ? true : nil)
     }
 
     /// Two cards across on iPhone in portrait; more on iPhone in landscape and on the Mac, at the same 2:3 proportion.

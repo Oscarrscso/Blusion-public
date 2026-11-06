@@ -150,12 +150,14 @@ private struct TitlePageBars: ViewModifier {
     let path: ReferenceWritableKeyPath<AppRouter, NavigationPath>
     @Environment(AppRouter.self) private var router
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
+    @Environment(\.usesEditorialTabBar) private var usesEditorialTabBar
     @State private var depth: Int?
 
     func body(content: Content) -> some View {
         content
             #if !targetEnvironment(macCatalyst)
-            .toolbarVisibility(isOnTop || (isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone) ? .hidden : .visible, for: .tabBar)
+            .toolbarVisibility(isOnTop || usesEditorialTabBar || (isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone)
+                ? .hidden : .visible, for: .tabBar)
             #endif
             .onAppear {
                 let current = router[keyPath: path].count

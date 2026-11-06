@@ -29,11 +29,26 @@ public struct RankingPreferences: Sendable, Equatable {
     public var preferredResolution: Int?
     /// The kind of stream Settings prefers. A near-tie breaker only (see `AutoStreamRanking.preferenceBonus`); Balanced when nil.
     public var sourcePreference: StreamSourcePreference
+    /// Data Saver: efficient encodes win over REMUXes and outsized files (see `AutoStreamRanking`). The resolution cap that goes with it
+    /// is already in `preferredResolution` (see `PlaybackSettings.rankingPreferences(for:)`).
+    public var savesData: Bool
 
-    public init(preferredResolution: Int? = nil, sourcePreference: StreamSourcePreference = .balanced) {
+    /// The highest resolution Data Saver plays when there is a choice.
+    public static let dataSaverResolution = 1080
+
+    public init(preferredResolution: Int? = nil, sourcePreference: StreamSourcePreference = .balanced, savesData: Bool = false) {
         self.preferredResolution = preferredResolution
         self.sourcePreference = sourcePreference
+        self.savesData = savesData
     }
+}
+
+/// A quality chosen for one play from a hold menu, instead of what Settings asks for.
+public enum PlayQuality: String, Sendable, Equatable {
+    /// The best release there is, whatever Settings' preferred quality or Data Saver says.
+    case highest
+    /// Data Saver's choice for this play, whether or not it is on in Settings.
+    case dataSaver
 }
 
 public enum StreamIdentity {

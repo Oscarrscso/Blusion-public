@@ -51,7 +51,9 @@ struct RootView: View {
     @State private var addonLink: String?
     @State private var userStateRevision = 0
     @State private var pendingPlayerURLs: [URL] = []
+    @State private var showsSplash = true
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The OMDb and TMDb review services from the saved keys. Run at launch, and again when settings or secrets change on another device.
     private func reloadReviewServices() async {
@@ -72,15 +74,31 @@ struct RootView: View {
         }
     }
 
+    /// Holds the logo over the tabs until Home's first row has answered (at most 1.5 s), so what shows past it is content, then lets it
+    /// go at the Appearance animation speed. A launch that opens on another tab lets it go at once.
+    private func hideSplash() async {
+        let appearance = AppearancePreferences.saved()
+        if environment.launchRoute == .home, appearance.startTab == .home {
+            let deadline = ContinuousClock.now + .milliseconds(1500)
+            while !HomeStartup.shared.isSettled, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        let speed = appearance.animationSpeed.factor
+        withAnimation(speed == 0 ? nil : .easeOut(duration: 0.3).speed(speed)) { showsSplash = false }
+    }
+
     var body: some View {
-        Group {
+        ZStack {
             if isReady {
                 RootTabView(services: environment.services, route: environment.launchRoute,
                             addonLink: $addonLink, userStateRevision: userStateRevision)
                     .environment(environment.services.downloads!)
-            } else {
-                Spinner()
-                    .accessibilityIdentifier("root.loading")
+            }
+            if showsSplash {
+                LaunchSplash()
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 1.15)))
+                    .zIndex(1)
             }
         }
         #if targetEnvironment(macCatalyst)
@@ -108,6 +126,7 @@ struct RootView: View {
             environment.services.posterRatings.isEnabled = settings.showsPosterRatings
             environment.services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
             environment.services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
+            environment.services.posterRatings.markPlacement = settings.posterMarkPlacement
             await reloadReviewServices()
             await environment.seedDefaultAddons()
             #if DEBUG
@@ -116,6 +135,7 @@ struct RootView: View {
             await DebugDemoData.seedIfRequested(environment.services)
             #endif
             isReady = true
+            Task { await hideSplash() }
             refreshIMDbDataset()
             #if targetEnvironment(macCatalyst)
             if ProcessInfo.processInfo.environment["BLUSION_WINDOW_SIZE"] == nil {
@@ -185,6 +205,22 @@ struct RootView: View {
     }
 }
 
+/// The launch screen carried on in SwiftUI while the app loads: the same colour and the same logo at its own size, centred on the whole
+/// window as the system centres it, so the handoff from the launch screen does not move a pixel.
+private struct LaunchSplash: View {
+    var body: some View {
+        ZStack {
+            Color("LaunchBackground")
+            Image("LaunchLogo")
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityElement()
+        .accessibilityLabel("Loading")
+        .accessibilityIdentifier("root.loading")
+    }
+}
+
 #if targetEnvironment(macCatalyst)
 private struct MacTitlebar: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView { TitlebarView() }
@@ -216,7 +252,7 @@ private struct MacTitlebar: UIViewRepresentable {
     }
 }
 
-/// A Mac window can be no larger than what it shows, and the first thing this app shows is a loading spinner: without room
+/// A Mac window can be no larger than what it shows, and the first thing this app shows is the launch splash: without room
 /// to grow the window opens 16 points wide and ignores the default size. A snapshot run sets its own size (`DebugSnapshot`).
 private struct MacWindowSize: ViewModifier {
     private let applies = ProcessInfo.processInfo.environment["BLUSION_WINDOW_SIZE"] == nil

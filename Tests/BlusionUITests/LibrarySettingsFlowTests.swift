@@ -116,7 +116,7 @@ final class LibrarySettingsFlowTests: XCTestCase {
     func testSettingsPersistAndDataCanBeCleared() throws {
         let app = launch()
         openSettings(app)
-        XCTAssertTrue(app.otherElements["settings.form"].waitForExistence(timeout: 10) || app.tables["settings.form"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["settings.form"].firstMatch.waitForExistence(timeout: 10))
         captureScreenshot(app, named: "M7-settings")
 
         // An invalid server address explains itself and cannot be saved.
@@ -139,9 +139,11 @@ final class LibrarySettingsFlowTests: XCTestCase {
         let clearHistory = app.buttons["settings.clear.history"]
         XCTAssertTrue(clearHistory.waitForExistence(timeout: 5))
         clearHistory.tap()
-        XCTAssertTrue(app.buttons["settings.confirmClear"].waitForExistence(timeout: 5))
+        // iOS 27's popover lists its button twice, so the first is the one tapped.
+        let confirm = app.buttons["settings.confirmClear"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         captureScreenshot(app, named: "M7-settings-confirm")
-        app.buttons["settings.confirmClear"].tap()
+        confirm.tap()
         XCTAssertTrue(app.staticTexts["settings.clearMessage"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["settings.clearMessage"].label, "Watch history cleared.")
 
@@ -156,5 +158,111 @@ final class LibrarySettingsFlowTests: XCTestCase {
         acknowledgements.tap()
         XCTAssertTrue(app.staticTexts["Apple frameworks"].waitForExistence(timeout: 5))
         captureScreenshot(app, named: "M7-acknowledgements")
+    }
+
+    /// Every Settings page opens from its row and shows its own controls, the pages opened from a page open too, and each goes back.
+    @MainActor
+    func testEverySettingsPageOpens() throws {
+        let app = launch()
+        openSettings(app)
+        func element(_ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
+        func open(_ id: String, showing shown: String) {
+            let row = element(id)
+            var swipes = 0
+            while !row.isHittable && swipes < 8 { app.swipeUp(); swipes += 1 }
+            XCTAssertTrue(row.isHittable, "\(id) is not on the page")
+            row.tap()
+            // A page may open on something tall (Appearance's preview), with the control below the screen.
+            var found = element(shown).waitForExistence(timeout: 5)
+            swipes = 0
+            while !found && swipes < 3 { app.swipeUp(); swipes += 1; found = element(shown).waitForExistence(timeout: 2) }
+            XCTAssertTrue(found, "\(id) did not show \(shown)")
+            captureScreenshot(app, named: "settings-page-\(id)")
+        }
+        func back() { app.navigationBars.buttons.element(boundBy: 0).tap() }
+
+        open("settings.addons", showing: "addons.installField"); back()
+        open("settings.section.server", showing: "settings.serverURL"); back()
+
+        open("settings.section.playback", showing: "settings.resolution")
+        XCTAssertTrue(element("settings.autoPlay").exists)
+        XCTAssertFalse(element("settings.subtitleLanguage").exists, "subtitle language belongs to Player only")
+        open("settings.section.addonSpeed", showing: "settings.addonSpeed.test"); back()
+        back()
+
+        open("settings.section.player", showing: "settings.player")
+        XCTAssertTrue(element("settings.player.subtitleLanguage").exists)
+        open("settings.player.openSubtitles", showing: "settings.opensubtitles.key"); back()
+        back()
+
+        open("settings.section.downloads", showing: "settings.downloads.deleteWatched"); back()
+
+        open("settings.section.appearance", showing: "settings.appearance.colour")
+        open("settings.appearance.colour", showing: "settings.appearance.accent"); back()
+        back()
+        open("settings.widgets", showing: "widgets.add"); back()
+
+        open("settings.section.haptics", showing: "settings.haptics.enabled")
+        open("settings.haptics.place.buttons", showing: "settings.haptics.buttons.enabled"); back()
+        open("settings.haptics.place.playerControls", showing: "settings.haptics.playerControls.enabled"); back()
+        back()
+
+        open("settings.trakt", showing: "trakt.signIn"); back()
+        open("settings.section.reviews", showing: "settings.omdbUsage")
+        app.swipeUp()
+        XCTAssertTrue(element("settings.imdbDataset").waitForExistence(timeout: 5), "Ratings has no IMDb section")
+        back()
+        open("settings.section.optimisation", showing: "settings.lazyLoadLookahead"); back()
+        open("settings.section.data", showing: "settings.clear.everything"); back()
+        open("settings.section.about", showing: "settings.acknowledgements"); back()
+        captureScreenshot(app, named: "settings-root")
+    }
+
+    /// Each Appearance preset can be chosen by its app's name, and the picker then reads it.
+    @MainActor
+    func testEveryAppearancePresetApplies() throws {
+        let app = launch()
+        openSettings(app)
+        let row = app.buttons["settings.section.appearance"]
+        var swipes = 0
+        while !row.isHittable && swipes < 6 { app.swipeUp(); swipes += 1 }
+        row.tap()
+        // The page opens on its preview; the preset menu is below it.
+        let picker = app.buttons["settings.appearance.preset"].firstMatch
+        XCTAssertTrue(app.buttons["settings.appearance.preview"].firstMatch.waitForExistence(timeout: 5))
+        for name in ["Netflix", "Apple TV", "Disney+", "Prime Video", "Letterboxd", "Plex", "Arthouse", "Original"] {
+            swipes = 0
+            while !(picker.exists && picker.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1 }
+            XCTAssertTrue(picker.isHittable, "no preset menu")
+            picker.tap()
+            let choice = app.buttons[name].firstMatch
+            XCTAssertTrue(choice.waitForExistence(timeout: 5), "no \(name) preset")
+            choice.tap()
+            // A look can make the preview taller, so the menu may now sit below the screen.
+            swipes = 0
+            while !picker.waitForExistence(timeout: 2) && swipes < 4 { app.swipeUp(); swipes += 1 }
+            XCTAssertTrue(picker.exists, "the preset menu went missing after \(name)")
+            XCTAssertTrue(picker.label.contains(name) || (picker.value as? String)?.contains(name) == true, "picker does not read \(name)")
+            app.swipeDown()
+            app.swipeDown()
+            captureScreenshot(app, named: "preset-\(name)")
+        }
+    }
+
+    /// Pulling Settings down and holding it for two seconds turns Ghost mode on; its banner's Turn Off turns it off.
+    @MainActor
+    func testGhostModeTurnsOnAndOffFromSettings() throws {
+        let app = launch()
+        openSettings(app)
+        let banner = app.descendants(matching: .any)["settings.ghost"].firstMatch
+        if banner.exists { app.buttons["settings.ghost.off"].tap() }
+        XCTAssertFalse(banner.waitForExistence(timeout: 2))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 3)
+        XCTAssertTrue(banner.waitForExistence(timeout: 5), "the held pull did not turn Ghost mode on")
+        captureScreenshot(app, named: "ghost-on")
+        app.buttons["settings.ghost.off"].tap()
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 5), "Turn Off did not turn Ghost mode off")
     }
 }

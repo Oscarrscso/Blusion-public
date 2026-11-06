@@ -329,7 +329,12 @@ public struct TMDbRelatedTitle: Sendable, Equatable, Identifiable {
     static func parse(_ data: Data) throws -> [TMDbRelatedTitle] {
         let response: RawRecommendations
         do { response = try JSONDecoder().decode(RawRecommendations.self, from: data) } catch { throw AddonError.invalidJSON }
-        return (response.results ?? []).compactMap { entry in
+        return titles(response.results ?? [])
+    }
+
+    /// The entries that have a name. An entry without a media type is a movie.
+    fileprivate static func titles(_ entries: [RawRecommendations.RawRecommendation]) -> [TMDbRelatedTitle] {
+        entries.compactMap { entry in
             let title = [entry.title, entry.name].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
             guard let title else { return nil }
             let date = [entry.releaseDate, entry.firstAirDate].compactMap { $0 }.first { !$0.isEmpty }
@@ -337,6 +342,37 @@ public struct TMDbRelatedTitle: Sendable, Equatable, Identifiable {
                                     poster: TMDbImage.url(entry.posterPath, size: "w342"),
                                     backdrop: TMDbImage.url(entry.backdropPath, size: "w780"), overview: entry.overview)
         }
+    }
+}
+
+// MARK: - Franchises
+
+/// A movie franchise: a TMDb collection ("The Lord of the Rings Collection") and its films.
+public struct TMDbFranchise: Sendable, Equatable {
+    public let name: String
+    /// The films in release order. Films with no date yet come last, in TMDb's order.
+    public let parts: [TMDbRelatedTitle]
+
+    public init(name: String, parts: [TMDbRelatedTitle]) {
+        self.name = name
+        self.parts = parts
+    }
+
+    /// The franchise without one of its films, such as the one whose page shows it.
+    public func excluding(tmdbID: Int?) -> TMDbFranchise {
+        guard let tmdbID else { return self }
+        return TMDbFranchise(name: name, parts: parts.filter { $0.tmdbID != tmdbID })
+    }
+
+    /// Reads a `collection/{id}` answer. Throws `invalidJSON` for an answer that is not an object.
+    static func parse(_ data: Data) throws -> TMDbFranchise {
+        let response: RawCollection
+        do { response = try JSONDecoder().decode(RawCollection.self, from: data) } catch { throw AddonError.invalidJSON }
+        let parts = TMDbRelatedTitle.titles(response.parts ?? []).enumerated()
+            .sorted { ($0.element.releaseDate ?? "~", $0.offset) < ($1.element.releaseDate ?? "~", $1.offset) }
+            .map(\.element)
+        let name = response.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return TMDbFranchise(name: name.isEmpty ? "Collection" : name, parts: parts)
     }
 }
 
@@ -374,6 +410,15 @@ extension TMDbRatings {
         let (url, headers) = try request(path: [type == "movie" ? "movie" : "tv", String(id), "recommendations"])
         let result = try await client.get(url, headers: headers, limits: FetchLimits(maxBytes: 1024 * 1024), timeout: 8)
         return try TMDbRelatedTitle.parse(result.data)
+    }
+
+    /// The franchise a movie belongs to, by its collection's id (`TMDbTitleFacts.collectionID`). Throws `AddonError` for refusals and
+    /// failures.
+    public func franchise(collectionID: Int) async throws -> TMDbFranchise {
+        let (url, headers) = try request(path: ["collection", String(collectionID)],
+                                         query: [URLQueryItem(name: "language", value: "en-US")])
+        let result = try await client.get(url, headers: headers, limits: FetchLimits(maxBytes: 512 * 1024), timeout: 8)
+        return try TMDbFranchise.parse(result.data)
     }
 
     /// The IMDb id of a TMDb movie or series, so a credit can open the title's page. Nil when TMDb has none.
@@ -513,6 +558,11 @@ private struct RawRecommendations: Decodable {
             case backdropPath = "backdrop_path"
         }
     }
+}
+
+private struct RawCollection: Decodable {
+    let name: String?
+    let parts: [RawRecommendations.RawRecommendation]?
 }
 
 private struct RawPersonImages: Decodable {

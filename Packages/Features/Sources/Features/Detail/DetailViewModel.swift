@@ -78,6 +78,9 @@ public final class DetailViewModel {
     public private(set) var titleCredits: TMDbTitleCredits?
     /// Titles TMDb recommends for this one, for the shelf at the bottom of the page. Empty until TMDb answers.
     public private(set) var relatedTitles: [TMDbRelatedTitle] = []
+    /// The other films of the movie's franchise (its TMDb collection), for the shelf above More Like This. Nil until TMDb answers, for a
+    /// series, and for a movie in no franchise.
+    public private(set) var franchise: TMDbFranchise?
     /// Where the title can be watched in the viewer's region, for the Watch Anywhere section. Nil until loaded, and only asked for while
     /// that section is on.
     public private(set) var titleWatch: TMDbTitleWatch?
@@ -240,9 +243,20 @@ public final class DetailViewModel {
         defer { isLoadingFacts = false }
         let settings = await services.settings.load()
         guard let token = settings.tmdbReadToken, !token.isEmpty else { titleFacts = nil; return }
-        let loaded = try? await TMDbRatings(client: services.client, readAccessToken: token).titleFacts(imdbID: preview.id, type: preview.type)
+        let tmdb = TMDbRatings(client: services.client, readAccessToken: token)
+        let loaded = try? await tmdb.titleFacts(imdbID: preview.id, type: preview.type)
         guard !Task.isCancelled else { return }
         titleFacts = loaded ?? nil
+        await loadFranchise(facts: loaded ?? nil, tmdb: tmdb)
+    }
+
+    /// The movie's franchise, from the collection its facts name. The movie itself is left out of the shelf.
+    private func loadFranchise(facts: TMDbTitleFacts?, tmdb: TMDbRatings) async {
+        guard !isSeries, let collectionID = facts?.collectionID else { franchise = nil; return }
+        let loaded = try? await tmdb.franchise(collectionID: collectionID)
+        guard !Task.isCancelled else { return }
+        let others = loaded?.excluding(tmdbID: facts?.tmdbID)
+        franchise = others?.parts.isEmpty == false ? others : nil
     }
 
     private func loadTitleCredits() async {
@@ -282,14 +296,15 @@ public final class DetailViewModel {
             .titleWatch(imdbID: preview.id, type: preview.type, region: region)
         guard !Task.isCancelled else { return }
         titleWatch = loaded
+        if let loaded { await services.posterRatings.rememberWatch(loaded, imdbID: preview.id, region: region) }
     }
 
     /// The rent and buy prices in the viewer's region, from JustWatch. Needs no TMDb token.
     private func loadTitlePrices() async {
         let region = Locale.current.region?.identifier ?? "US"
         let loaded = try? await JustWatchPrices(client: services.client)
-            .prices(id: preview.id, title: detail.preview.name, year: Self.releaseYear(detail.preview.releaseInfo), type: preview.type,
-                    country: region)
+            .localPrices(id: preview.id, title: detail.preview.name, year: Self.releaseYear(detail.preview.releaseInfo), type: preview.type,
+                         country: region)
         guard !Task.isCancelled else { return }
         titlePrices = loaded ?? nil
     }
@@ -447,16 +462,20 @@ public final class DetailViewModel {
     private func fetchEpisodeRuntimes(season: Int, seriesID: String) async {
         let settings = await services.settings.load()
         guard let token = settings.tmdbReadToken, !token.isEmpty else { return }
-        guard let minutes = try? await TMDbRatings(client: services.client, readAccessToken: token)
-            .seasonEpisodeRuntimes(seriesIMDbID: seriesID, season: season) else { return }
+        guard let episodes = try? await TMDbRatings(client: services.client, readAccessToken: token)
+            .seasonEpisodes(seriesIMDbID: seriesID, season: season) else { return }
         guard !Task.isCancelled else { return }
         runtimeSeasons.insert(season)
         var updatedRuntimes = episodeRuntimes
         for video in detail.episodes(inSeason: season) {
-            if let episode = video.episode, let runtime = minutes[episode] { updatedRuntimes[video.id] = runtime }
+            if let episode = video.episode, let runtime = episodes.runtimes[episode] { updatedRuntimes[video.id] = runtime }
         }
         // One observed assignment per season, rather than one invalidation per episode card.
         if updatedRuntimes != episodeRuntimes { episodeRuntimes = updatedRuntimes }
+        // Some addons send no episode synopses at all (Cinemeta for Friends or Seinfeld), so TMDb's fill the gaps.
+        var filled = detail
+        filled.fillEpisodeOverviews(season: season, overviews: episodes.overviews)
+        if filled != detail { detail = filled }
     }
 
     /// Switches the episode cards between their fixed width and the width of the text above them. The cards change at once; the
@@ -693,7 +712,7 @@ public final class DetailViewModel {
 
     /// Starts the stream lookup for the Play button's request, once per title. A new request (a series moving to its next episode) lets the previous lookup go.
     public func prefetchStreams(for request: StreamRequest?) async {
-        guard let request, !Task.isCancelled else { return }
+        guard let request, !Task.isCancelled, OptimisationSettings.prefetchesStreams() else { return }
         if let previous = prefetchedStreamRequest, previous.id == request.id, previous.type == request.type { return }
         if let previous = prefetchedStreamRequest { services.streams.releasePrefetch(previous) }
         prefetchedStreamRequest = request

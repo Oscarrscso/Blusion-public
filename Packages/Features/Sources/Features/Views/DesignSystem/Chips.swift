@@ -6,6 +6,7 @@ import SwiftUI
 /// (the same inversion as the TV app's category filters). Semibold in both states, so selecting never shifts the neighbours.
 struct GlassChip: View {
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.appAppearance) private var appearance
     let title: String
     let systemImage: String?
     let isSelected: Bool
@@ -30,9 +31,9 @@ struct GlassChip: View {
     var body: some View {
         Group {
             if isSelected {
-                button.buttonStyle(.glassProminent).tint(.white)
+                button.finishedProminentButtonStyle(appearance.buttonFinish).tint(.white)
             } else {
-                button.buttonStyle(.glass)
+                button.finishedButtonStyle(nil, finish: appearance.buttonFinish)
             }
         }
         .buttonBorderShape(metrics.cornerScale(for: .filters) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .filters)))
@@ -51,7 +52,9 @@ struct GlassChip: View {
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(fillsWidth ? 1 : nil)
                 .minimumScaleFactor(0.8)
-                .foregroundStyle(isSelected ? Color.black : Color.primary)
+                // Flat draws no fill, so the selected chip reads bright and the rest grey.
+                .foregroundStyle(appearance.buttonFinish == .flat ? (isSelected ? Color.primary : Color.secondary)
+                                 : isSelected ? Color.black : Color.primary)
                 .frame(maxWidth: fillsWidth ? .infinity : nil)
         }
     }
@@ -198,7 +201,7 @@ struct RatingBadge: View {
 
 /// Dot-separated metadata such as "Drama · 2008 · 2 hr 32 min". Nil and empty parts are skipped, and it renders nothing when every
 /// part is skipped. It stays on one line: when the parts are too long for the width, genres go first, the last one first, so the rest
-/// (the rating above all) stays. Only when no genre is left does the line shrink to fit.
+/// (the rating above all) stays. Only when no genre is left does the line shrink to fit. A title's disc or streamer mark ends the line.
 struct MetaLine: View {
     /// The space kept on each side of a dot when the parts are spread, so a dot never touches the text beside it.
     private static let minimumGap: CGFloat = 4
@@ -217,12 +220,14 @@ struct MetaLine: View {
     /// True spreads the parts across the whole width the line is given, with the dots between them, so the line is as wide as what sits
     /// under it. When the parts do not fit on one line that way, the line is joined as usual.
     private let spreads: Bool
+    private let mark: TitleMark?
 
-    init(_ parts: [String?], genres: [String] = [], identifier: String? = nil, spreads: Bool = false) {
+    init(_ parts: [String?], genres: [String] = [], identifier: String? = nil, spreads: Bool = false, mark: TitleMark? = nil) {
         self.parts = Self.cleaned(parts)
         self.genres = Self.cleaned(genres)
         self.identifier = identifier
         self.spreads = spreads
+        self.mark = mark
     }
 
     private static func cleaned(_ texts: [String?]) -> [String] {
@@ -237,7 +242,7 @@ struct MetaLine: View {
                 .font(Theme.Typography.metaLine)
                 .foregroundStyle(Theme.metaText)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(parts.joined(separator: ", "))
+                .accessibilityLabel((parts + [mark?.spokenName].compactMap { $0 }).joined(separator: ", "))
             if let identifier {
                 line.accessibilityIdentifier(identifier)
             } else {
@@ -264,7 +269,7 @@ struct MetaLine: View {
     @ViewBuilder
     private func variant(dropping count: Int, shrinks: Bool) -> some View {
         let shown = partsDropping(count)
-        if spreads && !shrinks && shown.count >= Self.minimumSpreadParts {
+        if spreads && !shrinks && shown.count + (mark == nil ? 0 : 1) >= Self.minimumSpreadParts {
             spread(shown)
         } else {
             joined(shown, shrinks: shrinks)
@@ -296,16 +301,39 @@ struct MetaLine: View {
                     .lineLimit(1)
                     .fixedSize()
             }
+            if let mark {
+                Spacer(minLength: Self.minimumGap)
+                Text("·")
+                Spacer(minLength: Self.minimumGap)
+                markView(mark)
+            }
         }
         .frame(maxWidth: .infinity)
     }
 
+    /// The mark at the height of the line's capitals.
+    private func markView(_ mark: TitleMark) -> some View {
+        TitleMarkView(mark: mark, height: 11)
+    }
+
     /// The parts joined by dots on one line. Measured at full width, so a variant too wide for the space is passed over. A shrinking one
     /// is drawn smaller to fit instead.
+    @ViewBuilder
     private func joined(_ shown: [String], shrinks: Bool) -> some View {
-        Text(shown.joined(separator: " · "))
+        let text = Text(shown.joined(separator: " · "))
             .lineLimit(1)
             .minimumScaleFactor(shrinks ? Self.minimumShrink : 1)
+        if let mark {
+            HStack(spacing: 0) {
+                text
+                Text(" · ")
+                    .fixedSize()
+                markView(mark)
+                    .fixedSize()
+            }
+        } else {
+            text
+        }
     }
 }
 #endif

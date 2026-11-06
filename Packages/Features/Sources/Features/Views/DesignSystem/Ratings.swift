@@ -64,8 +64,10 @@ struct RatingsLine: View {
 
 /// The ratings of one title as a small floating pill over the bottom-left of a poster: dark, very translucent, inset from the
 /// edges, sized to its contents, so the artwork stays unobstructed. Each score is led by its provider's own colours. Landscape artwork
-/// (the hero and the title page) keeps its pill in the bottom-right corner. With best discs on, a film's pill ends with the 4K or
-/// Blu-ray mark of its best release, and shows that mark alone when ratings are off. Reads the environment's `PosterRatingsStore`; draws
+/// (the hero and the title page) keeps its pill in the bottom-right corner. With marks on, the pill ends with the 4K or Blu-ray mark of
+/// a film's best release, or else the logo of the service the title streams on. The mark can instead sit on its own in another corner
+/// (`PosterMarkPlacement`, top right by default), and does when ratings are off. On its own it is sized to the card (see `markHeight`).
+/// Reads the environment's `PosterRatingsStore`; draws
 /// nothing without one, when both are switched off, or while nothing is known. Only this view observes the title's entry, so a rating
 /// that arrives late redraws one poster.
 struct PosterRatingsOverlay: View {
@@ -73,39 +75,88 @@ struct PosterRatingsOverlay: View {
     var isLandscape = false
     /// False holds the lookup back until the screen allows it (the title page waits for its hero).
     var startsLoading = true
+    /// False leaves the mark to the metadata line beside the artwork (the landscape spotlight's), so it is not drawn twice.
+    var showsMark = true
     @Environment(PosterRatingsStore.self) private var store: PosterRatingsStore?
+    @Environment(\.layoutMetrics) private var metrics
+    /// The card's shorter side, which sizes a mark on its own.
+    @State private var cardSide: CGFloat = 0
 
     var body: some View {
-        if let store, store.isEnabled || store.showsBestDisc {
+        if let store, store.isEnabled || store.showsBestDisc && showsMark {
             let ratings = store.ratings(for: item)
             let sites: [ReviewSite] = !store.isEnabled ? []
                 : isLandscape ? [ReviewSite.imdb, .letterboxd].filter { ratings.shortText(for: $0) != nil } : ratings.posterSites
-            let disc = store.showsBestDisc ? ratings.bestDisc : nil
+            let mark = store.showsBestDisc && showsMark ? ratings.mark : nil
+            let ratingsCorner: Alignment = isLandscape ? .bottomTrailing : .bottomLeading
+            let markCorner = Self.corner(of: store.markPlacement) ?? ratingsCorner
+            let joinsRatings = markCorner == ratingsCorner
             ZStack {
-                if !sites.isEmpty || disc != nil {
-                    RatingPill(ratings: ratings, sites: sites, disc: disc)
-                        .padding(Theme.Spacing.s - 2)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isLandscape ? .bottomTrailing : .bottomLeading)
-                        .accessibilityHidden(true)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                if !sites.isEmpty {
+                    placed(RatingPill(ratings: ratings, sites: sites, mark: joinsRatings ? mark : nil), in: ratingsCorner)
+                }
+                if let mark, !joinsRatings || sites.isEmpty {
+                    placed(markOnItsOwn(mark), in: markCorner)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGFloat.self) { min($0.size.width, $0.size.height) } action: { cardSide = $0 }
             .task(id: "\(item.identity):\(store.reviewServicesRevision):\(startsLoading)") {
                 guard startsLoading else { return }
                 _ = store.ratings(for: item)
             }
         }
     }
+
+    /// The mark's height on its own: a twelfth of the card's shorter side, so it grows and shrinks with Card size, but never under
+    /// 10 points, where a disc logo's lettering stops reading, nor over 18.
+    private var markHeight: CGFloat { min(max((cardSide / 12).rounded(), 10), 18) }
+
+    /// A disc logo on the pill's dark glass, so its white lettering reads on any artwork; a streamer's logo, already its own coloured
+    /// tile, bare.
+    @ViewBuilder
+    private func markOnItsOwn(_ mark: TitleMark) -> some View {
+        let height = markHeight
+        switch mark {
+        case .disc:
+            TitleMarkView(mark: mark, height: height)
+                .padding(.horizontal, height * 0.5)
+                .padding(.vertical, height * 0.2)
+                .background(.black.opacity(0.28),
+                            in: RoundedRectangle(cornerRadius: height * 0.6 * metrics.cornerScale(for: .filters), style: .continuous))
+        case .streamer:
+            TitleMarkView(mark: mark, height: height)
+                .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+        }
+    }
+
+    private func placed(_ badge: some View, in corner: Alignment) -> some View {
+        badge
+            .padding(Theme.Spacing.s - 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+    }
+
+    private static func corner(of placement: PosterMarkPlacement) -> Alignment? {
+        switch placement {
+        case .withRatings: nil
+        case .topLeading: .topLeading
+        case .topTrailing: .topTrailing
+        case .bottomLeading: .bottomLeading
+        case .bottomTrailing: .bottomTrailing
+        }
+    }
 }
 
-/// The floating rating pill: each site's coloured mark, then its score in bold white, then the film's best disc mark, on a dark, very
+/// The floating rating pill: each site's coloured mark, then its score in bold white, then the title's disc or streamer mark, on a dark, very
 /// transparent rounded rectangle with no edge. Small, so it reads as a tag on the artwork; it is only as wide as its contents.
 private struct RatingPill: View {
     @Environment(\.layoutMetrics) private var metrics
     let ratings: TitleRatings
     let sites: [ReviewSite]
-    var disc: BestDiscFormat?
+    var mark: TitleMark?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -125,13 +176,74 @@ private struct RatingPill: View {
                     .accessibilityHidden(true)
                 }
             }
-            if let disc { BestDiscMark(format: disc, height: 10) }
+            if let mark { TitleMarkView(mark: mark, height: 10) }
         }
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
         .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 6 * metrics.cornerScale(for: .filters), style: .continuous))
+    }
+}
+
+/// The one mark a title shows: its film's best disc, else the service it streams on.
+enum TitleMark: Equatable {
+    case disc(BestDiscFormat)
+    case streamer(TMDbWatchService)
+
+    /// What VoiceOver reads for it.
+    var spokenName: String {
+        switch self {
+        case .disc(let format): format == .uhdBluRay ? "4K Blu-ray" : "Blu-ray"
+        case .streamer(let service): "On \(service.name)"
+        }
+    }
+}
+
+extension TitleRatings {
+    var mark: TitleMark? { bestDisc.map(TitleMark.disc) ?? streamer.map(TitleMark.streamer) }
+}
+
+/// A disc mark, or a streamer's logo as a small rounded square a little taller than the disc marks, so the two read alike in a line.
+struct TitleMarkView: View {
+    let mark: TitleMark
+    var height: CGFloat = 10
+
+    var body: some View {
+        switch mark {
+        case .disc(let format):
+            BestDiscMark(format: format, height: height)
+        case .streamer(let service):
+            let side = (height * 1.3).rounded()
+            if let logo = service.logo {
+                ArtworkImage(url: logo, title: service.name, maxPixelSize: side * 4, contentMode: .fit)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: side * 0.24, style: .continuous))
+                    .accessibilityHidden(true)
+            } else {
+                Text(service.name)
+                    .font(.system(size: height, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The title's mark as the store knows it, for a line that shows it beside text (the title page's metadata line). Only this view
+/// observes the title's entry, so a mark that arrives late redraws the line alone. Nil while marks are off or nothing is known.
+struct TitleMarkReader<Content: View>: View {
+    let item: MetaPreview
+    @ViewBuilder let content: (TitleMark?) -> Content
+    @Environment(PosterRatingsStore.self) private var store: PosterRatingsStore?
+
+    var body: some View {
+        if let store, store.showsBestDisc {
+            content(store.ratings(for: item).mark)
+        } else {
+            content(nil)
+        }
     }
 }
 

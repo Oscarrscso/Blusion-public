@@ -4,7 +4,7 @@ import PlayerKit
 import StremioKit
 
 /// Two-way syncing that runs by itself. The buttons here force a full sync, which reads everything from Trakt and applies every removal.
-/// Trakt uses a user-configured client ID and PKCE; no application credential is bundled.
+/// Trakt uses the app's built-in client ID and PKCE.
 @MainActor
 @Observable
 public final class TraktAccountViewModel {
@@ -18,7 +18,6 @@ public final class TraktAccountViewModel {
     public private(set) var errorMessage: String?
     /// Changes still waiting to reach Trakt.
     public private(set) var pendingCount = 0
-    public var clientIDText = ""
     public private(set) var clientIDConfigured = false
 
     private let services: AppServices
@@ -32,36 +31,14 @@ public final class TraktAccountViewModel {
 
     public func load() async {
         let stored = await services.settings.load()
-        clientIDText = stored.traktClientID ?? ""
-        clientIDConfigured = !clientIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        clientIDConfigured = !(stored.traktClientID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         isSignedIn = await services.traktAccount.isSignedIn()
         pendingCount = await services.traktSync.pendingCount()
     }
 
-    /// Save a user-provided API client ID. Changing it ends the old sign-in, not an unrelated load.
-    public func saveClientID() async {
-        let clientID = clientIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let previous = await services.settings.load()
-        guard (previous.traktClientID ?? "").trimmingCharacters(in: .whitespacesAndNewlines) != clientID else {
-            clientIDConfigured = !clientID.isEmpty
-            return
-        }
-        await perform {
-            await self.services.traktAccount.signOut()
-            await self.services.traktSync.signedOut()
-            var settings = await self.services.settings.load()
-            settings.traktClientID = clientID.isEmpty ? nil : clientID
-            await self.services.settings.save(settings)
-            await self.services.widgetContent.invalidate()
-            self.clientIDConfigured = !clientID.isEmpty
-            self.isSignedIn = false
-            self.message = clientID.isEmpty ? "Trakt client ID removed." : "Trakt client ID saved."
-        }
-    }
-
     public func startPKCESignIn() async {
         guard canSignIn else {
-            errorMessage = "Enter and save your Trakt API client ID first."
+            errorMessage = "This build has no Trakt client ID."
             return
         }
         #if canImport(CryptoKit)

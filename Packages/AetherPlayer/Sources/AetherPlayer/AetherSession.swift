@@ -41,9 +41,18 @@ public final class AetherSession {
     /// and AetherEngine's own play() is a no-op until then; so the word is kept and applied once the load is done.
     private var wantsPlaying = false
     /// A track pick AetherEngine has not reported back yet (a switch rebuilds the session, so it lands later). Reported as selected
-    /// meanwhile, so the menu doesn't flick back to the old track. `.some(nil)` is subtitles off.
+    /// meanwhile, so the menu doesn't flick back to the old track.
     private var pendingAudio: Int?
-    private var pendingSubtitle: Int??
+    private var pendingSubtitle: SubtitlePick?
+    private enum SubtitlePick: Equatable {
+        case off
+        case track(Int)
+
+        var trackID: Int? {
+            if case .track(let id) = self { return id }
+            return nil
+        }
+    }
 
     public var view: UIView { host }
     /// The AVPlayer AetherEngine plays the picture through now; nil on its software path or before a load. It changes as AetherEngine
@@ -243,7 +252,7 @@ public final class AetherSession {
     }
 
     public func selectSubtitle(id: Int?) {
-        pendingSubtitle = .some(id)
+        pendingSubtitle = id.map(SubtitlePick.track) ?? .off
         if let id { engine.selectSubtitleTrack(index: id) } else { engine.clearSubtitle() }
         publishTracks()
     }
@@ -535,7 +544,7 @@ public final class AetherSession {
         var subtitleID = engine.isSubtitleActive ? engine.activeSubtitleTrackIndex : nil
         if let pending = pendingSubtitle {
             // Settled once AetherEngine reports the pick, or has stopped loading without taking it.
-            if pending == subtitleID || (!engine.isLoadingSubtitles && pending == nil) { pendingSubtitle = nil } else { subtitleID = pending }
+            if pending.trackID == subtitleID || (!engine.isLoadingSubtitles && pending == .off) { pendingSubtitle = nil } else { subtitleID = pending.trackID }
         }
         return (engine.audioTracks.map(Self.track), engine.subtitleTracks.map(Self.track), audioID, subtitleID)
     }

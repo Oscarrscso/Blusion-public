@@ -320,7 +320,7 @@ struct ContinueWatchingRow: View {
             HStack {
                 Text("Sign in to Trakt to see paused movies and episodes.")
                 Spacer(minLength: 8)
-                Button("Sign In") { router.showSettings() }.buttonStyle(.glass).pointerFeedback()
+                Button("Sign In") { router.showSettings() }.buttonStyle(.hoverGlass)
             }
         case .failed(let message):
             InlineErrorView(message, retry: retry)
@@ -344,13 +344,10 @@ struct RowPlaceholder: View {
     let aspect: CardAspect
     let size: CardSize
     @Environment(\.layoutMetrics) private var metrics
-    @Environment(\.isLandscape) private var isLandscape
 
     var body: some View {
-        let landscape = isLandscape && aspect == .poster
-        let displayedAspect: CardAspect = landscape ? .wide : aspect
-        let width = landscape ? (metrics.landscapePosterWidth * size.scale).rounded() : size.width(for: aspect, metrics: metrics)
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+        // The header's gap and the cards' gap and margins are `MediaRow`'s, so the row fills in without moving.
+        VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             switch header {
             case .title(let title):
                 SectionHeader(title).padding(.horizontal, metrics.pageMargin)
@@ -363,21 +360,9 @@ struct RowPlaceholder: View {
                 EmptyView()
             }
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: Theme.cardSpacing) {
+                HStack(alignment: .top, spacing: metrics.cardSpacing) {
                     ForEach(0..<6, id: \.self) { _ in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            RoundedRectangle(cornerRadius: displayedAspect.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
-                                .fill(Theme.surfaceStrong)
-                                .frame(width: width, height: width / displayedAspect.ratio)
-                                .mediaArtwork(cornerRadius: displayedAspect.cornerRadius)
-                            if !landscape {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ScaledCapsule(scale: metrics.cornerScale(for: .artwork)).fill(Theme.surfaceStrong).frame(width: width * 0.75, height: 10)
-                                    ScaledCapsule(scale: metrics.cornerScale(for: .artwork)).fill(Theme.surfaceStrong).frame(width: width * 0.4, height: 8)
-                                }
-                                .frame(height: 34, alignment: .top)
-                            }
-                        }
+                        CardPlaceholder(aspect: aspect, size: size, fill: AnyShapeStyle(Theme.surfaceStrong))
                     }
                 }
                 .shimmering()
@@ -423,7 +408,7 @@ struct IssueMessage: View {
                 .fixedSize(horizontal: false, vertical: true)
             if issue == .needsTraktClientID {
                 Button("Open Settings") { router.showSettings() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.hoverGlass)
                     .controlSize(.small)
                     .pointerFeedback()
                     .accessibilityIdentifier("home.openSettings")

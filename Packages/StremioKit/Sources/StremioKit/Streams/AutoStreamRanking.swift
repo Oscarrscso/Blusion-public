@@ -72,15 +72,20 @@ public enum AutoStreamRanking {
             previous.addonID != nil && previous.addonID == item.addon.id && previous.bingeGroup == item.bingeContext?.bingeGroup
         } ?? false
 
+        // Data Saver wants the smallest file that still looks good: a REMUX costs points instead of earning them.
+        let savesData = preferences.savesData
+        let remux = remuxCounts ? (savesData ? -dataSaverRemuxCost : remuxPoints) : 0
         let contributions = [
             Contribution(fact: "resolution", detail: resolution.map(resolutionLabel), points: resolutionPoints(resolution)),
             Contribution(fact: "source", detail: source?.label, points: sourcePoints(source)),
-            Contribution(fact: "REMUX", detail: remuxCounts ? "REMUX" : nil, points: remuxCounts ? remuxPoints : 0),
+            Contribution(fact: "REMUX", detail: remuxCounts ? "REMUX" : nil, points: remux),
             Contribution(fact: "video codec", detail: codec?.label, points: videoCodecPoints(codec)),
             Contribution(fact: "bit depth", detail: quality.bitDepth.map { "\($0)-bit" }, points: bitDepthPoints(quality.bitDepth)),
             Contribution(fact: "HDR", detail: hdrLabel(quality), points: hdrPoints(quality)),
-            Contribution(fact: "bitrate", detail: bitrate.map { "\(format($0)) Mbps" }, points: bitratePoints(bitrate, resolution: resolution, codec: codec)),
-            Contribution(fact: "audio", detail: audioLabel(playableAudio), points: audioPoints(playableAudio)),
+            Contribution(fact: "bitrate", detail: bitrate.map { "\(format($0)) Mbps" },
+                         points: savesData ? dataSaverBitratePoints(bitrate, resolution: resolution, codec: codec)
+                             : bitratePoints(bitrate, resolution: resolution, codec: codec)),
+            Contribution(fact: "audio", detail: audioLabel(playableAudio), points: audioPoints(playableAudio, savesData: savesData)),
             Contribution(fact: "provider", detail: quality.provider?.name, points: quality.provider == nil ? 0 : 3),
             Contribution(fact: "release group", detail: quality.hasReputableGroup ? "reputable" : nil, points: quality.hasReputableGroup ? 3 : 0),
             Contribution(fact: "contradictions", detail: contradictions == 0 ? nil : "\(contradictions)", points: -8 * Double(contradictions)),
@@ -149,6 +154,8 @@ public enum AutoStreamRanking {
     }
 
     private static let remuxPoints: Double = 10
+    /// What a REMUX costs under Data Saver: enough that a good encode of the same disc wins.
+    private static let dataSaverRemuxCost: Double = 12
 
     private static func distance(_ quality: StreamQuality, from preferred: Int) -> Int {
         guard !quality.hasConflictingResolution, let resolution = quality.resolution else { return Int.max }
@@ -236,14 +243,27 @@ public enum AutoStreamRanking {
     /// above and floored below, so a huge file gains no more than a well-encoded one, and a starved one loses only so much.
     private static func bitratePoints(_ mbps: Double?, resolution: Int?, codec: VideoCodec?) -> Double {
         guard let mbps, let resolution, let reference = referenceMbps(resolution) else { return 0 }
-        // HEVC and AV1 reach the same picture at a lower rate than H.264.
-        let efficiency: Double = switch codec {
+        return min(6, max(-8, 5 * log2(mbps / (reference * efficiency(codec)))))
+    }
+
+    /// Data Saver's view of the rate: best at about half what the resolution usually needs (a good encode), less above that, and a
+    /// starved encode still loses, as it does otherwise. Each doubling above the sweet spot costs 6 points, down to -12.
+    private static func dataSaverBitratePoints(_ mbps: Double?, resolution: Int?, codec: VideoCodec?) -> Double {
+        guard let mbps, let resolution, let reference = referenceMbps(resolution) else { return 0 }
+        let ratio = mbps / (reference * efficiency(codec) * 0.5)
+        if ratio < 0.5 { return max(-8, 4 + 5 * log2(ratio / 0.5)) }
+        if ratio <= 1 { return 4 }
+        return max(-12, 4 - 6 * log2(ratio))
+    }
+
+    /// HEVC and AV1 reach the same picture at a lower rate than H.264.
+    private static func efficiency(_ codec: VideoCodec?) -> Double {
+        switch codec {
         case .hevc?, .vp9?: 0.7
         case .av1?: 0.6
         case .vvc?: 0.5
         default: 1
         }
-        return min(6, max(-8, 5 * log2(mbps / (reference * efficiency))))
     }
 
     /// The rate, in Mbps, that an H.264 release of this height is usually encoded at for good quality.
@@ -274,10 +294,11 @@ public enum AutoStreamRanking {
 
     /// The best track the text names counts, since the player picks a track it can play. Channels add a little, and Atmos counts only with
     /// a codec that carries it: an Atmos label beside AAC contradicts itself.
-    private static func audioPoints(_ quality: StreamQuality) -> Double {
-        var points = quality.audioCodecs.map { audioCodecPoints($0) }.max() ?? 0
+    /// Under Data Saver a lossless track counts as DD+ does: it is most of what makes a REMUX large.
+    private static func audioPoints(_ quality: StreamQuality, savesData: Bool = false) -> Double {
+        var points = quality.audioCodecs.map { savesData ? min(audioCodecPoints($0), audioCodecPoints(.eac3)) : audioCodecPoints($0) }.max() ?? 0
         if let channels = quality.audioChannels { points += channels >= 8 ? 6 : channels >= 6 ? 4 : 0 }
-        if quality.atmosFormat == .lossless { points += 9 }
+        if quality.atmosFormat == .lossless { points += savesData ? 6 : 9 }
         if quality.atmosFormat == .streaming { points += 6 }
         if quality.hasDTSX { points += 7 }
         if let kbps = quality.audioBitrateKbps { points += min(3, max(0, log2(kbps / 192))) }

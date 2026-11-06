@@ -227,7 +227,7 @@ struct MediaCard: View {
                                      logo: item.logo ?? resolvedHeroArtwork?.logo,
                                      maxPixelSize: PosterQuality.heroPosterPixelSize,
                                      logoAlignment: usesLandscapeArtwork ? .center : .bottom,
-                                     logoBottomInset: usesLandscapeArtwork ? 0 : (showsRating && (ratingsStore?.isEnabled == true || ratingsStore?.showsBestDisc == true) ? Theme.Spacing.xl + Theme.Spacing.s : Theme.Spacing.m),
+                                     logoBottomInset: usesLandscapeArtwork ? 0 : (showsRating && ratingsStore?.occupiesPosterBottom == true ? Theme.Spacing.xl + Theme.Spacing.s : Theme.Spacing.m),
                                      showsLogo: usesLandscapeArtwork || resolvedHeroArtwork?.portraitHidesLogo != true,
                                      acceptsAnyCachedSize: false, usesHeroLogo: true, artworkIsReady: $heroImageIsReady)
                         .id(heroArtworkURL)
@@ -296,6 +296,7 @@ struct MediaCard: View {
             Text(item.name)
                 .font(Theme.Typography.cardTitle)
                 .foregroundStyle(.primary)
+                .textCase(appearance.uppercaseCaptions ? .uppercase : nil)
                 .lineLimit(appearance.captionLines, reservesSpace: true)
             if appearance.showsCaptionDetails {
                 Text(subtitleLine)
@@ -318,6 +319,76 @@ struct MediaCard: View {
 
     private var spokenName: String {
         [item.name, item.releaseInfo].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+}
+
+/// A blank stand-in for a `MediaCard` while its title loads: the same artwork box (a poster in landscape is a wide card), corners,
+/// outline, width and caption lines, so the title lands exactly where its placeholder stood. `stretched()` takes a grid column's width,
+/// as the card's does.
+struct CardPlaceholder: View {
+    let aspect: CardAspect
+    var size: CardSize = .medium
+    var showsTitle: Bool? = nil
+    var width: CGFloat? = nil
+    var fill: AnyShapeStyle = AnyShapeStyle(Theme.surface)
+    private var stretches = false
+    @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.isLandscape) private var isLandscape
+    @Environment(\.appAppearance) private var appearance
+
+    init(aspect: CardAspect, size: CardSize = .medium, showsTitle: Bool? = nil, width: CGFloat? = nil,
+         fill: AnyShapeStyle = AnyShapeStyle(Theme.surface)) {
+        self.aspect = aspect
+        self.size = size
+        self.showsTitle = showsTitle
+        self.width = width
+        self.fill = fill
+    }
+
+    func stretched() -> CardPlaceholder {
+        var copy = self
+        copy.stretches = true
+        return copy
+    }
+
+    var body: some View {
+        let landscape = isLandscape && aspect == .poster
+        let artwork: CardAspect = landscape ? .wide : aspect
+        let fixed = MediaCard.resolvedWidth(width: width, aspect: aspect, size: size, metrics: metrics, isLandscape: isLandscape)
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Group {
+                if stretches {
+                    Rectangle().fill(fill).aspectRatio(artwork.ratio, contentMode: .fit)
+                } else {
+                    Rectangle().fill(fill).frame(width: fixed, height: fixed / artwork.ratio)
+                }
+            }
+            .mediaArtwork(cornerRadius: artwork.cornerRadius)
+            if !landscape && (showsTitle ?? aspect.showsCaption(appearance)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    line(font: Theme.Typography.cardTitle, share: 0.78, lines: appearance.captionLines)
+                    if appearance.showsCaptionDetails { line(font: Theme.Typography.cardSubtitle, share: 0.46) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(minWidth: stretches ? 0 : fixed, idealWidth: fixed, maxWidth: stretches ? .infinity : fixed, alignment: .leading)
+    }
+
+    /// A caption line's room, as the card's text keeps it, with a bar across `share` of the card's width.
+    private func line(font: Font, share: CGFloat, lines: Int = 1) -> some View {
+        Text(" ")
+            .font(font)
+            .lineLimit(lines, reservesSpace: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .topLeading) {
+                GeometryReader { proxy in
+                    RoundedRectangle(cornerRadius: 3 * metrics.cornerScale(for: .artwork), style: .continuous)
+                        .fill(fill)
+                        .frame(width: proxy.size.width * share)
+                        .padding(.vertical, 3)
+                }
+            }
     }
 }
 

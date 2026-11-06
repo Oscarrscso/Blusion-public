@@ -60,7 +60,30 @@ actor ImagePipeline {
         checks.urlCache = nil
         checks.requestCachePolicy = .reloadIgnoringLocalCacheData
         refreshSession = URLSession(configuration: checks)
-        decoded.totalCostLimit = ImageCachePolicy.decodedBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory)
+        decoded.totalCostLimit = ImageCachePolicy.decodedBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory,
+                                                               level: OptimisationSettings.pictureMemory())
+    }
+
+    // MARK: Optimisation
+
+    /// Sets how much decoded artwork is held in memory. A smaller limit lets the least recently used pictures go.
+    nonisolated func setMemoryLevel(_ level: Int) {
+        decoded.totalCostLimit = ImageCachePolicy.decodedBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory, level: level)
+    }
+
+    /// Optimisation's Pictures at once changed: with more slots, waiting downloads start at once.
+    func downloadSlotsChanged() {
+        while let next = waiting.first, activeDownloads < slotLimit(next.priority) {
+            activeDownloads += 1
+            waiting.removeFirst().continuation.resume()
+        }
+    }
+
+    /// The downloads at once for `priority` (Optimisation's Pictures at once, fewer while saving power): a high-priority picture (a title's
+    /// logo) may take one more.
+    private func slotLimit(_ priority: TaskPriority) -> Int {
+        let slots = OptimisationSettings.downloadSlots()
+        return priority >= .high ? slots + 1 : slots
     }
 
     // MARK: The cache on disk
@@ -214,7 +237,7 @@ actor ImagePipeline {
             var entry = waiting.remove(at: index)
             entry.priority = bestPriority
             entry.order = rank
-            if activeDownloads < (bestPriority >= .high ? 6 : 5) {
+            if activeDownloads < slotLimit(bestPriority) {
                 activeDownloads += 1
                 entry.continuation.resume()
             } else {
@@ -235,8 +258,8 @@ actor ImagePipeline {
         let pending = inFlight.values.first { $0.slot == id }
         let effectivePriority = pending?.priority ?? priority
         let effectiveOrder = pending?.order ?? order
-        // Keep one of the six slots available for title logos, even when posters fill the queue.
-        if urgentSlots.remove(id) != nil || activeDownloads < (effectivePriority >= .high ? 6 : 5) { activeDownloads += 1; return }
+        // Keep one slot more available for title logos, even when posters fill the queue.
+        if urgentSlots.remove(id) != nil || activeDownloads < slotLimit(effectivePriority) { activeDownloads += 1; return }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 enqueue((id, effectivePriority, effectiveOrder, continuation))
@@ -264,7 +287,7 @@ actor ImagePipeline {
 
     private func releaseDownloadSlot() {
         activeDownloads -= 1
-        guard let next = waiting.first, activeDownloads < (next.priority >= .high ? 6 : 5) else { return }
+        guard let next = waiting.first, activeDownloads < slotLimit(next.priority) else { return }
         activeDownloads += 1
         waiting.removeFirst().continuation.resume()
     }

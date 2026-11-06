@@ -123,6 +123,7 @@ struct PersonView: View {
                 .onTapGesture {
                     if folds { toggle() }
                 }
+                .pointerFeedback(folds)
         }
         .frame(maxWidth: metrics.readableWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: leading ? .leading : .center)

@@ -170,11 +170,11 @@ struct DetailReviews: View {
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.white)
             .frame(width: 24, height: 24)
-            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+            .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
             .clipShape(RoundedRectangle(cornerRadius: 12 * metrics.circularButtonScale(for: .actionButtons)))
-            .pointerFeedback()
+            .glassHover(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
     }
 
     /// The AI button reveals this panel and starts summarisation only when requested.
@@ -498,6 +498,7 @@ struct ReviewCard: View {
                 .onTapGesture {
                     if folds { onToggle() }
                 }
+                .pointerFeedback(folds)
                 // Two texts, each at its final width: the old one fades out as laid out and the new one fades in already laid out.
                 // The text takes its own taps (see `tapText`), so the card's tap does not reach it.
                 ZStack(alignment: .topLeading) {

@@ -107,7 +107,7 @@ struct PlayerControls: View {
                 onClose()
             } label: {
                 Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                    .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .pointerInteraction(cornerRadius: 22)
             }
@@ -170,7 +170,7 @@ struct PlayerControls: View {
                     }
                 }
                 .padding(.horizontal, 2)
-                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
             }
         }
         .buttonStyle(.hoverPlain)
@@ -184,7 +184,7 @@ struct PlayerControls: View {
         } label: {
             Image(systemName: Self.zoomSymbol(model.zoomMode)).font(.body.weight(.semibold)).frame(width: 44, height: 44)
                 .contentTransition(.symbolEffect(.replace))
-                .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                 .pointerInteraction(cornerRadius: 22)
         }
@@ -235,7 +235,7 @@ struct PlayerControls: View {
             HStack(spacing: 36) {
                 Button { Haptics.play(.playerControls); Task { await model.skipBack() } } label: {
                     Image(systemName: "gobackward.\(Int(model.skipBackSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 29)
                 }
@@ -256,7 +256,7 @@ struct PlayerControls: View {
                         }
                     }
                     .animation(.easeOut(duration: 0.2), value: isStalled)
-                    .frame(width: 80, height: 80).glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                    .frame(width: 80, height: 80).buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                     .pointerInteraction(cornerRadius: 40)
                 }
@@ -269,7 +269,7 @@ struct PlayerControls: View {
                 .accessibilityIdentifier("player.playPause")
                 Button { Haptics.play(.playerControls); Task { await model.skipForward() } } label: {
                     Image(systemName: "goforward.\(Int(model.skipForwardSeconds))").font(.title2.weight(.medium)).frame(width: 58, height: 58)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 29)
                 }
@@ -318,7 +318,7 @@ struct PlayerControls: View {
                 } label: {
                     Label("Next Episode", systemImage: "forward.end.fill").font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 16).frame(height: 40)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 20 * metrics.cornerScale(for: .playerControls))
                 }
@@ -381,7 +381,7 @@ struct PlayerControls: View {
         }
         .font(.body.weight(.semibold))
         .padding(4)
-        .glassEffect(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+        .buttonSurface(.regular, in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
     }
 
     /// The menus this film has: Audio only with a choice to make in it, Chapters only with chapter markers.

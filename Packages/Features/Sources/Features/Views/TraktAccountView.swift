@@ -3,18 +3,27 @@ import SwiftUI
 import AuthenticationServices
 import StremioKit
 
+/// Settings → Trakt: the connection, syncing the library and how often Continue Watching asks Trakt for playback. The API client ID is
+/// built in.
 struct TraktAccountView: View {
     @State private var model: TraktAccountViewModel
+    /// Settings' model, which holds the Continue Watching refresh.
+    let settings: SettingsViewModel
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
-    init(services: AppServices) { _model = State(initialValue: TraktAccountViewModel(services: services)) }
+    init(services: AppServices, settings: SettingsViewModel) {
+        _model = State(initialValue: TraktAccountViewModel(services: services))
+        self.settings = settings
+    }
 
     var body: some View {
-        Form {
+        SettingsList {
             if model.isAvailable {
-                clientIDSection
                 accountSection
-                if model.isSignedIn { syncSection }
+                if model.isSignedIn {
+                    syncSection
+                    continueWatchingSection
+                }
             } else {
                 Section {
                     Text("Trakt unavailable").foregroundStyle(.secondary).accessibilityIdentifier("trakt.unavailable")
@@ -29,29 +38,12 @@ struct TraktAccountView: View {
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .scrollContentBackground(.hidden)
-        .screenBackground()
-        .navigationTitle("Trakt")
-        .macBackNavigation()
-        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage("Trakt")
         .task { await model.load() }
         .onDisappear { model.cancelSignIn() }
         .disabled(model.isWorking)
         .overlay { if model.isWorking { Spinner().padding().glassEffect() } }
         .accessibilityIdentifier("trakt.form")
-    }
-
-    private var clientIDSection: some View {
-        Section {
-            TextField("Trakt API Client ID", text: $model.clientIDText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityIdentifier("trakt.clientID")
-            Button("Save Client ID") { Task { await model.saveClientID() } }
-                .accessibilityIdentifier("trakt.saveClientID")
-        } header: {
-            Text("API configuration")
-        }
     }
 
     private var accountSection: some View {
@@ -73,15 +65,28 @@ struct TraktAccountView: View {
 
     private var syncSection: some View {
         Section {
-            Button("Sync") { Task { await model.sync() } }
+            Button("Sync Now") { Task { await model.sync() } }
                 .accessibilityIdentifier("trakt.sync")
-            Button("Import collection") { Task { await model.importFromTrakt() } }
+            Button("Import Collection") { Task { await model.importFromTrakt() } }
                 .accessibilityIdentifier("trakt.import")
             if model.pendingCount > 0 {
                 Text(pendingText).foregroundStyle(.secondary).accessibilityIdentifier("trakt.pending")
             }
         } header: {
-            Text("Your Trakt library")
+            Text("Library")
+        }
+    }
+
+    /// How often Home's Continue Watching asks Trakt for playback from other devices.
+    private var continueWatchingSection: some View {
+        Section("Continue Watching") {
+            Picker("Refresh", selection: Binding(get: { settings.settings.continueWatchingRefreshSeconds ?? 300 }, set: { value in
+                Haptics.play(.choices)
+                Task { await settings.setContinueWatchingRefreshSeconds(value) }
+            })) {
+                ForEach(SettingsViewModel.continueWatchingRefreshOptions) { Text($0.label).tag($0.value) }
+            }
+            .accessibilityIdentifier("settings.continueWatchingRefresh")
         }
     }
 

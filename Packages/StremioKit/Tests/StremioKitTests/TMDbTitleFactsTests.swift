@@ -40,6 +40,27 @@ import Testing
         #expect(facts.originalTitle == "千と千尋の神隠し")
     }
 
+    @Test func aMovieNamesItsFranchise() throws {
+        let json = #"{"id":120,"title":"The Fellowship of the Ring","belongs_to_collection":{"id":119,"name":"The Lord of the Rings Collection"}}"#
+        let facts = try TMDbTitleFacts.parse(Data(json.utf8))
+        #expect(facts.tmdbID == 120 && facts.collectionID == 119)
+    }
+
+    @Test func aFranchiseListsItsFilmsInReleaseOrder() throws {
+        let json = #"""
+            {"id":119,"name":"The Lord of the Rings Collection","parts":[
+             {"id":122,"title":"The Return of the King","release_date":"2003-12-01"},
+             {"id":999,"title":"Untitled","release_date":""},
+             {"id":120,"title":"The Fellowship of the Ring","release_date":"2001-12-18"},
+             {"id":121,"title":"The Two Towers","release_date":"2002-12-18"}]}
+            """#
+        let franchise = try TMDbFranchise.parse(Data(json.utf8))
+        #expect(franchise.name == "The Lord of the Rings Collection")
+        #expect(franchise.parts.map(\.tmdbID) == [120, 121, 122, 999], "a film with no date yet comes last")
+        #expect(franchise.parts.allSatisfy { $0.mediaType == "movie" })
+        #expect(franchise.excluding(tmdbID: 120).parts.map(\.tmdbID) == [121, 122, 999], "the page's own film is left out")
+    }
+
     @Test func anAnswerThatIsNotAnObjectThrows() {
         #expect(throws: AddonError.invalidJSON) { try TMDbTitleFacts.parse(Data("[]".utf8)) }
     }

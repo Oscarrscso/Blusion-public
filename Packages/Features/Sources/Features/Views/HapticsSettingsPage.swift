@@ -34,6 +34,7 @@ struct HapticsSettingsPage: View {
     private static let groups: [PlaceGroup] = [
         PlaceGroup(title: "Taps", places: [.buttons, .titles, .navigation]),
         PlaceGroup(title: "Choices", places: [.choices, .sliders]),
+        PlaceGroup(title: "Player", places: [.playerControls, .playerOptions, .playerGestures]),
         PlaceGroup(title: "Motion", places: [.shelves, .banner, .reviews]),
         PlaceGroup(title: "Confirmations", places: [.saved]),
     ]
@@ -48,45 +49,24 @@ struct HapticsSettingsPage: View {
                     if value { Haptics.preview(.buttons) }
                 }))
                 .accessibilityIdentifier("settings.haptics.enabled")
+                overallRow
+                    .disabled(!draft.isOn)
             }
-            Group {
-                Section {
-                    overallRow
-                }
-                Section("Player") {
-                    NavigationLink {
-                        SettingsList {
-                            ForEach([Place.playerControls, .playerOptions, .playerGestures]) { place in
-                                NavigationLink {
-                                    HapticPlacePage(place: place, model: model, draft: $draft)
-                                } label: {
-                                    SettingsRow(title: place.title, summary: summary(place), systemImage: place.systemImage)
-                                }
-                                .accessibilityIdentifier("settings.haptics.place.\(place.rawValue)")
-                            }
+            ForEach(Self.groups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.places) { place in
+                        NavigationLink {
+                            HapticPlacePage(place: place, model: model, draft: $draft)
+                        } label: {
+                            SettingsRow(title: place.title, summary: summary(place), systemImage: place.systemImage)
                         }
-                        .settingsPage("Player haptics")
-                    } label: {
-                        SettingsRow(title: "Player haptics", summary: "", systemImage: "play.rectangle")
-                    }
-                    .accessibilityIdentifier("settings.haptics.player")
-                }
-                ForEach(Self.groups, id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.places) { place in
-                            NavigationLink {
-                                HapticPlacePage(place: place, model: model, draft: $draft)
-                            } label: {
-                                SettingsRow(title: place.title, summary: summary(place), systemImage: place.systemImage)
-                            }
-                            .accessibilityIdentifier("settings.haptics.place.\(place.rawValue)")
-                        }
+                        .accessibilityIdentifier("settings.haptics.place.\(place.rawValue)")
                     }
                 }
+                .disabled(!draft.isOn)
             }
-            .disabled(!draft.isOn)
             Section {
-                Button("Reset all to defaults") {
+                Button("Restore Defaults") {
                     draft = HapticPreferences()
                     lastPreview = nil
                     save()
@@ -106,7 +86,7 @@ struct HapticsSettingsPage: View {
         let value = draft.overall
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack {
-                Text("Overall strength")
+                Text("Strength")
                 Spacer()
                 Text(HapticFormat.percent(value)).foregroundStyle(.secondary).monospacedDigit()
             }
@@ -203,7 +183,7 @@ private struct HapticPlacePage: View {
             }
             .disabled(!draft.plays(place))
             Section {
-                Button("Restore default") {
+                Button("Restore Defaults") {
                     draft.restore(place)
                     lastPreview = nil
                     save()

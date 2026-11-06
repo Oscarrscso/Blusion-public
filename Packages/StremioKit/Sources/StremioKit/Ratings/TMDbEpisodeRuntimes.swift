@@ -1,40 +1,62 @@
 import Foundation
 
+/// What one TMDb season answer gives the episode cards, keyed by episode number.
+public struct TMDbSeasonEpisodes: Sendable, Equatable {
+    /// Minutes each episode runs.
+    public var runtimes: [Int: Int] = [:]
+    /// Each episode's synopsis, for addons that send none.
+    public var overviews: [Int: String] = [:]
+
+    public init(runtimes: [Int: Int] = [:], overviews: [Int: String] = [:]) {
+        self.runtimes = runtimes
+        self.overviews = overviews
+    }
+}
+
 extension TMDbRatings {
-    /// How long each episode of one season runs, in minutes, keyed by episode number. Empty when the series or the season is unknown to
-    /// TMDb, or no episode has a runtime. Throws `AddonError` for refusals and transport failures.
-    public func seasonEpisodeRuntimes(seriesIMDbID: String, season: Int) async throws -> [Int: Int] {
+    /// How long each episode of one season runs, and its synopsis, keyed by episode number. Empty when the series or the season is
+    /// unknown to TMDb. Throws `AddonError` for refusals and transport failures.
+    public func seasonEpisodes(seriesIMDbID: String, season: Int) async throws -> TMDbSeasonEpisodes {
         guard LetterboxdRatings.isIMDbID(seriesIMDbID), season >= 0, credential != nil,
-              let show = try await tmdbID(imdbID: seriesIMDbID, type: "series") else { return [:] }
+              let show = try await tmdbID(imdbID: seriesIMDbID, type: "series") else { return TMDbSeasonEpisodes() }
         let (url, headers) = try request(path: ["tv", String(show), "season", String(season)])
         do {
             let result = try await client.get(url, headers: headers, limits: FetchLimits(maxBytes: 512 * 1024), timeout: 6)
-            return try Self.parseSeasonRuntimes(result.data)
+            return try Self.parseSeasonEpisodes(result.data)
         } catch AddonError.notFound {
-            return [:]
+            return TMDbSeasonEpisodes()
         }
     }
 
-    /// The runtimes in a `tv/{id}/season/{n}` answer. An episode without a number or with no runtime (0 or missing) is left out. Throws
-    /// `invalidJSON` when the answer has no `episodes` list.
-    public static func parseSeasonRuntimes(_ data: Data) throws -> [Int: Int] {
-        let response: RuntimeSeason
-        do { response = try JSONDecoder().decode(RuntimeSeason.self, from: data) } catch { throw AddonError.invalidJSON }
+    /// The runtimes and synopses in a `tv/{id}/season/{n}` answer. An episode without a number is left out, as is a runtime of 0 or
+    /// an empty synopsis. Throws `invalidJSON` when the answer has no `episodes` list.
+    public static func parseSeasonEpisodes(_ data: Data) throws -> TMDbSeasonEpisodes {
+        let response: Season
+        do { response = try JSONDecoder().decode(Season.self, from: data) } catch { throw AddonError.invalidJSON }
         guard let episodes = response.episodes else { throw AddonError.invalidJSON }
-        var runtimes: [Int: Int] = [:]
+        var parsed = TMDbSeasonEpisodes()
         for episode in episodes {
-            guard let number = episode.episode_number, let minutes = episode.runtime, minutes > 0 else { continue }
-            runtimes[number] = minutes
+            guard let number = episode.episode_number else { continue }
+            if let minutes = episode.runtime, minutes > 0 { parsed.runtimes[number] = minutes }
+            if let text = episode.overview?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                parsed.overviews[number] = text
+            }
         }
-        return runtimes
+        return parsed
     }
 
-    private struct RuntimeSeason: Decodable {
-        let episodes: [RuntimeEpisode]?
+    /// The runtimes alone, as `parseSeasonEpisodes` reads them.
+    public static func parseSeasonRuntimes(_ data: Data) throws -> [Int: Int] {
+        try parseSeasonEpisodes(data).runtimes
     }
 
-    private struct RuntimeEpisode: Decodable {
+    private struct Season: Decodable {
+        let episodes: [Episode]?
+    }
+
+    private struct Episode: Decodable {
         let episode_number: Int?
         let runtime: Int?
+        let overview: String?
     }
 }

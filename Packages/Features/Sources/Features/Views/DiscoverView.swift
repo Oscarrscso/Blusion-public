@@ -26,6 +26,8 @@ struct DiscoverView: View {
             #endif
         }
         .task { await model.loadSources() }
+        // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+        .environment(\.layoutMetrics, metrics.gridPage)
     }
 
     #if targetEnvironment(macCatalyst)
@@ -37,6 +39,9 @@ struct DiscoverView: View {
                                             onLastAppear: { Task { await model.loadMore() } }, spacingAfter: metrics.shelfSpacing) { _, item in
                 AnyView(MediaCardLink(item: item).stretched())
             }))
+        } else if model.items.isEmpty, model.state == .idle || model.state == .loadingFirstPage {
+            // The first page's placeholders in the grid's own layout, so the titles land where they stand, at the same size.
+            parts.append(.placeholders(id: "placeholders"))
         }
         parts.append(.full(id: "status", view: AnyView(VStack(alignment: .leading, spacing: metrics.shelfSpacing) { resultsStatus })))
         return MacGridPage(parts: parts, scrollToTop: router.tabTapRevisions[.discover, default: 0])
@@ -187,14 +192,19 @@ struct DiscoverView: View {
         }
         switch model.state {
         case .idle, .loadingFirstPage:
-            // The grid's own placeholders, so the titles land where they stand, at the same size.
+            // The grid's own placeholders, so the titles land where they stand, at the same size. The Mac's page lays them out in its
+            // own grid instead (see `macPage`).
+            #if targetEnvironment(macCatalyst)
+            EmptyView()
+            #else
             if model.items.isEmpty { MediaGridPlaceholder(aspect: .poster, fillsWidth: true) }
+            #endif
         case .failed(let error):
             if model.isOffline {
                 OfflineBanner()
             } else {
                 InlineErrorView(error.shortDescription, retry: { Task { await model.reload() } })
-                    .padding(.horizontal, metrics.pageMargin)
+                    .padding(.horizontal, metrics.gridPageMargin)
             }
         case .loaded:
             if model.items.isEmpty { EmptyStateView("Nothing here yet", systemImage: "film", message: "Try another genre or remove a filter.") }

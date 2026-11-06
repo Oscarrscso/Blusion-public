@@ -5,8 +5,6 @@ import SwiftUI
 /// The portrait hero's numbers, shared by Home's spotlight and the title page so that a title looks the same on both, and opening it from the
 /// spotlight does not jump. Both screens read them; change one here and both move together.
 enum TitleHero {
-    /// On a Mac title page, the widest the stream list runs in place of the details under the hero.
-    static let macDetailsWidth: CGFloat = 640
     /// On a Mac title page, the one width of the column over the picture (title, overview, ratings, Play row) and of the trailer, reviews,
     /// synopsis and information under the hero, so they share one straight right edge.
     static let macBlockWidth: CGFloat = 480
@@ -481,6 +479,9 @@ struct HeroTitleArt: View {
     var hidden = false
     /// The box a logo is fitted into, when a page sizes its own title; nil uses the page's standard sizes.
     var logoBox: CGSize?
+    /// The least height a wide, thin logo is drawn at, and the widest it may grow past `logoBox` to reach it.
+    var logoMinHeight: CGFloat = 0
+    var logoStretchWidth: CGFloat?
 
     /// The tallest a logo can be on this page.
     private var logoHeight: CGFloat { logoBox?.height ?? (compact ? TitleHero.landscapeLogoMaxHeight : TitleHero.logoMaxHeight) }
@@ -502,7 +503,7 @@ struct HeroTitleArt: View {
                 Color.clear.frame(height: 0)
             } else if case .ready(let image) = slot {
                 LogoLayout(imageSize: image.size, maxWidth: logoBox?.width ?? (compact ? TitleHero.landscapeLogoMaxWidth : TitleHero.logoMaxWidth),
-                           maxHeight: logoHeight) {
+                           maxHeight: logoHeight, minHeight: logoMinHeight, stretchWidth: logoStretchWidth) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
@@ -533,16 +534,26 @@ struct LogoLayout: Layout {
     let imageSize: CGSize
     let maxWidth: CGFloat
     let maxHeight: CGFloat
+    /// A wide, thin logo is drawn at least this tall, growing past `maxWidth` up to `stretchWidth` to reach it.
+    var minHeight: CGFloat = 0
+    var stretchWidth: CGFloat?
 
-    static func fittedSize(imageSize: CGSize, proposedWidth: CGFloat?, maxWidth: CGFloat, maxHeight: CGFloat) -> CGSize {
+    static func fittedSize(imageSize: CGSize, proposedWidth: CGFloat?, maxWidth: CGFloat, maxHeight: CGFloat,
+                           minHeight: CGFloat = 0, stretchWidth: CGFloat? = nil) -> CGSize {
         guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
         let width = max(0, min(proposedWidth ?? maxWidth, maxWidth))
-        let scale = min(width / imageSize.width, maxHeight / imageSize.height)
+        var scale = min(width / imageSize.width, maxHeight / imageSize.height)
+        if imageSize.height * scale < minHeight {
+            let stretch = stretchWidth ?? maxWidth
+            let widest = max(0, min(proposedWidth ?? stretch, stretch))
+            scale = max(scale, min(minHeight / imageSize.height, widest / imageSize.width))
+        }
         return CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        Self.fittedSize(imageSize: imageSize, proposedWidth: proposal.width, maxWidth: maxWidth, maxHeight: maxHeight)
+        Self.fittedSize(imageSize: imageSize, proposedWidth: proposal.width, maxWidth: maxWidth, maxHeight: maxHeight,
+                        minHeight: minHeight, stretchWidth: stretchWidth)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -553,16 +564,29 @@ struct LogoLayout: Layout {
 /// A title's logo for Home's landscape caption, fitted into a box of fixed size so the text under it never moves when it arrives.
 struct HeroLogo: View {
     static let box = CGSize(width: 260, height: 84)
+    /// On the Mac a wide, thin logo is drawn at least `minHeight` tall, growing wider than the box, up to `stretchWidth`, to reach it.
+    /// The iPhone's landscape caption keeps the box, which its narrower screen sets.
+    static var minHeight: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        56
+        #else
+        0
+        #endif
+    }
+    static let stretchWidth: CGFloat = 440
 
     let image: UIImage
 
     var body: some View {
+        let size = LogoLayout.fittedSize(imageSize: image.size, proposedWidth: nil, maxWidth: Self.box.width, maxHeight: Self.box.height,
+                                         minHeight: Self.minHeight, stretchWidth: Self.stretchWidth)
         Color.clear
-            .frame(width: Self.box.width, height: Self.box.height)
+            .frame(width: max(Self.box.width, size.width), height: Self.box.height)
             .overlay(alignment: .bottom) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
+                    .frame(width: size.width, height: size.height)
             }
     }
 }

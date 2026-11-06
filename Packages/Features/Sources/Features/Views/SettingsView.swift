@@ -10,9 +10,17 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(\.layoutMetrics) private var metrics
     @State private var model: SettingsViewModel
-    @State private var datasetStatus: IMDbDatasetStatus?
     @State private var syncFolderName: String?
+    @State private var traktConnected: Bool?
+    @State private var downloadsBytes: Int64?
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+    /// Performance's other choices, read so its row's summary follows them.
+    @AppStorage(OptimisationSettings.homePreloadKey) private var optimisationHome = OptimisationSettings.homePreloadMatchesLazyLoad
+    @AppStorage(OptimisationSettings.pictureMemoryKey) private var optimisationMemory = OptimisationSettings.defaultPictureMemory
+    @AppStorage(OptimisationSettings.downloadSlotsKey) private var optimisationSlots = OptimisationSettings.defaultDownloadSlots
+    @AppStorage(OptimisationSettings.prefetchesStreamsKey) private var optimisationPrefetch = true
+    @AppStorage(OptimisationSettings.readiesFirstStreamKey) private var optimisationReadies = true
+    @AppStorage(OptimisationSettings.savesPowerKey) private var optimisationSavesPower = true
     @AppStorage(ImageCachePolicy.diskMegabytesKey) private var imageCacheMegabytes = ImageCachePolicy.defaultDiskMegabytes
     @AppStorage(AppearancePreferences.defaultsKey) private var appearance = AppearancePreferences()
     private let services: AppServices
@@ -25,6 +33,10 @@ struct SettingsView: View {
     @AppStorage(GhostMode.defaultsKey) private var ghostIsOn = false
     /// How far the page is pulled down past its top, in points.
     @State private var pull: CGFloat = 0
+    #if targetEnvironment(macCatalyst)
+    /// The page opened from the chosen page, shown to its right (see `SettingsDetailColumns`).
+    @State private var sidePage = SettingsSidePage()
+    #endif
     /// How much of the two-second hold has run, 0...1, which the ring round the ghost draws.
     @State private var holdProgress: CGFloat = 0
     /// The pull from which the hold counts, and how long it must last.
@@ -47,16 +59,23 @@ struct SettingsView: View {
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 400)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
-            NavigationStack(path: $router.settingsPath) {
-                if let selection = router.settingsSelection {
-                    page(selection)
-                } else {
-                    Color.clear.screenBackground()
+            SettingsDetailColumns(sidePage: sidePage) {
+                NavigationStack(path: $router.settingsPath) {
+                    if let selection = router.settingsSelection {
+                        page(selection)
+                    } else {
+                        Color.clear.screenBackground()
+                    }
                 }
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .onChange(of: router.settingsSelection) { router.settingsPath = NavigationPath() }
+        .onChange(of: router.settingsSelection) {
+            router.settingsPath = NavigationPath()
+            sidePage.close()
+            // The list stays on screen beside the page, so its summaries catch up when another page is chosen.
+            Task { await refreshSummaries() }
+        }
         #else
         list.navigationDestination(for: SettingsDestination.self) { page($0) }
         #endif
@@ -80,39 +99,39 @@ struct SettingsView: View {
                     .listRowBackground(SettingsRowBackground())
                 }
             }
-            Section("Content") {
+            Section("Sources") {
                 link(.addons) {
                     SettingsRow(title: "Addons", summary: "\(model.installedAddonCount) installed", systemImage: "puzzlepiece.extension")
                 }
                 .accessibilityIdentifier("settings.addons")
-                link(.addonSpeed) {
-                    SettingsRow(title: "Addon Speed",
-                                summary: AddonSpeedViewModel.summary(for: model.settings.autoPickWait, names: model.addonNames),
-                                systemImage: "speedometer")
+                link(.server) {
+                    SettingsRow(title: "Streaming Server", summary: model.settings.streamingServerURL ?? "Not set", systemImage: "server.rack")
                 }
-                .accessibilityIdentifier("settings.section.addonSpeed")
-                link(.widgets) {
-                    SettingsRow(title: "Widgets", summary: "Home rows and layout", systemImage: "rectangle.3.group")
-                }
-                .accessibilityIdentifier("settings.widgets")
+                .accessibilityIdentifier("settings.section.server")
             }
-            Section("Playback & appearance") {
-                link(.playback) {
-                    SettingsRow(title: "Playback", summary: playbackSummary, systemImage: "play.rectangle")
+            Section("Playback") {
+                link(.streams) {
+                    SettingsRow(title: "Streams", summary: streamsSummary, systemImage: "play.square.stack")
                 }
                 .accessibilityIdentifier("settings.section.playback")
                 link(.player) {
-                    SettingsRow(title: "Player", summary: "Subtitles, audio, picture, skip buttons", systemImage: "slider.horizontal.3")
+                    SettingsRow(title: "Player", summary: playerSummary, systemImage: "play.rectangle")
                 }
                 .accessibilityIdentifier("settings.section.player")
+                link(.downloads) {
+                    SettingsRow(title: "Downloads", summary: downloadsSummary, systemImage: "arrow.down.circle")
+                }
+                .accessibilityIdentifier("settings.section.downloads")
+            }
+            Section("Customise") {
                 link(.appearance) {
                     SettingsRow(title: "Appearance", summary: appearanceSummary, systemImage: "paintpalette")
                 }
                 .accessibilityIdentifier("settings.section.appearance")
-                link(.lazyLoad) {
-                    SettingsRow(title: "Lazy load", summary: lazyLoadLabel(lookaheadLevel), systemImage: "arrow.down.to.line")
+                link(.widgets) {
+                    SettingsRow(title: "Widgets", summary: "Home rows and layout", systemImage: "rectangle.3.group")
                 }
-                .accessibilityIdentifier("settings.section.lazyLoad")
+                .accessibilityIdentifier("settings.widgets")
                 // A Mac has no haptic hardware, so the page would be sliders it cannot demonstrate.
                 #if !targetEnvironment(macCatalyst)
                 link(.haptics) {
@@ -121,58 +140,33 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.section.haptics")
                 #endif
             }
-            Section("Ratings") {
-                link(.reviews) {
-                    SettingsRow(title: "Review services", summary: reviewServicesSummary, systemImage: "star.bubble")
-                }
-                .accessibilityIdentifier("settings.section.reviews")
-                link(.imdb) {
-                    SettingsRow(title: "IMDb ratings", summary: IMDbDatasetSummary.text(datasetStatus), systemImage: "arrow.down.circle")
-                }
-                .accessibilityIdentifier("settings.section.imdb")
-            }
-            Section("Accounts & server") {
+            Section("Accounts & Sync") {
                 link(.trakt) {
-                    SettingsRow(title: "Trakt", summary: "Sync and lists", systemImage: "person.crop.circle")
+                    SettingsRow(title: "Trakt", summary: traktSummary, systemImage: "person.crop.circle")
                 }
                 .accessibilityIdentifier("settings.trakt")
-                link(.continueRefresh) {
-                    SettingsRow(title: "Continue refresh", summary: continueRefreshSummary, systemImage: "arrow.clockwise")
+                link(.ratings) {
+                    SettingsRow(title: "Ratings", summary: ratingsSummary, systemImage: "star.bubble")
                 }
-                .accessibilityIdentifier("settings.section.accounts")
-                link(.server) {
-                    SettingsRow(title: "Streaming server", summary: model.settings.streamingServerURL ?? "Not set", systemImage: "server.rack")
-                }
-                .accessibilityIdentifier("settings.section.server")
-                if fallbackEngineLinked {
-                    link(.fallback) {
-                        SettingsRow(title: "Fallback player", summary: FallbackSettingsPage.summary(model.settings, aetherEngineLinked: aetherEngineLinked),
-                                    systemImage: "film")
-                    }
-                    .accessibilityIdentifier("settings.section.fallback")
-                }
-            }
-            Section("Data") {
-                link(.downloads) {
-                    SettingsRow(title: "Downloads", summary: "", systemImage: "arrow.down.circle")
-                }
-                link(.imageCache) {
-                    SettingsRow(title: "Image cache", summary: ImageCacheSettingsPage.summary(imageCacheMegabytes), systemImage: "photo.stack")
-                }
-                .accessibilityIdentifier("settings.section.imageCache")
-                if let folder = services.sharedFolder {
+                .accessibilityIdentifier("settings.section.reviews")
+                if services.sharedFolder != nil {
                     link(.syncFolder) {
-                        SettingsRow(title: "Sync folder", summary: syncFolderName ?? "Off", systemImage: "arrow.triangle.2.circlepath")
+                        SettingsRow(title: "Widget Sync", summary: syncFolderName ?? "Off", systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .onAppear { syncFolderName = folder.folderName }
                     .accessibilityIdentifier("settings.section.syncFolder")
                 }
+            }
+            Section("Advanced") {
+                link(.performance) {
+                    SettingsRow(title: "Performance", summary: performanceSummary, systemImage: "gauge.with.dots.needle.67percent")
+                }
+                .accessibilityIdentifier("settings.section.optimisation")
                 link(.data) {
-                    SettingsRow(title: "Clear data", summary: "History, library, settings", systemImage: "trash")
+                    SettingsRow(title: "Clear Data", summary: "History, library, settings", systemImage: "trash")
                 }
                 .accessibilityIdentifier("settings.section.data")
             }
-            Section("About") {
+            Section {
                 link(.about) {
                     SettingsRow(title: "About", summary: "Version \(SettingsViewModel.appVersion)", systemImage: "info.circle")
                 }
@@ -190,15 +184,11 @@ struct SettingsView: View {
         .macRootNavigation()
         .pageTabBar(hidden: isPhoneInLandscape)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await model.load()
-            datasetStatus = await services.posterRatings.imdbDatasetStatus()
-        }
-        // A new copy of the IMDb data arrived while Settings was open, or the review services changed.
-        .onChange(of: services.posterRatings.reviewServicesRevision) {
-            model.refreshOMDbUsage()
-            Task { datasetStatus = await services.posterRatings.imdbDatasetStatus() }
-        }
+        .task { await model.load() }
+        // On iPhone, each return to the list: a page pushed from it may have changed what a summary reads.
+        .onAppear { Task { await refreshSummaries() } }
+        // The review services changed while Settings was open.
+        .onChange(of: services.posterRatings.reviewServicesRevision) { model.refreshOMDbUsage() }
         .accessibilityIdentifier("settings.form")
         // The pull past the top, which the ghost's indicator follows.
         .onScrollGeometryChange(for: CGFloat.self) { max(0, -($0.contentOffset.y + $0.contentInsets.top)) } action: { _, value in
@@ -239,34 +229,36 @@ struct SettingsView: View {
     private func page(_ destination: SettingsDestination) -> some View {
         switch destination {
         case .addons: AddonsView(services: services)
-        case .addonSpeed: AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } })
-        case .widgets: WidgetsManagerView(services: services)
-        case .playback: PlaybackSettingsPage(model: model)
-        case .player: PlayerSettingsPage(model: model)
+        case .server: ServerSettingsPage(model: model)
+        case .streams: StreamsSettingsPage(model: model, services: services)
+        case .player: PlayerSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked)
+        case .downloads: DownloadSettingsPage(services: services)
         case .appearance: AppearanceSettingsPage(model: model)
-        case .lazyLoad: LazyLoadSettingsPage()
+        case .widgets: WidgetsManagerView(services: services, startsHidden: true)
         case .haptics:
             #if targetEnvironment(macCatalyst)
             EmptyView()
             #else
             HapticsSettingsPage(model: model)
             #endif
-        case .reviews: ReviewServicesPage(model: model, services: services)
-        case .imdb: IMDbRatingsPage(status: datasetStatus)
-        case .trakt: TraktAccountView(services: services)
-        case .continueRefresh: AccountsSettingsPage(model: model)
-        case .server: ServerSettingsPage(model: model)
-        case .fallback: FallbackSettingsPage(model: model, aetherEngineLinked: aetherEngineLinked)
-        case .downloads: DownloadSettingsPage(services: services)
-        case .imageCache: ImageCacheSettingsPage()
+        case .trakt: TraktAccountView(services: services, settings: model)
+        case .ratings: RatingsSettingsPage(model: model, services: services)
         case .syncFolder:
             if let folder = services.sharedFolder { SyncFolderSettingsPage(folder: folder, services: services) }
+        case .performance: PerformanceSettingsPage()
         case .data: DataSettingsPage(model: model)
         case .about: AboutSettingsPage(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked)
         }
     }
 
     private var isPhoneInLandscape: Bool { isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone }
+
+    /// The summaries that read state other than the settings model's: Trakt's sign-in, the downloads on disk and the sync folder.
+    private func refreshSummaries() async {
+        syncFolderName = services.sharedFolder?.folderName
+        downloadsBytes = services.downloads?.storageBytes
+        traktConnected = await services.traktAccount.isSignedIn()
+    }
 
     private func setGhost(_ isOn: Bool) {
         // A button's tap, not a switch's: Ghost mode changes what every screen shows, so it lands like a change of screen.
@@ -303,9 +295,36 @@ struct SettingsView: View {
         }
     }
 
-    private var playbackSummary: String {
-        let quality = SettingsViewModel.resolutionOptions.first { $0.value == model.settings.preferredResolution }?.label ?? "Best available"
-        return "\(model.settings.playerPreference.title) · \(quality) · \(model.settings.autoPickSource.title)"
+    /// Whether Auto Pick starts on its own, the quality asked for, and the source Auto Pick prefers when it is not balanced.
+    private var streamsSummary: String {
+        let settings = model.settings
+        let quality = settings.dataSaver ? "Data Saver"
+            : SettingsViewModel.resolutionOptions.first { $0.value == settings.preferredResolution }?.label ?? "Best available"
+        var parts = [settings.autoPlayBestStream ? "Auto Pick" : "Manual", quality]
+        if settings.autoPlayBestStream, settings.autoPickSource != .balanced { parts.append(settings.autoPickSource.title) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Which player plays, and the subtitles it starts with.
+    private var playerSummary: String {
+        let player = switch model.settings.playerPreference {
+        case .builtIn: "Blusion"
+        case .infuse: "Infuse"
+        case .infuseWhenNeeded: "Blusion, then Infuse"
+        }
+        let subtitles = model.settings.subtitleLanguage.flatMap { code in
+            SettingsViewModel.languageOptions.first { $0.value == code }?.label
+        }
+        return "\(player) · " + (subtitles.map { "\($0) subtitles" } ?? "Subtitles off")
+    }
+
+    private var downloadsSummary: String {
+        guard let downloadsBytes else { return "" }
+        return downloadsBytes > 0 ? ByteCountFormatter.string(fromByteCount: downloadsBytes, countStyle: .file) : "None"
+    }
+
+    private var traktSummary: String {
+        traktConnected.map { $0 ? "Connected" : "Not connected" } ?? ""
     }
 
     /// The preset in use, or what differs from the app's own look (accent, background, cards, text), then the poster switches that are on.
@@ -323,8 +342,8 @@ struct SettingsView: View {
         if model.settings.usesHeroPosters { on.append("Hero artwork on posters") }
         if model.settings.showsPosterRatings { on.append("Ratings on posters") }
         if model.settings.showsColouredRatingLogos { on.append("Coloured logos") }
-        if model.settings.showsBestDiscOnPosters { on.append("Best disc on posters") }
-        return on.isEmpty ? "Default appearance" : on.joined(separator: ", ")
+        if model.settings.showsBestDiscOnPosters { on.append("Disc and streamer marks") }
+        return on.isEmpty ? "Default" : on.joined(separator: ", ")
     }
 
     /// The Haptics row shows whether anything has been tuned: the overall strength when it is not 100%, and how many places are off.
@@ -342,20 +361,27 @@ struct SettingsView: View {
         return places.allSatisfy(haptics.isDefault) ? "Default" : "Custom"
     }
 
-    private var reviewServicesSummary: String {
+    private var ratingsSummary: String {
         var saved: [String] = []
         if model.settings.omdbAPIKey != nil { saved.append("OMDb") }
         if model.settings.tmdbReadToken != nil { saved.append("TMDB") }
-        var text = saved.isEmpty ? "Not set up" : saved.joined(separator: ", ")
+        var text = saved.isEmpty ? "IMDb only" : saved.joined(separator: ", ")
         if model.settings.omdbAPIKey != nil {
             text += " · \(model.omdbRequestsToday.formatted()) of \(SettingsViewModel.omdbDailyLimit.formatted()) today"
         }
         return text
     }
+}
 
-    private var continueRefreshSummary: String {
-        let seconds = model.settings.continueWatchingRefreshSeconds ?? 300
-        return SettingsViewModel.continueWatchingRefreshOptions.first { $0.value == seconds }?.label ?? "Every 5 minutes"
+extension SettingsView {
+    /// How far lists load ahead, then whether anything else on the page has been changed.
+    private var performanceSummary: String {
+        let level = "Load ahead: \(lazyLoadLabel(lookaheadLevel))"
+        let isDefault = optimisationHome == OptimisationSettings.homePreloadMatchesLazyLoad
+            && optimisationMemory == OptimisationSettings.defaultPictureMemory && optimisationSlots == OptimisationSettings.defaultDownloadSlots
+            && optimisationPrefetch && optimisationReadies && optimisationSavesPower
+            && imageCacheMegabytes == ImageCachePolicy.defaultDiskMegabytes
+        return isDefault ? level : "\(level) · Custom"
     }
 }
 
@@ -430,34 +456,34 @@ extension View {
     }
 }
 
-private struct PlaybackSettingsPage: View {
+/// Settings → Streams: the quality asked of addons, and Auto Pick (whether it plays on its own, the source it prefers and which addons
+/// it waits for).
+private struct StreamsSettingsPage: View {
     let model: SettingsViewModel
-    @State private var infuseInstalled = true
-    @Environment(\.scenePhase) private var scenePhase
+    let services: AppServices
 
     var body: some View {
         SettingsList {
             Section {
-                Picker("Play with", selection: Binding(get: { model.settings.playerPreference }, set: { value in
-                    Task { await model.setPlayerPreference(value) }
-                })) {
-                    ForEach(PlayerPreference.allCases) { Text($0.title).tag($0) }
+                Picker("Quality",
+                       selection: Binding(get: { model.settings.preferredResolution },
+                                          set: { value in Haptics.play(.choices); Task { await model.setPreferredResolution(value) } })) {
+                    ForEach(SettingsViewModel.resolutionOptions) { Text($0.label).tag($0.value) }
                 }
-                .accessibilityIdentifier("settings.player")
-                if model.settings.playerPreference.externalPlayer != nil && !infuseInstalled {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Infuse isn’t installed on this device.").font(.footnote).foregroundStyle(.secondary)
-                        if let url = ExternalPlayer.infuse.appStoreURL { Link("Get Infuse", destination: url) }
-                    }
-                    .accessibilityIdentifier("settings.player.missing")
-                }
+                .accessibilityIdentifier("settings.resolution")
+                Toggle("Data Saver", isOn: Binding(get: { model.settings.dataSaver }, set: { value in
+                    Task { await model.setDataSaver(value) }
+                }))
+                .accessibilityIdentifier("settings.dataSaver")
+            }
+            Section("Auto Pick") {
                 Toggle("Play best stream automatically", isOn: Binding(get: { model.settings.autoPlayBestStream }, set: { value in
                     Task { await model.setAutoPlayBestStream(value) }
                 }))
                 .accessibilityIdentifier("settings.autoPlay")
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Auto Pick source")
-                    Picker("Auto Pick source", selection: Binding(get: { model.settings.autoPickSource }, set: { value in
+                    Text("Prefer")
+                    Picker("Prefer", selection: Binding(get: { model.settings.autoPickSource }, set: { value in
                         Haptics.play(.choices)
                         Task { await model.setAutoPickSource(value) }
                     })) {
@@ -467,46 +493,63 @@ private struct PlaybackSettingsPage: View {
                     .labelsHidden()
                     .accessibilityIdentifier("settings.autoPickSource")
                 }
-                Picker("Preferred quality",
-                       selection: Binding(get: { model.settings.preferredResolution },
-                                          set: { value in Haptics.play(.choices); Task { await model.setPreferredResolution(value) } })) {
-                    ForEach(SettingsViewModel.resolutionOptions) { Text($0.label).tag($0.value) }
+                SettingsSubpageLink(id: "streams.addonSpeed") {
+                    AddonSpeedSettingsPage(services: services, onChange: { Task { await model.load() } })
+                } label: {
+                    LabeledContent("Waits for", value: waitSummary)
                 }
-                .accessibilityIdentifier("settings.resolution")
-                Picker("Subtitles", selection: Binding(get: { model.settings.subtitleLanguage }, set: { value in
-                    Haptics.play(.choices)
-                    Task { await model.setSubtitleLanguage(value) }
-                })) {
-                    ForEach(SettingsViewModel.languageOptions) { Text($0.label).tag($0.value) }
-                }
-                .accessibilityIdentifier("settings.subtitleLanguage")
+                .accessibilityIdentifier("settings.section.addonSpeed")
             }
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Playback")
-        // Checked again on return to the app: Get Infuse leaves it for the App Store.
-        .task(id: scenePhase) {
-            guard scenePhase == .active, let url = URL(string: "infuse://") else { return }
-            infuseInstalled = UIApplication.shared.canOpenURL(url)
+        .settingsPage("Streams")
+    }
+
+    private var waitSummary: String {
+        switch model.settings.autoPickWait {
+        case .allAddons: "All addons"
+        case .fastest: "Fastest addon"
+        case .addon: AddonSpeedViewModel.summary(for: model.settings.autoPickWait, names: model.addonNames)
         }
     }
 }
 
-private struct LazyLoadSettingsPage: View {
+/// Settings → Performance: how far ahead lists and Home load, what is readied before Play, how much artwork is held, downloaded at once
+/// and kept on disk, and Low Power Mode (see `OptimisationSettings`, `ImageCachePolicy`). Every choice applies at once.
+private struct PerformanceSettingsPage: View {
     @AppStorage(LazyLoadLookahead.defaultsKey) private var lookaheadLevel = LazyLoadLookahead.defaultLevel
+    @AppStorage(OptimisationSettings.homePreloadKey) private var homePreload = OptimisationSettings.homePreloadMatchesLazyLoad
+    @AppStorage(OptimisationSettings.prefetchesStreamsKey) private var prefetchesStreams = true
+    @AppStorage(OptimisationSettings.readiesFirstStreamKey) private var readiesFirstStream = true
+    @AppStorage(OptimisationSettings.pictureMemoryKey) private var pictureMemory = OptimisationSettings.defaultPictureMemory
+    @AppStorage(OptimisationSettings.downloadSlotsKey) private var downloadSlots = OptimisationSettings.defaultDownloadSlots
+    @AppStorage(OptimisationSettings.savesPowerKey) private var savesPower = true
+    @AppStorage(ImageCachePolicy.diskMegabytesKey) private var diskMegabytes = ImageCachePolicy.defaultDiskMegabytes
+    @State private var diskInUse: Int?
+    @State private var confirmsClear = false
+
+    private var isDefault: Bool {
+        lookaheadLevel == LazyLoadLookahead.defaultLevel && homePreload == OptimisationSettings.homePreloadMatchesLazyLoad
+            && prefetchesStreams && readiesFirstStream && pictureMemory == OptimisationSettings.defaultPictureMemory
+            && downloadSlots == OptimisationSettings.defaultDownloadSlots && savesPower
+            && diskMegabytes == ImageCachePolicy.defaultDiskMegabytes
+    }
 
     var body: some View {
         SettingsList {
-            Section {
+            Section("Load Ahead") {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack {
-                        Text("Lazy load")
+                        Text("Lists")
                         Spacer()
-                        Text(lazyLoadLabel(lookaheadLevel)).foregroundStyle(.secondary)
+                        Text("\(lazyLoadLabel(lookaheadLevel)) · \(LazyLoadLookahead.titles(atLevel: lookaheadLevel)) titles")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                     GlassSlider(value: $lookaheadLevel, stops: LazyLoadLookahead.levels.count)
-                        .accessibilityLabel("Lazy load")
+                        .accessibilityLabel("Lists")
+                        .accessibilityValue(lazyLoadLabel(lookaheadLevel))
                         .accessibilityIdentifier("settings.lazyLoadLookahead")
                     HStack {
                         Text(LazyLoadLookahead.levels[0].label)
@@ -515,28 +558,130 @@ private struct LazyLoadSettingsPage: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 }
+                picker("Home", selection: $homePreload, options: OptimisationSettings.homePreloadOptions,
+                       id: "settings.optimisation.homePreload")
+            }
+            Section("Streams") {
+                Toggle("Look up streams when a title opens", isOn: choice($prefetchesStreams))
+                    .accessibilityIdentifier("settings.optimisation.prefetchStreams")
+                Toggle("Pre-buffer the top stream", isOn: choice($readiesFirstStream))
+                    .accessibilityIdentifier("settings.optimisation.readyFirstStream")
+            }
+            Section("Artwork") {
+                picker("Memory", selection: $pictureMemory, options: pictureMemoryOptions, id: "settings.optimisation.pictureMemory")
+                picker("Downloads at once", selection: $downloadSlots, options: OptimisationSettings.downloadSlotOptions,
+                       id: "settings.optimisation.downloadSlots")
+                Picker("Disk cache", selection: Binding(get: { diskMegabytes }, set: { new in
+                    Haptics.play(.choices)
+                    diskMegabytes = new
+                })) {
+                    ForEach(ImageCachePolicy.diskSizeOptions, id: \.self) { Text(Self.sizeName($0)).tag($0) }
+                }
+                .accessibilityIdentifier("settings.imageCache.size")
+                LabeledContent("Disk cache used") {
+                    Text(diskInUse.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "—")
+                        .monospacedDigit()
+                        .accessibilityLabel(diskInUse.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "Measuring")
+                }
+                .accessibilityIdentifier("settings.imageCache.inUse")
+                Button("Clear Artwork Cache", role: .destructive) { confirmsClear = true }
+                    .accessibilityIdentifier("settings.imageCache.clear")
+            }
+            Section {
+                Toggle("Save power in Low Power Mode", isOn: choice($savesPower))
+                    .accessibilityIdentifier("settings.optimisation.savesPower")
+            }
+            Section {
+                Button("Restore Defaults") {
+                    Haptics.play(.buttons)
+                    for key in OptimisationSettings.allKeys + [ImageCachePolicy.diskMegabytesKey] { UserDefaults.standard.removeObject(forKey: key) }
+                    applyPictures()
+                    applyDiskLimit()
+                }
+                .disabled(isDefault)
+                .accessibilityIdentifier("settings.optimisation.restore")
             }
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Lazy load")
+        .settingsPage("Performance")
+        .task { diskInUse = ImagePipeline.shared.diskUsage }
+        .onChange(of: pictureMemory) { applyPictures() }
+        .onChange(of: downloadSlots) { applyPictures() }
+        .onChange(of: savesPower) { applyPictures() }
+        .onChange(of: diskMegabytes) { applyDiskLimit() }
+        .confirmationDialog("Clear the artwork cache?", isPresented: $confirmsClear, titleVisibility: .visible) {
+            Button("Clear Artwork Cache", role: .destructive) {
+                // Off the main thread: emptying a full cache takes a moment, and the page should not stall while it does.
+                Task {
+                    await Task.detached(priority: .userInitiated) { ImagePipeline.shared.clearDisk() }.value
+                    diskInUse = ImagePipeline.shared.diskUsage
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Posters and backdrops download again as you browse.")
+        }
+    }
+
+    /// Memory's choices with what each holds on this device: "Balanced · 1 GB".
+    private var pictureMemoryOptions: [OptimisationSettings.Option] {
+        OptimisationSettings.pictureMemoryOptions.map { option in
+            let bytes = ImageCachePolicy.decodedBytes(physicalMemory: ProcessInfo.processInfo.physicalMemory, level: option.value)
+            return OptimisationSettings.Option(label: "\(option.label) · \(Self.sizeName(bytes / 1024 / 1024))", value: option.value)
+        }
+    }
+
+    static func sizeName(_ megabytes: Int) -> String {
+        megabytes >= 1024 ? "\(megabytes / 1024) GB" : "\(megabytes) MB"
+    }
+
+    /// A switch that ticks as it is flipped, as Settings' other switches do.
+    private func choice(_ value: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { value.wrappedValue }, set: { new in
+            Haptics.play(.choices)
+            value.wrappedValue = new
+        })
+    }
+
+    private func picker(_ title: LocalizedStringKey, selection: Binding<Int>, options: [OptimisationSettings.Option], id: String) -> some View {
+        Picker(title, selection: Binding(get: { selection.wrappedValue }, set: { new in
+            Haptics.play(.choices)
+            selection.wrappedValue = new
+        })) {
+            ForEach(options) { Text($0.label).tag($0.value) }
+        }
+        .accessibilityIdentifier(id)
+    }
+
+    /// The picture loader takes its new memory limit and number of downloads at once now, not at the next launch.
+    private func applyPictures() {
+        ImagePipeline.shared.setMemoryLevel(OptimisationSettings.pictureMemory())
+        Task { await ImagePipeline.shared.downloadSlotsChanged() }
+    }
+
+    private func applyDiskLimit() {
+        ImagePipeline.shared.setDiskLimit(megabytes: UserDefaults.standard.object(forKey: ImageCachePolicy.diskMegabytesKey) as? Int
+                                          ?? ImageCachePolicy.defaultDiskMegabytes)
+        diskInUse = ImagePipeline.shared.diskUsage
     }
 }
 
-private struct ReviewServicesPage: View {
-    @Bindable var model: SettingsViewModel
+/// Settings → Ratings: OMDb's requests today (the app's own OMDb and TMDB keys are built in), and the offline IMDb scores (when they
+/// were last updated, and whose they are: IMDb asks for the credit and limits the data to personal, non-commercial use).
+private struct RatingsSettingsPage: View {
+    let model: SettingsViewModel
     let services: AppServices
+    @State private var datasetStatus: IMDbDatasetStatus?
 
     private var used: Int { model.omdbRequestsToday }
     private var limit: Int { SettingsViewModel.omdbDailyLimit }
 
     var body: some View {
         SettingsList {
-            Section {
-                SecureField("OMDb API Key", text: $model.omdbAPIKeyText)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("settings.omdbAPIKey")
+            Section("OMDb") {
                 VStack(alignment: .leading, spacing: 6) {
                     LabeledContent("Requests today", value: "\(used.formatted()) of \(limit.formatted())")
                     ProgressView(value: Double(min(used, limit)), total: Double(limit))
@@ -544,21 +689,8 @@ private struct ReviewServicesPage: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("settings.omdbUsage")
-                if let url = URL(string: "https://www.omdbapi.com/apikey.aspx") { Link("Get an OMDb key", destination: url) }
-            } header: {
-                Text("OMDb")
             }
             Section {
-                SecureField("TMDB Read Access Token", text: $model.tmdbReadTokenText)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("settings.tmdbReadToken")
-                if let url = URL(string: "https://www.themoviedb.org/settings/api") { Link("TMDB API settings", destination: url) }
-            } header: {
-                Text("TMDB")
-            }
-            Section {
-                Button("Save Review Services") { Task { await model.commitReviewCredentials() } }
-                    .accessibilityIdentifier("settings.reviews.save")
                 Button("Refresh Ratings") { Task { await model.refreshRatings() } }
                     .accessibilityIdentifier("settings.reviews.refresh")
                 if let error = services.posterRatings.omdbError ?? services.posterRatings.reviewServiceIssue {
@@ -566,52 +698,24 @@ private struct ReviewServicesPage: View {
                         .font(.footnote)
                         .foregroundStyle(.orange)
                         .accessibilityIdentifier("settings.reviews.error")
+                } else if let message = model.lastMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.reviews.message")
                 }
             }
-        }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Review services")
-        .task { model.refreshOMDbUsage() }
-        .onChange(of: services.posterRatings.reviewServicesRevision) { model.refreshOMDbUsage() }
-    }
-}
-
-/// What the offline IMDb scores are, when they were last updated, and whose they are (IMDb asks for the credit and limits the data
-/// to personal, non-commercial use).
-private struct IMDbRatingsPage: View {
-    let status: IMDbDatasetStatus?
-
-    var body: some View {
-        SettingsList {
             Section {
-                if let status {
-                    LabeledContent {
-                        Text(status.titleCount.formatted())
-                    } label: {
-                        HStack(spacing: 6) {
-                            ReviewSiteIcon(site: .imdb, size: 13)
-                            Text("Titles")
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
+                LabeledContent("Titles", value: datasetStatus.map { $0.titleCount.formatted() } ?? IMDbDatasetSummary.text(nil))
                     .accessibilityIdentifier("settings.imdbDataset")
+                if let status = datasetStatus {
                     LabeledContent("Updated", value: (status.updatedAt ?? status.checkedAt)
                         .map { $0.formatted(.dateTime.day().month(.abbreviated).year()) } ?? "Not yet")
                     LabeledContent("Size on disk", value: status.fileSize.map { $0.formatted(.byteCount(style: .file)) } ?? "Unknown")
-                } else {
-                    LabeledContent {
-                        Text(IMDbDatasetSummary.text(nil))
-                    } label: {
-                        HStack(spacing: 6) {
-                            ReviewSiteIcon(site: .imdb, size: 13)
-                            Text("Titles")
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("settings.imdbDataset")
                 }
-                if let url = IMDbAttribution.termsURL { Link("IMDb data terms", destination: url) }
+                if let url = IMDbAttribution.termsURL { Link("IMDb Data Terms", destination: url) }
+            } header: {
+                Text("IMDb")
             } footer: {
                 // IMDb's credit and terms, which its non-commercial datasets require.
                 Text("\(IMDbAttribution.notice) \(IMDbAttribution.terms)")
@@ -619,27 +723,17 @@ private struct IMDbRatingsPage: View {
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("IMDb ratings")
-    }
-}
-
-private struct AccountsSettingsPage: View {
-    let model: SettingsViewModel
-
-    var body: some View {
-        SettingsList {
-            Section {
-                Picker("Continue refresh", selection: Binding(get: { model.settings.continueWatchingRefreshSeconds ?? 300 }, set: { value in
-                    Task { await model.setContinueWatchingRefreshSeconds(value) }
-                })) {
-                    ForEach(SettingsViewModel.continueWatchingRefreshOptions) { Text($0.label).tag($0.value) }
-                }
-                .accessibilityIdentifier("settings.continueWatchingRefresh")
-            }
+        .settingsPage("Ratings")
+        .onAppear { model.clearMessage() }
+        .task {
+            model.refreshOMDbUsage()
+            datasetStatus = await services.posterRatings.imdbDatasetStatus()
         }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Continue refresh")
+        // A new copy of the IMDb data arrived while the page was open, or the review services changed.
+        .onChange(of: services.posterRatings.reviewServicesRevision) {
+            model.refreshOMDbUsage()
+            Task { datasetStatus = await services.posterRatings.imdbDatasetStatus() }
+        }
     }
 }
 
@@ -664,63 +758,14 @@ private struct ServerSettingsPage: View {
                         .foregroundStyle(.orange)
                         .accessibilityIdentifier("settings.serverURL.message")
                 }
-                Button("Save address") { Task { await model.commitServerURL() } }
+                Button("Save Address") { Task { await model.commitServerURL() } }
                     .disabled(model.serverURLMessage != nil)
                     .accessibilityIdentifier("settings.serverURL.save")
             }
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Streaming server")
-    }
-}
-
-private struct FallbackSettingsPage: View {
-    let model: SettingsViewModel
-    var aetherEngineLinked = false
-
-    /// The row's summary on the Settings list: off, or which engine plays.
-    static func summary(_ settings: PlaybackSettings, aetherEngineLinked: Bool) -> String {
-        guard settings.fallbackEngineEnabled else { return "Off" }
-        guard aetherEngineLinked else { return "On" }
-        return settings.player.advancedEngine == .aether ? "AetherEngine" : "mpv"
-    }
-
-    private func binding<Value>(_ keyPath: WritableKeyPath<PlayerPreferences, Value>) -> Binding<Value> {
-        Binding(get: { model.settings.player[keyPath: keyPath] }, set: { value in
-            Haptics.play(.choices)
-            Task { await model.updatePlayer { $0[keyPath: keyPath] = value } }
-        })
-    }
-
-    var body: some View {
-        SettingsList {
-            Section {
-                Toggle("Use the fallback player", isOn: Binding(get: { model.settings.fallbackEngineEnabled },
-                                        set: { value in Haptics.play(.choices); Task { await model.setFallbackEngineEnabled(value) } }))
-                    .accessibilityIdentifier("settings.fallbackToggle")
-            }
-            if aetherEngineLinked, model.settings.fallbackEngineEnabled {
-                Section {
-                    Picker("Engine", selection: binding(\.advancedEngine)) {
-                        Text("AetherEngine").tag(AdvancedEngine.aether)
-                        Text("mpv").tag(AdvancedEngine.mpv)
-                    }
-                    .accessibilityIdentifier("settings.fallbackEngine")
-                }
-                if model.settings.player.advancedEngine == .aether {
-                    Section {
-                        Toggle("Compose Dolby Vision FEL", isOn: binding(\.composesDolbyVisionFEL))
-                            .accessibilityIdentifier("settings.aether.fel")
-                        Toggle("Spatial audio for TrueHD and DTS:X", isOn: binding(\.rendersObjectAudio))
-                            .accessibilityIdentifier("settings.aether.objectAudio")
-                    }
-                }
-            }
-        }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Fallback player")
+        .settingsPage("Streaming Server")
     }
 }
 
@@ -731,11 +776,13 @@ private struct DataSettingsPage: View {
     var body: some View {
         SettingsList {
             Section {
-                ForEach(DataResetService.Scope.allCases, id: \.self) { scope in
-                    Button(scope.title, role: .destructive) { pendingScope = scope }
-                        .accessibilityIdentifier("settings.clear.\(String(describing: scope))")
-                }
-                if let message = model.lastMessage {
+                ForEach(DataResetService.Scope.allCases.filter { $0 != .everything }, id: \.self) { scope in clearButton(scope) }
+            }
+            Section {
+                clearButton(.everything)
+            }
+            if let message = model.lastMessage {
+                Section {
                     Label(message, systemImage: "checkmark.circle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -745,7 +792,8 @@ private struct DataSettingsPage: View {
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Clear data")
+        .settingsPage("Clear Data")
+        .onAppear { model.clearMessage() }
         .confirmationDialog(pendingScope.map { "Clear \($0.title.lowercased())?" } ?? "",
                             isPresented: Binding(get: { pendingScope != nil }, set: { if !$0 { pendingScope = nil } }),
                             titleVisibility: .visible, presenting: pendingScope) { scope in
@@ -755,6 +803,11 @@ private struct DataSettingsPage: View {
         } message: { scope in
             Text(scope.warning)
         }
+    }
+
+    private func clearButton(_ scope: DataResetService.Scope) -> some View {
+        Button(scope.title, role: .destructive) { pendingScope = scope }
+            .accessibilityIdentifier("settings.clear.\(String(describing: scope))")
     }
 }
 
@@ -770,10 +823,10 @@ private struct SyncFolderSettingsPage: View {
         SettingsList {
             Section {
                 LabeledContent("Folder", value: folderName ?? "None")
-                Button(folderName == nil ? "Choose folder" : "Change folder") { isChoosing = true }
+                Button(folderName == nil ? "Choose Folder" : "Change Folder") { isChoosing = true }
                     .accessibilityIdentifier("settings.syncFolder.choose")
                 if folderName != nil {
-                    Button("Stop syncing", role: .destructive) {
+                    Button("Stop Syncing", role: .destructive) {
                         folder.forget()
                         folderName = nil
                     }
@@ -788,7 +841,7 @@ private struct SyncFolderSettingsPage: View {
         }
         .scrollIndicators(.visible, axes: .vertical)
         .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Sync folder")
+        .settingsPage("Widget Sync")
         .onAppear { folderName = folder.folderName }
         .fileImporter(isPresented: $isChoosing, allowedContentTypes: [.folder]) { result in
             guard case .success(let url) = result else { return }
@@ -801,65 +854,6 @@ private struct SyncFolderSettingsPage: View {
             } catch {
                 failed = true
             }
-        }
-    }
-}
-
-/// How much room posters and backdrops may take on this device, how much they take now, and a way to clear them. There is no expiry and no
-/// quality choice: pictures stay until the limit makes room (the least recently used go first), and one that has been kept a while is
-/// checked quietly for a newer copy (see `ImageCachePolicy`).
-private struct ImageCacheSettingsPage: View {
-    @AppStorage(ImageCachePolicy.diskMegabytesKey) private var megabytes = ImageCachePolicy.defaultDiskMegabytes
-    @State private var inUse: Int?
-    @State private var confirmsClear = false
-
-    /// The Settings row's summary: the chosen size.
-    static func summary(_ megabytes: Int) -> String {
-        "Up to \(sizeName(ImageCachePolicy.diskBytes(forSavedMegabytes: megabytes) / 1024 / 1024))"
-    }
-
-    static func sizeName(_ megabytes: Int) -> String {
-        megabytes >= 1024 ? "\(megabytes / 1024) GB" : "\(megabytes) MB"
-    }
-
-    var body: some View {
-        SettingsList {
-            Section {
-                Picker("Disk cache size", selection: $megabytes) {
-                    ForEach(ImageCachePolicy.diskSizeOptions, id: \.self) { Text(Self.sizeName($0)).tag($0) }
-                }
-                .accessibilityIdentifier("settings.imageCache.size")
-                LabeledContent("Cache in use") {
-                    Text(inUse.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "—")
-                        .monospacedDigit()
-                        .accessibilityLabel(inUse.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) } ?? "Measuring")
-                }
-                .accessibilityIdentifier("settings.imageCache.inUse")
-            }
-            Section {
-                Button("Clear Image Cache", role: .destructive) { confirmsClear = true }
-                    .accessibilityIdentifier("settings.imageCache.clear")
-            }
-        }
-        .scrollIndicators(.visible, axes: .vertical)
-        .scrollIndicatorsFlash(onAppear: true)
-        .settingsPage("Image cache")
-        .task { inUse = ImagePipeline.shared.diskUsage }
-        .onChange(of: megabytes) { _, chosen in
-            ImagePipeline.shared.setDiskLimit(megabytes: chosen)
-            inUse = ImagePipeline.shared.diskUsage
-        }
-        .confirmationDialog("Clear the image cache?", isPresented: $confirmsClear, titleVisibility: .visible) {
-            Button("Clear Image Cache", role: .destructive) {
-                // Off the main thread: emptying a full cache takes a moment, and the page should not stall while it does.
-                Task {
-                    await Task.detached(priority: .userInitiated) { ImagePipeline.shared.clearDisk() }.value
-                    inUse = ImagePipeline.shared.diskUsage
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Posters and backdrops download again as you browse.")
         }
     }
 }
@@ -885,7 +879,7 @@ private struct AddonSpeedSettingsPage: View {
                     Task { await model.test() }
                 } label: {
                     HStack {
-                        Text(model.isTesting ? "Testing…" : "Test Now")
+                        Text(model.isTesting ? "Testing…" : "Test Speed")
                         Spacer(minLength: 0)
                         if model.isTesting { Spinner().controlSize(.small) }
                     }
@@ -918,10 +912,10 @@ private struct AddonSpeedSettingsPage: View {
             }
             Section {
                 waitChoice("All addons", .allAddons)
-                waitChoice("Auto (fastest)", .fastest)
+                waitChoice("Fastest addon", .fastest)
                 ForEach(model.rows) { row in waitChoice(row.addon.name, .addon(row.id)) }
             } header: {
-                Text("Auto Pick waits for")
+                Text("Auto Pick Waits For")
             }
         }
         .scrollIndicators(.visible, axes: .vertical)
@@ -955,7 +949,11 @@ private struct AboutSettingsPage: View {
         SettingsList {
             Section {
                 LabeledContent("Version", value: SettingsViewModel.appVersion)
-                NavigationLink("Acknowledgements") { AcknowledgementsView(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked) }
+                SettingsSubpageLink(id: "about.acknowledgements") {
+                    AcknowledgementsView(fallbackEngineLinked: fallbackEngineLinked, aetherEngineLinked: aetherEngineLinked)
+                } label: {
+                    Text("Acknowledgements")
+                }
                     .accessibilityIdentifier("settings.acknowledgements")
             } footer: {
                 Text("""

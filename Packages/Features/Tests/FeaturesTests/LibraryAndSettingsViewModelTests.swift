@@ -257,19 +257,6 @@ import StremioKitTestSupport
         #expect(!services.posterRatings.isEnabled && !model.settings.showsPosterRatings)
     }
 
-    @Test func tmdbReadTokenIsLoadedAndSavedTrimmed() async {
-        let services = services(settings: PlaybackSettings(tmdbReadToken: "tmdb-old"))
-        let model = SettingsViewModel(services: services)
-        await model.load()
-        #expect(model.tmdbReadTokenText == "tmdb-old")
-        model.tmdbReadTokenText = "  tmdb-1 \n"
-        await model.commitReviewCredentials()
-        #expect(await services.settings.load().tmdbReadToken == "tmdb-1")
-        model.tmdbReadTokenText = "   "
-        await model.commitReviewCredentials()
-        #expect(await services.settings.load().tmdbReadToken == nil, "a blank field removes the token")
-    }
-
     @Test func installedAddonCountComesFromTheRegistry() async throws {
         let empty = SettingsViewModel(services: services())
         await empty.load()

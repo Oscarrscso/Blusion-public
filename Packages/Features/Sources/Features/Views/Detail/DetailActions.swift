@@ -14,6 +14,8 @@ struct DetailActions: View {
     var isLoadingStreams = false
     /// The main action's movie or episode returned no streams: leave the action visible, labelled and disabled.
     var hasNoStreams = false
+    /// The player app Play last handed this title to, from this page. Play's second line then says so, in place of a price or streamer.
+    var openedInPlayer: ExternalPlayer?
     /// True while Shuffle's or an episode's streams load: Play takes no taps then, and looks exactly as it does otherwise.
     var blocksPlay = false
     /// False leaves the metadata line out, for a page that sets the line itself, above its overview and ratings.
@@ -22,8 +24,17 @@ struct DetailActions: View {
     let play: (StreamRequest) -> Void
     let showStreamSelector: (StreamRequest) -> Void
     let playWithInfuse: (StreamRequest) -> Void
+    /// Highest Quality or Data Saver from Play's hold menu: the best stream at that quality starts.
+    let playAtQuality: (StreamRequest, PlayQuality) -> Void
     @Environment(\.isLandscape) private var isLandscape
     @Environment(TitleActions.self) private var titleActions
+    @Environment(PosterRatingsStore.self) private var ratingsStore: PosterRatingsStore?
+    @Environment(\.appAppearance) private var appearance
+    /// The film's best disc as the device knows it, for Highest Quality's mark. Read again after each Play, since opening the streams
+    /// asks Best Blurays.
+    @State private var bestDisc: BestDiscFormat?
+    /// The service the title's poster mark already names, read from the marks cache so Play says it at once.
+    @State private var knownStreamer: TMDbWatchService?
     /// Play was tapped while a series' episodes were still arriving: its spinner shows, and it plays once they are in.
     @State private var playsWhenLoaded = false
 
@@ -40,8 +51,10 @@ struct DetailActions: View {
         VStack(alignment: leadsText ? .leading : .center, spacing: leadsText ? Theme.Spacing.s : TitleHero.playRowGap) {
             // The line stays on one line wherever it sits: when it is too long, genres go before the rating does.
             if showsMetaLine {
-                MetaLine(metaParts, genres: metaGenres, identifier: "detail.metaLine", spreads: true)
-                    .multilineTextAlignment(leadsText ? .leading : .center)
+                TitleMarkReader(item: model.detail.preview) { mark in
+                    MetaLine(metaParts, genres: metaGenres, identifier: "detail.metaLine", spreads: true, mark: mark)
+                }
+                .multilineTextAlignment(leadsText ? .leading : .center)
             }
             if showsActions {
                 VStack(alignment: leadsText ? .leading : .center, spacing: Theme.Spacing.s) {
@@ -78,6 +91,10 @@ struct DetailActions: View {
                 playsWhenLoaded = false
                 if let request = model.primaryRequest { play(request) }
             }
+            .task(id: "\(model.detail.preview.identity)|\(isLoadingStreams)") {
+                bestDisc = await ratingsStore?.knownBestDisc(for: model.detail.preview)
+                knownStreamer = await ratingsStore?.knownStreamer(for: model.detail.preview)
+            }
     }
 
     @ViewBuilder
@@ -95,8 +112,16 @@ struct DetailActions: View {
                     if !hasNoStreams, model.isSeries, title.hasPrefix("Resume"),
                        let next = model.nextUp, let season = next.season, let episode = next.episode {
                         labelWithDetail("Resume", "S\(season)E\(episode)")
+                    } else if !hasNoStreams, let openedInPlayer {
+                        labelWithDetail(title.hasPrefix("Play") ? "Play" : title, "Opened in \(openedInPlayer.displayName)")
+                    } else if !hasNoStreams, let bestDisc {
+                        // The film's best disc goes first, as on its poster mark: a streamer found later does not replace it.
+                        labelWithDetail(title.hasPrefix("Play") ? "Play" : title, bestDisc == .uhdBluRay ? "On 4K Blu-ray" : "On Blu-ray")
+                    } else if !hasNoStreams, let streamer = knownStreamer?.name ?? model.titlePrices?.streamers.first {
+                        // The service it streams on: the poster mark's, known at once, else JustWatch's once it answers.
+                        labelWithDetail(title.hasPrefix("Play") ? "Play" : title, "On \(streamer)")
                     } else if !hasNoStreams, let rent = model.titlePrices?.bestRent {
-                        // The cheapest rent in the best quality a store has, where a resumed episode would be.
+                        // Nothing streams it: the cheapest rent in the best quality a store has.
                         labelWithDetail(title.hasPrefix("Play") ? "Play" : title, "\(rent.quality.label) Rental: \(rent.priceText)")
                     } else {
                         Text(!hasNoStreams && title.hasPrefix("Play") ? "Play" : title)
@@ -111,7 +136,10 @@ struct DetailActions: View {
                         }
                     }
                     .animation(.smooth(duration: 0.25), value: isLoadingStreams)
-                    .animation(.smooth(duration: 0.3), value: model.titlePrices?.bestRent)
+                    .animation(.smooth(duration: 0.3), value: model.titlePrices)
+                    .animation(.smooth(duration: 0.3), value: knownStreamer)
+                    .animation(.smooth(duration: 0.3), value: bestDisc)
+                    .animation(.smooth(duration: 0.3), value: openedInPlayer)
             }
             .buttonStyle(PrimaryActionButtonStyle(glass: playGlass, height: CircleActionButton.diameter))
             .contextMenu {
@@ -123,6 +151,7 @@ struct DetailActions: View {
                     Haptics.play(.buttons)
                     playWithInfuse(request)
                 }
+                PlayQualityMenuItems(disc: bestDisc) { playAtQuality(request, $0) }
             }
             .disabled(hasNoStreams)
             .opacity(hasNoStreams ? 0.4 : 1)
@@ -161,25 +190,29 @@ struct DetailActions: View {
         }
     }
 
-    /// Play's label with a smaller second line (a resumed episode, a rent price): beside it on the Mac, under it on iPhone.
+    /// Play's label with a smaller second line (a resumed episode, a rent price): beside it on the Mac, under it on iPhone. Both lines
+    /// take Play's own text colour, so they read black on a white fill.
     @ViewBuilder
     private func labelWithDetail(_ label: String, _ detail: String) -> some View {
         #if targetEnvironment(macCatalyst)
         HStack(spacing: Theme.Spacing.s) {
-            Text(label).foregroundStyle(.white)
+            Text(label)
             Text(detail)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.6))
+                .opacity(detailOpacity)
         }
         #else
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).foregroundStyle(.white)
+            Text(label)
             Text(detail)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.6))
+                .opacity(detailOpacity)
         }
         #endif
     }
+
+    /// The glass Play dims its detail line; a solid fill keeps it at full strength so it stays black on white.
+    private var detailOpacity: Double { appearance.playStyle == .artwork ? 0.6 : 1 }
 
     /// Fixed circles reserve their natural width; Play uses all remaining space.
     private var actionRow: some View {

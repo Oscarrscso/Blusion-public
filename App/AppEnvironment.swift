@@ -191,14 +191,17 @@ final class AppEnvironment {
         let widgetContent = WidgetContentService(registry: registry, client: client, settings: settings, trakt: trakt, account: traktAccount,
                                                  snapshots: snapshots, imdb: imdbDataset)
         let ratingsCache: any RatingsCache
+        var marksFile: URL?
         if !uiTesting, let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             ratingsCache = FileRatingsCache(fileURL: caches.appendingPathComponent("poster-ratings.json"))
+            marksFile = caches.appendingPathComponent("title-marks.bin")
         } else {
             ratingsCache = InMemoryRatingsCache()
         }
+        let marks = TitleMarksCache(fileURL: marksFile, region: Locale.current.region?.identifier ?? "US")
         let posterRatings = PosterRatingsStore(letterboxd: uiTesting ? nil : LetterboxdRatings(client: client), cache: ratingsCache,
                                                dataset: imdbDataset, bestBlurays: uiTesting ? nil : BestBluraysClient(client: client),
-                                               logger: logger)
+                                               marks: marks, logger: logger)
         let searchHistory: any SearchHistoryStore = uiTesting ? InMemorySearchHistoryStore() : DefaultsSearchHistoryStore(defaults: settingsDefaults)
         let streamService = StreamService(registry: registry, client: client, timings: addonSpeed)
         let subtitleService = SubtitleService(registry: registry, client: client)

@@ -33,10 +33,10 @@ struct FilterMenuLabel: View {
         .frame(maxWidth: .infinity, minHeight: minHeight)
         .contentShape(shape)
         .contentShape(.contextMenuPreview, shape)
-        .glassEffect(.regular.tint(tint.opacity(isActive ? 0.25 : 0.08)).interactive(), in: shape)
+        .buttonSurface(.regular.tint(tint.opacity(isActive ? 0.25 : 0.08)).interactive(), in: shape)
         .clipShape(shape)
+        .glassHover(shape)
         .accessibilityAddTraits(isActive ? .isSelected : [])
-        .pointerFeedback()
     }
 }
 

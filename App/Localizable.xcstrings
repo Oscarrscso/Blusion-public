@@ -23,6 +23,17 @@
         }
       }
     },
+    " · ": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " · "
+          }
+        }
+      }
+    },
     "4K": {
       "extractionState": "manual",
       "localizations": {
@@ -56,6 +67,28 @@
         }
       }
     },
+    "AI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        }
+      }
+    },
+    "AI Review Summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI Review Summary"
+          }
+        }
+      }
+    },
     "AI Search": {
       "extractionState": "manual",
       "localizations": {
@@ -67,6 +100,17 @@
         }
       }
     },
+    "API Client": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Client"
+          }
+        }
+      }
+    },
     "About": {
       "extractionState": "manual",
       "localizations": {
@@ -74,6 +118,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "About"
+          }
+        }
+      }
+    },
+    "Accent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accent"
           }
         }
       }
@@ -96,6 +151,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Accounts"
+          }
+        }
+      }
+    },
+    "Accounts & Sync": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accounts & Sync"
           }
         }
       }
@@ -188,6 +254,17 @@
         }
       }
     },
+    "Add a filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a filter"
+          }
+        }
+      }
+    },
     "Add an addon": {
       "extractionState": "manual",
       "localizations": {
@@ -254,6 +331,28 @@
         }
       }
     },
+    "Advanced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced"
+          }
+        }
+      }
+    },
+    "AetherEngine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AetherEngine"
+          }
+        }
+      }
+    },
     "After allowing access, copy the redirected address from your browser and paste it here.": {
       "extractionState": "manual",
       "localizations": {
@@ -272,6 +371,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "AirPlay"
+          }
+        }
+      }
+    },
+    "All": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
+          }
+        }
+      }
+    },
+    "All Corners": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All Corners"
           }
         }
       }
@@ -309,6 +430,17 @@
         }
       }
     },
+    "All previous episodes watched": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All previous episodes watched"
+          }
+        }
+      }
+    },
     "Always pick the best stream": {
       "extractionState": "manual",
       "localizations": {
@@ -316,6 +448,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Always pick the best stream"
+          }
+        }
+      }
+    },
+    "Ambient mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ambient mode"
           }
         }
       }
@@ -338,6 +481,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Appearance"
+          }
+        }
+      }
+    },
+    "Apply to styled (ASS) subtitles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply to styled (ASS) subtitles"
+          }
+        }
+      }
+    },
+    "Artwork": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Artwork"
           }
         }
       }
@@ -375,6 +540,17 @@
         }
       }
     },
+    "Auto Pick Waits For": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto Pick Waits For"
+          }
+        }
+      }
+    },
     "Auto Pick waits for": {
       "extractionState": "manual",
       "localizations": {
@@ -382,6 +558,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Auto Pick waits for"
+          }
+        }
+      }
+    },
+    "BACK": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BACK"
           }
         }
       }
@@ -415,6 +602,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Back to details"
+          }
+        }
+      }
+    },
+    "Background": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Background"
           }
         }
       }
@@ -551,6 +749,17 @@
         }
       }
     },
+    "Body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Body"
+          }
+        }
+      }
+    },
     "Browse Trakt Lists": {
       "extractionState": "manual",
       "localizations": {
@@ -558,6 +767,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Browse Trakt Lists"
+          }
+        }
+      }
+    },
+    "Buttons": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buttons"
           }
         }
       }
@@ -595,6 +815,39 @@
         }
       }
     },
+    "Captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Captions"
+          }
+        }
+      }
+    },
+    "Cards": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cards"
+          }
+        }
+      }
+    },
+    "Cast and Crew": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cast and Crew"
+          }
+        }
+      }
+    },
     "Checking Best Blurays…": {
       "extractionState": "manual",
       "localizations": {
@@ -617,6 +870,28 @@
         }
       }
     },
+    "Choose another stream": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose another stream"
+          }
+        }
+      }
+    },
+    "Choose stream": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose stream"
+          }
+        }
+      }
+    },
     "Choose which rows appear on Home.": {
       "extractionState": "manual",
       "localizations": {
@@ -635,6 +910,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clear"
+          }
+        }
+      }
+    },
+    "Clear Artwork Cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Artwork Cache"
           }
         }
       }
@@ -683,6 +969,17 @@
         }
       }
     },
+    "Clear the artwork cache?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear the artwork cache?"
+          }
+        }
+      }
+    },
     "Clear the image cache?": {
       "extractionState": "manual",
       "localizations": {
@@ -727,6 +1024,17 @@
         }
       }
     },
+    "Colour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colour"
+          }
+        }
+      }
+    },
     "Coloured rating logos": {
       "extractionState": "manual",
       "localizations": {
@@ -734,6 +1042,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Coloured rating logos"
+          }
+        }
+      }
+    },
+    "Compose Dolby Vision FEL": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compose Dolby Vision FEL"
           }
         }
       }
@@ -859,6 +1178,28 @@
         }
       }
     },
+    "Controls": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controls"
+          }
+        }
+      }
+    },
+    "Copy Appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Appearance"
+          }
+        }
+      }
+    },
     "Copy Link": {
       "extractionState": "manual",
       "localizations": {
@@ -903,6 +1244,28 @@
         }
       }
     },
+    "Custom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom"
+          }
+        }
+      }
+    },
+    "Customise": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Customise"
+          }
+        }
+      }
+    },
     "Customize": {
       "extractionState": "manual",
       "localizations": {
@@ -932,6 +1295,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Data"
+          }
+        }
+      }
+    },
+    "Data Saver": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data Saver"
+          }
+        }
+      }
+    },
+    "Decades": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decades"
+          }
+        }
+      }
+    },
+    "Default": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default"
+          }
+        }
+      }
+    },
+    "Deinterlacing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deinterlacing"
           }
         }
       }
@@ -980,6 +1387,17 @@
         }
       }
     },
+    "Disc and streamer marks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disc and streamer marks"
+          }
+        }
+      }
+    },
     "Disconnect": {
       "extractionState": "manual",
       "localizations": {
@@ -1002,6 +1420,17 @@
         }
       }
     },
+    "Disk cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disk cache"
+          }
+        }
+      }
+    },
     "Disk cache size": {
       "extractionState": "manual",
       "localizations": {
@@ -1009,6 +1438,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Disk cache size"
+          }
+        }
+      }
+    },
+    "Disk cache used": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disk cache used"
+          }
+        }
+      }
+    },
+    "Distance between ticks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Distance between ticks"
+          }
+        }
+      }
+    },
+    "Dolby Vision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dolby Vision"
           }
         }
       }
@@ -1031,6 +1493,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Done"
+          }
+        }
+      }
+    },
+    "Double-tap to skip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double-tap to skip"
+          }
+        }
+      }
+    },
+    "Download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download"
+          }
+        }
+      }
+    },
+    "Downloaded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloaded"
           }
         }
       }
@@ -1145,6 +1640,17 @@
         }
       }
     },
+    "Episode unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Episode unavailable"
+          }
+        }
+      }
+    },
     "Episode width": {
       "extractionState": "manual",
       "localizations": {
@@ -1152,6 +1658,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Episode width"
+          }
+        }
+      }
+    },
+    "Episodes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Episodes"
           }
         }
       }
@@ -1189,6 +1706,17 @@
         }
       }
     },
+    "Fallback engine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback engine"
+          }
+        }
+      }
+    },
     "Fallback player": {
       "extractionState": "manual",
       "localizations": {
@@ -1207,6 +1735,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fastest"
+          }
+        }
+      }
+    },
+    "Feel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feel"
           }
         }
       }
@@ -1255,6 +1794,17 @@
         }
       }
     },
+    "Folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder"
+          }
+        }
+      }
+    },
     "Forward 10 seconds": {
       "extractionState": "manual",
       "localizations": {
@@ -1284,6 +1834,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "From URL"
+          }
+        }
+      }
+    },
+    "Full HDR brightness": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full HDR brightness"
+          }
+        }
+      }
+    },
+    "GENRES LIST": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GENRES LIST"
           }
         }
       }
@@ -1321,6 +1893,17 @@
         }
       }
     },
+    "Genres": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genres"
+          }
+        }
+      }
+    },
     "Genres appear here for titles saved from now on.": {
       "extractionState": "manual",
       "localizations": {
@@ -1343,6 +1926,28 @@
         }
       }
     },
+    "Get a TMDB Token": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get a TMDB Token"
+          }
+        }
+      }
+    },
+    "Get an OMDb Key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get an OMDb Key"
+          }
+        }
+      }
+    },
     "Get an OMDb key": {
       "extractionState": "manual",
       "localizations": {
@@ -1361,6 +1966,72 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ghost mode is on"
+          }
+        }
+      }
+    },
+    "Glass": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Glass"
+          }
+        }
+      }
+    },
+    "HDR": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDR"
+          }
+        }
+      }
+    },
+    "Haptics": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haptics"
+          }
+        }
+      }
+    },
+    "Headings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Headings"
+          }
+        }
+      }
+    },
+    "Hero artwork on posters": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hero artwork on posters"
+          }
+        }
+      }
+    },
+    "Hide controls": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide controls"
           }
         }
       }
@@ -1420,6 +2091,17 @@
         }
       }
     },
+    "Home shows this widget with a source picked at random, named after the source, and picks again on the New Source schedule. With none ticked, it picks from every source, less any unticked.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home shows this widget with a source picked at random, named after the source, and picks again on the New Source schedule. With none ticked, it picks from every source, less any unticked."
+          }
+        }
+      }
+    },
     "Host": {
       "extractionState": "manual",
       "localizations": {
@@ -1460,6 +2142,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "IMDb"
+          }
+        }
+      }
+    },
+    "IMDb Data Terms": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IMDb Data Terms"
           }
         }
       }
@@ -1541,6 +2234,17 @@
         }
       }
     },
+    "Import Collection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import Collection"
+          }
+        }
+      }
+    },
     "Import Widgets": {
       "extractionState": "manual",
       "localizations": {
@@ -1614,6 +2318,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Import mode"
+          }
+        }
+      }
+    },
+    "Infuse isn't installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Infuse isn't installed"
           }
         }
       }
@@ -1706,6 +2421,17 @@
         }
       }
     },
+    "Language": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Language"
+          }
+        }
+      }
+    },
     "Large": {
       "extractionState": "manual",
       "localizations": {
@@ -1713,6 +2439,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Large"
+          }
+        }
+      }
+    },
+    "Last video": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last video"
+          }
+        }
+      }
+    },
+    "Layout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout"
           }
         }
       }
@@ -1783,6 +2531,28 @@
         }
       }
     },
+    "Lists": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lists"
+          }
+        }
+      }
+    },
+    "Load Ahead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load Ahead"
+          }
+        }
+      }
+    },
     "Loading": {
       "extractionState": "manual",
       "localizations": {
@@ -1805,6 +2575,28 @@
         }
       }
     },
+    "Loading cast and crew": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading cast and crew"
+          }
+        }
+      }
+    },
+    "Loading episode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading episode"
+          }
+        }
+      }
+    },
     "Loading episodes": {
       "extractionState": "manual",
       "localizations": {
@@ -1816,6 +2608,50 @@
         }
       }
     },
+    "Loading ratings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading ratings"
+          }
+        }
+      }
+    },
+    "Loading related title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading related title"
+          }
+        }
+      }
+    },
+    "Loading review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading review"
+          }
+        }
+      }
+    },
+    "Loading reviews": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading reviews"
+          }
+        }
+      }
+    },
     "Loading streams": {
       "extractionState": "manual",
       "localizations": {
@@ -1823,6 +2659,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Loading streams"
+          }
+        }
+      }
+    },
+    "Loading synopsis": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading synopsis"
+          }
+        }
+      }
+    },
+    "Loading video": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading video"
+          }
+        }
+      }
+    },
+    "Look up streams when a title opens": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Look up streams when a title opens"
           }
         }
       }
@@ -1915,6 +2784,17 @@
         }
       }
     },
+    "Mark position": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mark position"
+          }
+        }
+      }
+    },
     "More Info": {
       "extractionState": "manual",
       "localizations": {
@@ -1933,6 +2813,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "More options"
+          }
+        }
+      }
+    },
+    "Most ticks per review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Most ticks per review"
+          }
+        }
+      }
+    },
+    "Motion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Motion"
           }
         }
       }
@@ -1959,6 +2861,17 @@
         }
       }
     },
+    "Movies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Movies"
+          }
+        }
+      }
+    },
     "Mute": {
       "extractionState": "manual",
       "localizations": {
@@ -1966,6 +2879,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mute"
+          }
+        }
+      }
+    },
+    "My Looks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My Looks"
           }
         }
       }
@@ -1981,6 +2905,17 @@
         }
       }
     },
+    "Navigation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigation"
+          }
+        }
+      }
+    },
     "New Widget": {
       "extractionState": "manual",
       "localizations": {
@@ -1988,6 +2923,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "New Widget"
+          }
+        }
+      }
+    },
+    "Next Episode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next Episode"
+          }
+        }
+      }
+    },
+    "Next chapter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next chapter"
           }
         }
       }
@@ -2087,6 +3044,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "No stream addons"
+          }
+        }
+      }
+    },
+    "No streams": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No streams"
           }
         }
       }
@@ -2201,6 +3169,17 @@
         }
       }
     },
+    "Nothing is playing yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is playing yet."
+          }
+        }
+      }
+    },
     "Nothing to browse": {
       "extractionState": "manual",
       "localizations": {
@@ -2256,6 +3235,17 @@
         }
       }
     },
+    "Off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        }
+      }
+    },
     "Offline IMDb ratings": {
       "extractionState": "manual",
       "localizations": {
@@ -2263,6 +3253,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Offline IMDb ratings"
+          }
+        }
+      }
+    },
+    "On": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On"
+          }
+        }
+      }
+    },
+    "On-device": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device"
           }
         }
       }
@@ -2300,6 +3312,17 @@
         }
       }
     },
+    "On-device AI summary is unavailable.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device AI summary is unavailable."
+          }
+        }
+      }
+    },
     "Only basic details are available for this title.": {
       "extractionState": "manual",
       "localizations": {
@@ -2307,6 +3330,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Only basic details are available for this title."
+          }
+        }
+      }
+    },
+    "Open IMDb episode reviews": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open IMDb episode reviews"
           }
         }
       }
@@ -2351,6 +3385,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Open title"
+          }
+        }
+      }
+    },
+    "OpenSubtitles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenSubtitles"
           }
         }
       }
@@ -2432,6 +3477,17 @@
         }
       }
     },
+    "Overall strength": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Overall strength"
+          }
+        }
+      }
+    },
     "PKCE sign-in needs no Client Secret. Enter the exact Redirect URI from your Trakt app settings. The blusion://trakt/callback URI returns directly to this app when registered. Other callbacks can be pasted below after authorization. Sign-in tokens are stored in the Keychain.": {
       "extractionState": "manual",
       "localizations": {
@@ -2476,6 +3532,17 @@
         }
       }
     },
+    "Per Element": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Per Element"
+          }
+        }
+      }
+    },
     "Picks a random episode that has aired": {
       "extractionState": "manual",
       "localizations": {
@@ -2483,6 +3550,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Picks a random episode that has aired"
+          }
+        }
+      }
+    },
+    "Picture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picture"
           }
         }
       }
@@ -2505,6 +3583,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Play"
+          }
+        }
+      }
+    },
+    "Play Animation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play Animation"
           }
         }
       }
@@ -2560,6 +3649,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Play with"
+          }
+        }
+      }
+    },
+    "Play with Infuse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play with Infuse"
           }
         }
       }
@@ -2641,6 +3741,39 @@
         }
       }
     },
+    "Pre-buffer the top stream": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pre-buffer the top stream"
+          }
+        }
+      }
+    },
+    "Prefer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prefer"
+          }
+        }
+      }
+    },
+    "Prefer SDH": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prefer SDH"
+          }
+        }
+      }
+    },
     "Preferred quality": {
       "extractionState": "manual",
       "localizations": {
@@ -2648,6 +3781,61 @@
           "stringUnit": {
             "state": "translated",
             "value": "Preferred quality"
+          }
+        }
+      }
+    },
+    "Preparing review summary on device": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing review summary on device"
+          }
+        }
+      }
+    },
+    "Preset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preset"
+          }
+        }
+      }
+    },
+    "Press and hold for stream options": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press and hold for stream options"
+          }
+        }
+      }
+    },
+    "Previous chapter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous chapter"
+          }
+        }
+      }
+    },
+    "Progress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Progress"
           }
         }
       }
@@ -2663,6 +3851,17 @@
         }
       }
     },
+    "Quality": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quality"
+          }
+        }
+      }
+    },
     "Quality is a preference, not a rule: if nothing matches, the best available stream is used. Subtitles turn on by themselves when an addon has them in your language.": {
       "extractionState": "manual",
       "localizations": {
@@ -2670,6 +3869,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Quality is a preference, not a rule: if nothing matches, the best available stream is used. Subtitles turn on by themselves when an addon has them in your language."
+          }
+        }
+      }
+    },
+    "RESULTS": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RESULTS"
           }
         }
       }
@@ -2725,6 +3935,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Redirect URI"
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
           }
         }
       }
@@ -2916,6 +4137,39 @@
         }
       }
     },
+    "Reset Appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Appearance"
+          }
+        }
+      }
+    },
+    "Reset Appearance?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Appearance?"
+          }
+        }
+      }
+    },
+    "Resets to zero": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resets to zero"
+          }
+        }
+      }
+    },
     "Resources": {
       "extractionState": "manual",
       "localizations": {
@@ -2923,6 +4177,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Resources"
+          }
+        }
+      }
+    },
+    "Restore Defaults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Defaults"
+          }
+        }
+      }
+    },
+    "Results": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Results"
           }
         }
       }
@@ -2971,6 +4247,28 @@
         }
       }
     },
+    "SEARCH": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SEARCH"
+          }
+        }
+      }
+    },
+    "Same as all corners": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Same as all corners"
+          }
+        }
+      }
+    },
     "Save": {
       "extractionState": "manual",
       "localizations": {
@@ -2982,6 +4280,17 @@
         }
       }
     },
+    "Save Address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Address"
+          }
+        }
+      }
+    },
     "Save Client ID": {
       "extractionState": "manual",
       "localizations": {
@@ -2989,6 +4298,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Save Client ID"
+          }
+        }
+      }
+    },
+    "Save Current Look Here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Current Look Here"
+          }
+        }
+      }
+    },
+    "Save Current Look…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Current Look…"
+          }
+        }
+      }
+    },
+    "Save Keys": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Keys"
+          }
+        }
+      }
+    },
+    "Save Look": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Look"
           }
         }
       }
@@ -3033,6 +4386,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Save credentials"
+          }
+        }
+      }
+    },
+    "Save power in Low Power Mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save power in Low Power Mode"
           }
         }
       }
@@ -3103,6 +4467,17 @@
         }
       }
     },
+    "Searching": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching"
+          }
+        }
+      }
+    },
     "Searching…": {
       "extractionState": "manual",
       "localizations": {
@@ -3125,6 +4500,17 @@
         }
       }
     },
+    "Sections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sections"
+          }
+        }
+      }
+    },
     "See All": {
       "extractionState": "manual",
       "localizations": {
@@ -3136,6 +4522,17 @@
         }
       }
     },
+    "Seek position": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seek position"
+          }
+        }
+      }
+    },
     "Send to Trakt": {
       "extractionState": "manual",
       "localizations": {
@@ -3143,6 +4540,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Send to Trakt"
+          }
+        }
+      }
+    },
+    "Series": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Series"
           }
         }
       }
@@ -3246,6 +4654,17 @@
         }
       }
     },
+    "Shows another part of the cast and crew": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows another part of the cast and crew"
+          }
+        }
+      }
+    },
     "Shows the widgets": {
       "extractionState": "manual",
       "localizations": {
@@ -3257,6 +4676,17 @@
         }
       }
     },
+    "Shows, Movies, and More": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows, Movies, and More"
+          }
+        }
+      }
+    },
     "Shuffle": {
       "extractionState": "manual",
       "localizations": {
@@ -3264,6 +4694,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Shuffle"
+          }
+        }
+      }
+    },
+    "Shuffle titles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shuffle titles"
+          }
+        }
+      }
+    },
+    "Shuffle widget order": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shuffle widget order"
           }
         }
       }
@@ -3367,6 +4819,17 @@
         }
       }
     },
+    "Size & Shape": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Size & Shape"
+          }
+        }
+      }
+    },
     "Size on disk": {
       "extractionState": "manual",
       "localizations": {
@@ -3374,6 +4837,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Size on disk"
+          }
+        }
+      }
+    },
+    "Skip Intro & Credits buttons": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip Intro & Credits buttons"
+          }
+        }
+      }
+    },
+    "Skip back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip back"
+          }
+        }
+      }
+    },
+    "Skip forward": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip forward"
+          }
+        }
+      }
+    },
+    "Skip intros automatically": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip intros automatically"
           }
         }
       }
@@ -3455,6 +4962,28 @@
         }
       }
     },
+    "Sources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sources"
+          }
+        }
+      }
+    },
+    "Spatial audio for TrueHD and DTS:X": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spatial audio for TrueHD and DTS:X"
+          }
+        }
+      }
+    },
     "Speed": {
       "extractionState": "manual",
       "localizations": {
@@ -3462,6 +4991,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Speed"
+          }
+        }
+      }
+    },
+    "Spoilers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spoilers"
+          }
+        }
+      }
+    },
+    "Spotlight": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spotlight"
+          }
+        }
+      }
+    },
+    "Starting speed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting speed"
           }
         }
       }
@@ -3488,6 +5050,17 @@
         }
       }
     },
+    "Stop Syncing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop Syncing"
+          }
+        }
+      }
+    },
     "Stream Details": {
       "extractionState": "manual",
       "localizations": {
@@ -3495,6 +5068,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Stream Details"
+          }
+        }
+      }
+    },
+    "Stream Selector": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stream Selector"
+          }
+        }
+      }
+    },
+    "Streaming Services": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Streaming Services"
           }
         }
       }
@@ -3521,6 +5116,28 @@
         }
       }
     },
+    "Streams": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Streams"
+          }
+        }
+      }
+    },
+    "Strength": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strength"
+          }
+        }
+      }
+    },
     "Style": {
       "extractionState": "manual",
       "localizations": {
@@ -3528,6 +5145,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Style"
+          }
+        }
+      }
+    },
+    "Subtitle Style": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitle Style"
           }
         }
       }
@@ -3543,6 +5171,50 @@
         }
       }
     },
+    "Swipe for brightness": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swipe for brightness"
+          }
+        }
+      }
+    },
+    "Swipe posters to test shelf ticks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swipe posters to test shelf ticks"
+          }
+        }
+      }
+    },
+    "Swipe to test": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Swipe to test"
+          }
+        }
+      }
+    },
+    "Switch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch"
+          }
+        }
+      }
+    },
     "Sync": {
       "extractionState": "manual",
       "localizations": {
@@ -3550,6 +5222,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sync"
+          }
+        }
+      }
+    },
+    "Sync Now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Now"
           }
         }
       }
@@ -3583,6 +5266,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "TMDB API settings"
+          }
+        }
+      }
+    },
+    "TMDB lists need a TMDB Read Access Token. Add one in Settings › Ratings, or choose another source.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TMDB lists need a TMDB Read Access Token. Add one in Settings › Ratings, or choose another source."
           }
         }
       }
@@ -3638,6 +5332,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Technical details"
+          }
+        }
+      }
+    },
+    "Test slider": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test slider"
+          }
+        }
+      }
+    },
+    "Test switch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test switch"
+          }
+        }
+      }
+    },
+    "That folder can't be used.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That folder can't be used."
           }
         }
       }
@@ -3748,6 +5475,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "To"
+          }
+        }
+      }
+    },
+    "Tone mapping": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tone mapping"
           }
         }
       }
@@ -3884,6 +5622,17 @@
         }
       }
     },
+    "Turn pages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn pages"
+          }
+        }
+      }
+    },
     "Type": {
       "extractionState": "manual",
       "localizations": {
@@ -3939,6 +5688,17 @@
         }
       }
     },
+    "Upscaling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upscaling"
+          }
+        }
+      }
+    },
     "Use Automatic Layout": {
       "extractionState": "manual",
       "localizations": {
@@ -3983,6 +5743,17 @@
         }
       }
     },
+    "Username (optional)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Username (optional)"
+          }
+        }
+      }
+    },
     "Version": {
       "extractionState": "manual",
       "localizations": {
@@ -3990,6 +5761,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Version"
+          }
+        }
+      }
+    },
+    "Video surface": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video surface"
           }
         }
       }
@@ -4023,6 +5805,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Waiting for authorization…"
+          }
+        }
+      }
+    },
+    "Waits for": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waits for"
+          }
+        }
+      }
+    },
+    "Watch Anywhere": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Watch Anywhere"
+          }
+        }
+      }
+    },
+    "Watch Credits": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Watch Credits"
           }
         }
       }
@@ -4181,6 +5996,28 @@
         }
       }
     },
+    "Zoom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom"
+          }
+        }
+      }
+    },
+    "Zoom Mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom Mode"
+          }
+        }
+      }
+    },
     "http://192.168.1.10:11470": {
       "extractionState": "manual",
       "localizations": {
@@ -4210,6 +6047,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "https://example.com/widgets.json"
+          }
+        }
+      }
+    },
+    "mpv": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mpv"
           }
         }
       }

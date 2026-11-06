@@ -41,7 +41,15 @@ public final class PlayerViewModel {
     public private(set) var audioTrackRows: [PlayerTrackRow] = []
     public private(set) var audioTrackSelectionID: String?
     public private(set) var subtitleChoice: SubtitleChoice = .off
-    public private(set) var subtitleStatus: String?
+    /// The line under the subtitle menu: a choice under way, or what stopped the last one.
+    public var subtitleStatus: String? {
+        switch subtitleActivity {
+        case .idle: nil
+        case .loading: "Loading subtitles…"
+        case .switchingPlayer: "Switching to the advanced player for picture subtitles…"
+        case .failed(let message): message
+        }
+    }
     /// Positive delays the subtitles. Applies to whichever draws them: the app's overlay, or the engine for its own tracks and files.
     public private(set) var subtitleOffset: TimeInterval = 0
     public private(set) var controlsVisible = true
@@ -53,7 +61,10 @@ public final class PlayerViewModel {
     public private(set) var settings = PlaybackSettings()
     public private(set) var hasFinished = false
     /// A styled (ASS) file the overlay draws simplified; the advanced player would draw its effects.
-    public private(set) var hasSimplifiedStyling = false
+    public var hasSimplifiedStyling: Bool {
+        if case .overlay(_, _, let simplified) = drawing { return simplified }
+        return false
+    }
     public private(set) var openSubtitlesResults: [OpenSubtitlesResult] = []
     public private(set) var openSubtitlesStatus: String?
     public private(set) var isSearchingOpenSubtitles = false
@@ -62,39 +73,74 @@ public final class PlayerViewModel {
     /// The session store this player keeps current: the app's one, or a test's memory.
     private let snapshotStore: any PlaybackSnapshotStore
     private let now: @Sendable () -> Date
-    private var timeline: SubtitleTimeline?
-    private var bitmapTimeline: BitmapSubtitleTimeline?
+    /// Who draws the chosen subtitle file: the engine (loaded into it), or the app's overlay from the cues it loaded. None for Off, an
+    /// embedded track (the engine's own) and a file still loading for the first time.
+    private enum SubtitleDrawing {
+        case none
+        case engine(optionID: String)
+        /// `simplified`: a styled (ASS) file drawn without its effects, which the advanced player would draw.
+        case overlay(text: SubtitleTimeline?, bitmap: BitmapSubtitleTimeline?, simplified: Bool)
+    }
+    private var drawing = SubtitleDrawing.none
+    private var engineDrawsFile: Bool {
+        if case .engine = drawing { return true }
+        return false
+    }
+    /// A subtitle choice under way, or what stopped the last one.
+    private enum SubtitleActivity: Equatable {
+        case idle
+        /// A file loading for the overlay: presses during it, and a repeat of the same default, see this choice as made.
+        case loading(SubtitleChoice)
+        /// Picture subtitles the overlay cannot draw: the stream is reopening in the advanced player, which draws them.
+        case switchingPlayer
+        case failed(String)
+    }
+    private var subtitleActivity = SubtitleActivity.idle
+    /// The subtitle choice a load in flight is working towards.
+    private var pendingChoice: SubtitleChoice? {
+        if case .loading(let choice) = subtitleActivity { return choice }
+        return nil
+    }
     /// Written on every pointer move over the Mac player and read only by the idle timer, so it is kept out of observation.
     @ObservationIgnored private var lastInteraction: Date
     private var userChoseSubtitle = false
     private var userChoseAudio = false
     /// The choice the defaults made, while the listener has not made one: a better default (an embedded track) may still replace it.
     private var automaticChoice: SubtitleChoice?
-    /// The external option the engine draws (loaded into it), rather than the overlay.
-    private var engineDrawnOptionID: String?
+    /// Goes up with each choice, so a load that returns after a newer choice is dropped.
     private var subtitleGeneration = 0
-    /// The subtitle choice a load in flight is working towards, so presses during it, and a repeat of the same default, see it as chosen.
-    private var pendingChoice: SubtitleChoice?
     private var subtitleTask: Task<Void, Never>?
     private var lookupTasks: [Task<Void, Never>] = []
     private var lookedUpCandidates: Set<String> = []
     private var skippedMarkers: Set<SkipMarker> = []
     private var temporaryFiles: [URL] = []
     private var saveTask: Task<Void, Never>?
+    /// Where the session stands, from its start to its close.
+    private enum Lifecycle: Equatable {
+        /// Nothing begun.
+        case idle
+        /// Loading its settings and saved progress before it makes its player: for the screen at once (`start`), or to hold until
+        /// the screen shows (`prepare`).
+        case beginning(holding: Bool)
+        /// Readied by `prepare`: muted, paused on its first frame, and saving no progress until its screen shows.
+        case held
+        /// Playing, or paused, for the viewer.
+        case live
+        /// Closed by `close`: a start still loading its settings then makes no player, and a screen rejoining its session never gets
+        /// a closed one (`LivePlaybackSession.session(for:)`).
+        case closed
+    }
+    private var lifecycle = Lifecycle.idle
     /// The start made by `prepare`, so `start` (the screen appearing) waits for it instead of starting again.
     private var preparation: Task<Void, Never>?
-    /// True while a prepared player holds: muted, paused on its first frame, and saving no progress until its screen shows.
-    private var isHeld = false
     private var progressSession: ProgressSession?
-    /// Set by `close`: a start still loading its settings then makes no player, and a screen rejoining its session never gets a
-    /// closed one (`LivePlaybackSession.session(for:)`).
-    public private(set) var isClosed = false
-    /// A session being walked back into: its position, pause, track choices and picture, taken over as the engine comes up.
+    public var isClosed: Bool { lifecycle == .closed }
+    /// A session being walked back into: its position, pause, track choices and picture, taken over as the engine comes up. Its
+    /// track choices are applied once the engine lists its tracks; it is cleared then, so a later track list never overrides a fresh
+    /// choice.
     private var pendingResume: PlaybackSnapshot?
     /// The session was left paused: the screen showing does not start it again.
     private var resumeWasPaused = false
-    /// The restored track choices have been applied (or there were none), so a later track list never overrides a fresh choice.
-    private var restoredChoicesApplied = false
     /// When the snapshot was last refreshed, so playback writes it every few seconds rather than every tick.
     private var lastSnapshotRefresh: Date?
 
@@ -119,7 +165,8 @@ public final class PlayerViewModel {
             return
         }
         // Already running: a screen rejoining its session (a rebuild while the app was away, or a second start) does not begin again.
-        guard coordinator == nil else { return }
+        guard lifecycle == .idle else { return }
+        lifecycle = .beginning(holding: false)
         await begin(holding: false)
     }
 
@@ -132,6 +179,9 @@ public final class PlayerViewModel {
             await preparation.value
             return
         }
+        // A start already under way for the screen is not readied a second time.
+        guard lifecycle == .idle else { return }
+        lifecycle = .beginning(holding: true)
         let task = Task { [weak self] in
             guard let self else { return }
             await self.begin(holding: true)
@@ -171,7 +221,11 @@ public final class PlayerViewModel {
                 try? await snapshotStore.save(snapshot)
             }
         }
-        guard !isClosed, !Task.isCancelled else { return }
+        guard !isClosed, !Task.isCancelled else {
+            // A start called off before it made a player (its screen went) leaves the next start free to begin again.
+            if case .beginning = lifecycle { lifecycle = .idle }
+            return
+        }
         // The saved session knows where the viewer actually was, past what the progress store had flushed; progress still resumes a
         // session whose snapshot was at its start.
         var resume = ProgressRecorder.resumePosition(for: previous)
@@ -200,32 +254,30 @@ public final class PlayerViewModel {
         coordinator.onEngineChange = { [weak self] in self?.engineChanged() }
         coordinator.onTracksChange = { [weak self] in self?.tracksChanged() }
         self.coordinator = coordinator
-        if holding {
-            isHeld = true
-            // Muted before the first engine is made, so the start makes no sound while the screen is not up.
-            coordinator.setMuted(true)
-        }
+        lifecycle = holding ? .held : .live
+        // Muted before the first engine is made, so the start makes no sound while the screen is not up.
+        if holding { coordinator.setMuted(true) }
         startSubtitles()
         await coordinator.start()
         // A restored session takes its track choices over once the engine lists them.
         restoreChoicesIfPossible()
         // Ready: it waits, paused on its first frame, for the screen.
-        if isHeld, coordinator.phase == .playing { coordinator.pause() }
+        if lifecycle == .held, coordinator.phase == .playing { coordinator.pause() }
         // A session left paused stays paused when its screen shows.
         else if resumeWasPaused, coordinator.phase == .playing { coordinator.pause() }
     }
 
     /// The screen is up: a held player saves progress, gets its sound back and plays, unless the session was left paused.
     private func releaseHold() {
-        guard isHeld, let coordinator else { return }
-        isHeld = false
+        guard lifecycle == .held, let coordinator else { return }
+        lifecycle = .live
         progressSession?.isRecording = true
         coordinator.setMuted(false)
         if coordinator.phase == .playing, !resumeWasPaused { coordinator.play() }
     }
 
     public func close() async {
-        isClosed = true
+        lifecycle = .closed
         preparation?.cancel()
         // Closing ends any hold without a further engine call: the engine is being stopped.
         heldSpeed = nil
@@ -243,7 +295,7 @@ public final class PlayerViewModel {
 
     /// True once a session exists and has not been closed: the app-level holder keeps such a session alive across its screen's
     /// appearances and disappearances (including backgrounding), and hands it back to a screen that reopens the same plan.
-    public var isSessionLive: Bool { coordinator != nil && !isClosed }
+    public var isSessionLive: Bool { lifecycle == .held || lifecycle == .live }
 
     // MARK: The previous session
 
@@ -252,7 +304,6 @@ public final class PlayerViewModel {
     public func resumePlayback(from snapshot: PlaybackSnapshot) {
         pendingResume = snapshot
         resumeWasPaused = snapshot.wasPaused
-        restoredChoicesApplied = false
         guard hasStartedPlayback else { return }
         applyRestoredPicture(snapshot)
         if snapshot.position > 0 { Task { await seek(to: snapshot.position) } }
@@ -272,7 +323,7 @@ public final class PlayerViewModel {
     /// A pause, a seek or the app leaving the front refreshes it at once (`force`). A prepared player has not started for the viewer
     /// yet, and a closed one has no session.
     public func recordSessionSnapshot(force: Bool = false) async {
-        guard isSessionLive, !isHeld, hasStartedPlayback else { return }
+        guard lifecycle == .live, hasStartedPlayback else { return }
         let current = now()
         if !force, let last = lastSnapshotRefresh, current.timeIntervalSince(last) < Self.snapshotRefreshInterval { return }
         lastSnapshotRefresh = current
@@ -319,7 +370,7 @@ public final class PlayerViewModel {
     /// Applies the restored audio and subtitle choices once their lists exist. A list that is still empty keeps the choice waiting,
     /// so a track that arrives a moment later is still taken over; a fresh choice made meanwhile wins.
     private func restoreChoicesIfPossible() {
-        guard let restored = pendingResume, !restoredChoicesApplied, hasStartedPlayback else { return }
+        guard let restored = pendingResume, hasStartedPlayback else { return }
         var applied = true
         if let pick = restored.audioTrack {
             if let track = Self.track(pick, in: state.audioTracks) {
@@ -347,10 +398,7 @@ public final class PlayerViewModel {
                 applied = false
             }
         }
-        if applied {
-            restoredChoicesApplied = true
-            pendingResume = nil
-        }
+        if applied { pendingResume = nil }
     }
 
     /// A saved track against a fresh engine's own: its name and language, then its language and flags, then its name alone. A fresh
@@ -816,20 +864,20 @@ public final class PlayerViewModel {
 
     /// The line to draw, or nil. Reads the engine clock through `state.position`, so it updates with playback.
     public var cueText: String? {
-        guard case .external = subtitleChoice, engineDrawnOptionID == nil else { return nil }
-        return timeline?.text(at: state.position, offset: subtitleOffset)
+        guard case .external = subtitleChoice, case .overlay(let text, _, _) = drawing else { return nil }
+        return text?.text(at: state.position, offset: subtitleOffset)
     }
 
     /// The styled cues to draw now (empty when the engine draws them, or for picture subtitles).
     public var activeCues: [SubtitleCue] {
-        guard case .external = subtitleChoice, engineDrawnOptionID == nil else { return [] }
-        return timeline?.cues(at: state.position, offset: subtitleOffset) ?? []
+        guard case .external = subtitleChoice, case .overlay(let text, _, _) = drawing else { return [] }
+        return text?.cues(at: state.position, offset: subtitleOffset) ?? []
     }
 
     /// The picture subtitle (PGS) to draw now.
     public var activeBitmapCue: BitmapSubtitleCue? {
-        guard case .external = subtitleChoice, engineDrawnOptionID == nil else { return nil }
-        return bitmapTimeline?.cue(at: state.position, offset: subtitleOffset)
+        guard case .external = subtitleChoice, case .overlay(_, let bitmap, _) = drawing else { return nil }
+        return bitmap?.cue(at: state.position, offset: subtitleOffset)
     }
 
     /// Whether timing can be shifted for the current choice: the overlay always can; the engine only for what it draws.
@@ -837,7 +885,7 @@ public final class PlayerViewModel {
         switch subtitleChoice {
         case .off: return false
         case .embedded: return capabilities.contains(.subtitleDelay)
-        case .external: return engineDrawnOptionID == nil || capabilities.contains(.subtitleDelay)
+        case .external: return !engineDrawsFile || capabilities.contains(.subtitleDelay)
         }
     }
 
@@ -879,7 +927,7 @@ public final class PlayerViewModel {
     /// A subtitle file the user opened (SRT, VTT, ASS/SSA, SUP). It joins the list and is selected.
     public func loadSubtitleFile(at url: URL) async {
         guard let copy = copyIn(url) else {
-            subtitleStatus = "Couldn't open that file."
+            subtitleActivity = .failed("Couldn't open that file.")
             return
         }
         let name = url.lastPathComponent
@@ -896,7 +944,7 @@ public final class PlayerViewModel {
         guard capabilities.contains(.subtitleDelay) else { return }
         let engineDraws: Bool = switch subtitleChoice {
         case .embedded: true
-        case .external: engineDrawnOptionID != nil
+        case .external: engineDrawsFile
         case .off: false
         }
         let delay = engineDraws ? subtitleOffset : 0
@@ -909,84 +957,73 @@ public final class PlayerViewModel {
         // Each choice supersedes a subtitle load still in flight, so a load that returns late is dropped instead of overwriting the choice made since.
         subtitleGeneration += 1
         let generation = subtitleGeneration
-        pendingChoice = nil
-        hasSimplifiedStyling = false
+        subtitleActivity = .idle
         switch choice {
         case .off:
             clearOverlay()
             coordinator?.selectEmbeddedSubtitleTrack(id: nil)
-            subtitleStatus = nil
             subtitleChoice = .off
             syncEngineSubtitleDelay()
         case .embedded(let id):
             clearOverlay()
             coordinator?.selectEmbeddedSubtitleTrack(id: id)
-            subtitleStatus = nil
             subtitleChoice = .embedded(id)
             syncEngineSubtitleDelay()
         case .external(let id):
             guard let option = subtitleOptions.first(where: { $0.id == id }) else { return }
             // An engine that draws subtitle files draws them all: full ASS styling, pictures, its HDR brightness and its timing.
             if capabilities.contains(.engineSubtitles) {
-                clearOverlay()
-                engineDrawnOptionID = id
+                drawing = .engine(optionID: id)
                 coordinator?.addEngineSubtitle(engineSubtitle(for: option))
-                subtitleStatus = nil
                 subtitleChoice = .external(id)
                 syncEngineSubtitleDelay()
                 return
             }
-            pendingChoice = choice
+            // What the overlay draws now stays up until the new file has loaded.
+            subtitleActivity = .loading(choice)
             coordinator?.selectEmbeddedSubtitleTrack(id: nil)
-            subtitleStatus = "Loading subtitles…"
             do {
                 let loaded = try await loadOverlay(option)
                 guard generation == subtitleGeneration else { return }
-                pendingChoice = nil
+                subtitleActivity = .idle
                 guard !Task.isCancelled else { return }
                 // The engine that started while this loaded draws files itself: it gets the file instead.
                 if capabilities.contains(.engineSubtitles) {
                     await apply(choice)
                     return
                 }
-                engineDrawnOptionID = nil
-                timeline = loaded.text
-                bitmapTimeline = loaded.bitmap
-                hasSimplifiedStyling = loaded.simplified && plan.retriesInFallbackEngine
-                subtitleStatus = nil
+                drawing = .overlay(text: loaded.text, bitmap: loaded.bitmap,
+                                   simplified: loaded.simplified && plan.retriesInFallbackEngine)
                 subtitleChoice = .external(id)
                 syncEngineSubtitleDelay()
             } catch {
                 guard generation == subtitleGeneration else { return }
-                pendingChoice = nil
                 clearOverlay()
                 if case SubtitleError.bitmap = error, plan.retriesInFallbackEngine {
                     // VobSub has no decoder in the app: the advanced player draws it, from where the stream is now.
-                    subtitleStatus = "Switching to the advanced player for picture subtitles…"
+                    subtitleActivity = .switchingPlayer
                     subtitleChoice = .external(id)
-                    engineDrawnOptionID = id
+                    drawing = .engine(optionID: id)
                     await coordinator?.reopenInFallbackEngine()
                     guard generation == subtitleGeneration else { return }   // another choice was made during the reopen
                     if capabilities.contains(.engineSubtitles) {
                         coordinator?.addEngineSubtitle(engineSubtitle(for: option))
-                        subtitleStatus = nil
+                        subtitleActivity = .idle
                     } else {
-                        engineDrawnOptionID = nil
-                        subtitleStatus = "Couldn't show these subtitles."
+                        drawing = .none
+                        subtitleActivity = .failed("Couldn't show these subtitles.")
                         subtitleChoice = .off
                     }
                     return
                 }
-                subtitleStatus = (error as? SubtitleError).map(Self.message) ?? "Couldn't load these subtitles."
+                subtitleActivity = .failed((error as? SubtitleError).map(Self.message) ?? "Couldn't load these subtitles.")
                 subtitleChoice = .off
             }
         }
     }
 
     private func clearOverlay() {
-        timeline = nil
-        bitmapTimeline = nil
-        engineDrawnOptionID = nil
+        drawing = .none
     }
 
     private static func message(_ error: SubtitleError) -> String {
@@ -1057,11 +1094,11 @@ public final class PlayerViewModel {
         endHeldSpeed()
         guard case .external(let id) = subtitleChoice else { return }
         let engineDraws = capabilities.contains(.engineSubtitles)
-        if (engineDrawnOptionID != nil) != engineDraws {
+        if engineDrawsFile != engineDraws {
             let choice = subtitleChoice
             Task { [weak self] in await self?.apply(choice) }
         } else if engineDraws {
-            engineDrawnOptionID = id
+            drawing = .engine(optionID: id)
         }
     }
 

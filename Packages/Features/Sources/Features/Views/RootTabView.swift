@@ -5,11 +5,11 @@ import StremioKit
 
 /// The Settings pages, in the order of its list: pushed on iPhone, shown beside the list on Mac.
 enum SettingsDestination: Hashable {
-    case addons, addonSpeed, widgets
-    case playback, player, appearance, lazyLoad, haptics
-    case reviews, imdb
-    case trakt, continueRefresh, server, fallback
-    case downloads, imageCache, syncFolder, data
+    case addons, server
+    case streams, player, downloads
+    case appearance, widgets, haptics
+    case trakt, ratings, syncFolder
+    case performance, data
     case about
 }
 
@@ -28,6 +28,8 @@ public final class AppRouter {
     var searchFocusRevision = 0
     /// Counts the titles opened from Search, so the Search screen reads its recent searches again.
     var recentSearchRevision = 0
+    /// True while the editorial Search shows its results, which are laid on the accent: the editorial pill bar fills to match.
+    var showsAccentPage = false
     /// Untyped, because screens inside Settings push values of their own (an addon's id, a widget).
     var settingsPath = NavigationPath()
     /// The page Mac Settings shows beside its list. `settingsPath` holds what that page pushes.
@@ -365,6 +367,7 @@ struct MacPageNavigation: View {
     #if targetEnvironment(macCatalyst)
     @Environment(AppRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appAppearance.hover) private var hover
     @State private var hoveredSegment: Int?
     #endif
 
@@ -388,15 +391,15 @@ struct MacPageNavigation: View {
             .overlay {
                 if let hoveredSegment {
                     Capsule()
-                        .fill(.white.opacity(0.16))
-                        .overlay { Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 1) }
+                        .fill(.white.opacity(hover.segmentFillOpacity))
+                        .overlay { Capsule().strokeBorder(.white.opacity(hover.segmentRimOpacity), lineWidth: 1) }
                         .frame(width: max(0, segmentWidth - 4), height: Self.controlHeight - 4)
                         .position(x: segmentWidth * (CGFloat(hoveredSegment) + 0.5), y: geometry.size.height / 2)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hoveredSegment)
+            .animation(hover.animation(0.15, reduceMotion: reduceMotion), value: hoveredSegment)
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
@@ -412,6 +415,15 @@ struct MacPageNavigation: View {
         }
         .frame(maxWidth: Self.maxWidth)
         .frame(height: Self.controlHeight)
+        // A soft shadow under the control, so it stands out from whatever the page shows behind it.
+        .background {
+            Capsule()
+                .fill(.black.opacity(0.45))
+                .blur(radius: 10)
+                .offset(y: 3)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .padding(Self.inset)
         .frame(maxWidth: .infinity)
         #else
@@ -443,31 +455,82 @@ extension View {
     }
 
     func pageTabBar(hidden: Bool) -> some View {
+        modifier(PageTabBarModifier(hidden: hidden))
+    }
+}
+
+/// The tab bar on a page: hidden where the page asks, and on every page while the editorial pill bar stands in for it.
+private struct PageTabBarModifier: ViewModifier {
+    let hidden: Bool
+    @Environment(\.usesEditorialTabBar) private var usesEditorialTabBar
+
+    func body(content: Content) -> some View {
         #if targetEnvironment(macCatalyst)
-        toolbar(.hidden, for: .tabBar)
+        content
+            .toolbar(.hidden, for: .tabBar)
             .toolbarBackgroundVisibility(.hidden, for: .tabBar)
         #else
-        toolbar(hidden ? .hidden : .automatic, for: .tabBar)
+        content.toolbar(hidden || usesEditorialTabBar ? .hidden : .automatic, for: .tabBar)
         #endif
     }
 }
 
 #if targetEnvironment(macCatalyst)
+/// Whether the Mac's navigation is showing. Scrolling a page down hides it and scrolling up brings it straight back, on every page; at the
+/// top of a page it always shows. Each scrolling page reports its own offset, so two side by side (Settings' list and page) do not mix.
 @MainActor
 @Observable
 final class MacNavigationScrollState {
-    var offset: CGFloat = 0
+    private(set) var isHidden = false
+    @ObservationIgnored private var lastOffsets: [UUID: CGFloat] = [:]
+    /// How far the page has scrolled in its current direction.
+    @ObservationIgnored private var travel: CGFloat = 0
+    /// How far a scroll runs one way before the navigation follows it, so a trackpad's small wobbles do not flick it.
+    private static let threshold: CGFloat = 12
+
+    func update(offset: CGFloat, maxOffset: CGFloat, from page: UUID) {
+        let previous = lastOffsets[page] ?? offset
+        lastOffsets[page] = offset
+        guard offset > MacPageNavigation.height else {
+            travel = 0
+            setHidden(false)
+            return
+        }
+        // The bounce past the page's end moves back up by itself, which is no scroll up.
+        guard offset <= maxOffset else { return }
+        let delta = offset - previous
+        guard delta != 0 else { return }
+        if (delta > 0) != (travel > 0) { travel = 0 }
+        travel += delta
+        if travel > Self.threshold { setHidden(true) } else if travel < -Self.threshold { setHidden(false) }
+    }
+
+    /// A page has come on screen: the navigation shows on it.
+    func show() {
+        travel = 0
+        setHidden(false)
+    }
+
+    func forget(_ page: UUID) { lastOffsets[page] = nil }
+
+    private func setHidden(_ hidden: Bool) {
+        if isHidden != hidden { isHidden = hidden }
+    }
 }
 
 private struct MacPageNavigationOverlay: View {
     @Environment(MacNavigationScrollState.self) private var scroll
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         MacPageNavigation()
-            .offset(y: -scroll.offset)
+            // Slides up out of the window, or fades with Reduce Motion.
+            .offset(y: scroll.isHidden && !reduceMotion ? -MacPageNavigation.height : 0)
+            .opacity(scroll.isHidden && reduceMotion ? 0 : 1)
+            .animation(reduceMotion ? .easeOut(duration: 0.2) : .smooth(duration: 0.3), value: scroll.isHidden)
             .frame(height: MacPageNavigation.height, alignment: .top)
             .clipped()
-            .allowsHitTesting(scroll.offset < MacPageNavigation.height)
+            .allowsHitTesting(!scroll.isHidden)
     }
 }
 
@@ -497,23 +560,33 @@ private struct MacBackNavigation: ViewModifier {
 private struct MacPageScroll: ViewModifier {
     let reservesNavigationSpace: Bool
     @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
-    @State private var offset: CGFloat = 0
+    /// This page's place in the navigation's scroll tracking.
+    @State private var scrollID = UUID()
     @State private var isVisible = false
+
+    private struct Position: Equatable {
+        let offset: CGFloat
+        let maxOffset: CGFloat
+    }
 
     func body(content: Content) -> some View {
         content
             .contentMargins(.top, reservesNavigationSpace ? MacPageNavigation.height : 0, for: .scrollContent)
-            .onScrollGeometryChange(for: CGFloat.self) {
-                min(MacPageNavigation.height, max(0, $0.contentOffset.y + $0.contentInsets.top))
-            } action: { _, value in
-                offset = value
-                if isVisible { navigation?.offset = value }
+            .onScrollGeometryChange(for: Position.self) {
+                let insets = $0.contentInsets.top + $0.contentInsets.bottom
+                return Position(offset: max(0, $0.contentOffset.y + $0.contentInsets.top),
+                                maxOffset: $0.contentSize.height + insets - $0.containerSize.height)
+            } action: { _, position in
+                if isVisible { navigation?.update(offset: position.offset, maxOffset: position.maxOffset, from: scrollID) }
             }
             .onAppear {
                 isVisible = true
-                navigation?.offset = offset
+                navigation?.show()
             }
-            .onDisappear { isVisible = false }
+            .onDisappear {
+                isVisible = false
+                navigation?.forget(scrollID)
+            }
     }
 }
 #endif
@@ -609,7 +682,7 @@ private struct LandscapeTabControls: View {
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(router.tab == .home ? appearance.selectionColour : .white)
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .buttonSurface(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             }
             .buttonStyle(.hoverPlain)
@@ -706,6 +779,9 @@ public struct RootTabView: View {
         case .settings, .widgets: return false
         }
     }
+    /// The editorial pages' pill bar stands in for the tab bar on a phone held upright (see `EditorialTabBar`); a phone turned sideways
+    /// keeps its landscape controls.
+    private var usesEditorialTabBar: Bool { appearance.showsEditorialPages && !isPhoneInLandscape }
     /// Phones show each tab's icon alone (see `tabItem`) unless Appearance names them. The iPad and the Mac keep the titles, as their
     /// sidebar rows need them.
     private var showsTabTitles: Bool { UIDevice.current.userInterfaceIdiom != .phone || appearance.phoneTabTitles }
@@ -830,8 +906,16 @@ public struct RootTabView: View {
         .pageTopBar(hidden: isPhoneLandscape)
         .tabBarMinimizeBehavior(Self.isMacCatalyst || isPhoneInLandscape || !appearance.minimisesTabBar ? .never : .onScrollDown)
         .pageTabBar(hidden: isPhoneInLandscape)
+        // The native Continue Watching bar goes with the native tab bar.
         .modifier(ResumeAccessoryModifier(model: resume, hidden: router.showsTitlePage || !appearance.showsContinueBar,
-                                          isPhoneLandscape: isPhoneInLandscape))
+                                          isPhoneLandscape: isPhoneInLandscape || usesEditorialTabBar))
+        // The editorial pill bar, below every page but a title's, which has the whole screen as it does without it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if usesEditorialTabBar && !router.showsTitlePage {
+                EditorialTabBar(router: router,
+                                onAccent: router.tab == .search && router.searchPath.isEmpty && router.showsAccentPage)
+            }
+        }
         // The native bar stays hidden for *all* landscape scroll states. Replacing it mid-scroll
         // changes safe-area geometry and is what made the old detached Home button jump.
         .overlay(alignment: .bottom) {
@@ -850,7 +934,7 @@ public struct RootTabView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 21, weight: .medium))
                             .frame(width: 44, height: 44)
-                            .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                            .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                             .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     }
                     .buttonStyle(.hoverPlain)
@@ -881,7 +965,7 @@ public struct RootTabView: View {
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                         .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 }
                 .buttonStyle(.hoverPlain)
@@ -971,6 +1055,7 @@ public struct RootTabView: View {
         .environment(titleActions)
         .environment(\.isLandscape, isLandscape)
         .environment(\.isPhoneLandscape, isPhoneLandscape)
+        .environment(\.usesEditorialTabBar, usesEditorialTabBar)
         .environment(\.windowSafeArea, windowSafeArea)
         .onGeometryChange(for: Bool.self) { $0.size.width > $0.size.height } action: { isLandscape = $0 }
         // The full screen width (this sits inside the edge-to-edge line below), for the landscape buttons' side gap.
@@ -989,14 +1074,11 @@ public struct RootTabView: View {
     /// A tab's item. On a phone the tab bar shows the icon alone, and the title stays the item's accessibility label, which the UI tests
     /// find by. The sidebar shows the title beside the icon.
     private func tabItem(_ title: LocalizedStringKey, _ symbol: String) -> some View {
-        Group {
-            if showsTabTitles {
-                Label { Text(title) } icon: { Image(systemName: symbol) }
-            } else {
-                Image(systemName: symbol).accessibilityLabel(title)
-            }
-        }
-        .environment(\.symbolVariants, .none)
+        // Always a label, its title empty while hidden: the tab bar updates a title it is given, but keeps one it has once shown when the
+        // label turns into an icon alone.
+        Label { Text(showsTabTitles ? title : "") } icon: { Image(systemName: symbol) }
+            .accessibilityLabel(Text(title))
+            .environment(\.symbolVariants, .none)
     }
 
     private func refreshUserState() async {
@@ -1007,6 +1089,7 @@ public struct RootTabView: View {
         services.posterRatings.isEnabled = settings.showsPosterRatings
         services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
         services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
+        services.posterRatings.markPlacement = settings.posterMarkPlacement
         // Trakt may hold newer saved titles and watched marks, from the other device or from the web. Whatever it changed here is read
         // again, and Home is told.
         if let summary = try? await services.traktSync.sync(), summary.changedLocalData {

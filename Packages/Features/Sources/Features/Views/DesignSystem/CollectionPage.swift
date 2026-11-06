@@ -36,7 +36,7 @@ struct CollectionPage: UIViewRepresentable {
     /// True while the page scrolls, false once it has settled.
     var onScrollingChange: ((Bool) -> Void)? = nil
     /// The page's scroll position below its top inset, for the navigation bar's fade.
-    var onScrollOffset: ((CGFloat) -> Void)? = nil
+    var onScrollOffset: ((_ offset: CGFloat, _ maxOffset: CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -266,7 +266,8 @@ struct CollectionPage: UIViewRepresentable {
             let offset = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
             guard offset != lastOffset else { return }
             lastOffset = offset
-            report(offset)
+            let insets = scrollView.adjustedContentInset
+            report(offset, scrollView.contentSize.height + insets.top + insets.bottom - scrollView.bounds.height)
         }
 
         func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool { false }
@@ -293,6 +294,9 @@ struct MacGridPage: View {
     enum Part {
         case full(id: String, view: AnyView, spacingAfter: CGFloat = 0)
         case grid(MacTitleGrid)
+        /// Blank cards while a grid's first titles load, laid out by the page exactly as the grid of `aspect` will be: the same columns,
+        /// card width and height, and gaps, so each title lands where its placeholder stood.
+        case placeholders(id: String, aspect: CardAspect = .poster, fillsWidth: Bool = true, count: Int = 18)
     }
 
     let parts: [Part]
@@ -302,16 +306,18 @@ struct MacGridPage: View {
     @State private var visible = CollectionVisibleRanges()
     @State private var zoomScope = UUID().uuidString
     @Environment(MacNavigationScrollState.self) private var navigation: MacNavigationScrollState?
+    /// This page's place in the navigation's scroll tracking (see `MacNavigationScrollState`).
+    @State private var scrollID = UUID()
 
     var body: some View {
         CollectionPage(blocks: blocks, topInset: MacPageNavigation.height, bottomInset: Theme.Spacing.l, scrollToTop: scrollToTop,
-                       onScrollOffset: { [navigation] offset in
-                           let value = min(MacPageNavigation.height, max(0, offset))
-                           if navigation?.offset != value { navigation?.offset = value }
+                       onScrollOffset: { [navigation, scrollID] offset, maxOffset in
+                           navigation?.update(offset: offset, maxOffset: maxOffset, from: scrollID)
                        })
             .environment(\.zoomScope, zoomScope)
             .background { MacGridLookahead(grids: grids, visible: visible) }
-            .onAppear { navigation?.offset = 0 }
+            .onAppear { navigation?.show() }
+            .onDisappear { navigation?.forget(scrollID) }
     }
 
     private var grids: [MacTitleGrid] {
@@ -330,6 +336,13 @@ struct MacGridPage: View {
                                                                 cell: { index in grid.card(index, items[index]) }),
                                        spacingAfter: grid.spacingAfter,
                                        onVisibleRange: { visible.set($0, for: grid.id) })
+            case .placeholders(let id, let aspect, let fillsWidth, let count):
+                return CollectionBlock(id: id, kind: .grid(ids: (0..<max(count, 0)).map { "placeholder\($0)" }, aspect: aspect,
+                                                           fillsWidth: fillsWidth, cell: { _ in
+                    AnyView(CardPlaceholder(aspect: aspect, fill: AnyShapeStyle(.quaternary)).stretched()
+                        .shimmering()
+                        .accessibilityLabel("Loading"))
+                }))
             }
         }
     }
@@ -360,7 +373,7 @@ private struct MacGridLookahead: View {
             .accessibilityHidden(true)
     }
 
-    private var titles: Int { LazyLoadLookahead.titles(atLevel: lookaheadLevel) }
+    private var titles: Int { LazyLoadLookahead.activeTitles(atLevel: lookaheadLevel) }
 
     private var bufferedShelves: [ArtworkShelf] {
         grids.compactMap { grid in

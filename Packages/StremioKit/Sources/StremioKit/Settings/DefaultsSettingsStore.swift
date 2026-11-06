@@ -7,6 +7,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         public static let downloadsAllowCellular = "settings.downloadsAllowCellular"
         public static let downloadsDeleteWhenWatched = "settings.downloadsDeleteWhenWatched"
         public static let preferredResolution = "settings.preferredResolution"
+        public static let dataSaver = "settings.dataSaver"
         public static let subtitleLanguage = "settings.subtitleLanguage"
         public static let fallbackEngineEnabled = "settings.fallbackEngineEnabled"
         public static let playerPreference = "settings.playerPreference"
@@ -14,6 +15,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         public static let showsColouredRatingLogos = "settings.showsColouredRatingLogos"
         public static let usesHeroPosters = "settings.usesHeroPosters"
         public static let showsBestDiscOnPosters = "settings.showsBestDiscOnPosters"
+        public static let posterMarkPlacement = "settings.posterBrandLocation"
         public static let matchesEpisodeWidthToText = "settings.matchesEpisodeWidthToText"
         public static let autoPlayBestStream = "settings.autoPlayBestStream"
         public static let autoPickWait = "settings.autoPickWait"
@@ -83,14 +85,17 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 openSubtitlesPassword: openSubtitlesPassword,
                                 haptics: HapticPreferences.saved(in: defaults))
         result.downloadsAllowCellular = defaults.bool(forKey: Keys.downloadsAllowCellular)
+        result.dataSaver = defaults.bool(forKey: Keys.dataSaver)
         result.usesHeroPosters = defaults.bool(forKey: Keys.usesHeroPosters)
         result.showsBestDiscOnPosters = defaults.bool(forKey: Keys.showsBestDiscOnPosters)
+        result.posterMarkPlacement = defaults.string(forKey: Keys.posterMarkPlacement).flatMap(PosterMarkPlacement.init(rawValue:)) ?? .topTrailing
         result.downloadsDeleteWhenWatched = defaults.bool(forKey: Keys.downloadsDeleteWhenWatched)
         return result
     }
 
     public func save(_ settings: PlaybackSettings) async {
         defaults.set(settings.downloadsAllowCellular, forKey: Keys.downloadsAllowCellular)
+        defaults.set(settings.dataSaver, forKey: Keys.dataSaver)
         defaults.set(settings.downloadsDeleteWhenWatched, forKey: Keys.downloadsDeleteWhenWatched)
         if let resolution = settings.preferredResolution, resolution > 0 {
             defaults.set(resolution, forKey: Keys.preferredResolution)
@@ -108,6 +113,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         defaults.set(settings.showsColouredRatingLogos, forKey: Keys.showsColouredRatingLogos)
         defaults.set(settings.usesHeroPosters, forKey: Keys.usesHeroPosters)
         defaults.set(settings.showsBestDiscOnPosters, forKey: Keys.showsBestDiscOnPosters)
+        defaults.set(settings.posterMarkPlacement.rawValue, forKey: Keys.posterMarkPlacement)
         defaults.set(settings.matchesEpisodeWidthToText, forKey: Keys.matchesEpisodeWidthToText)
         defaults.set(settings.autoPlayBestStream, forKey: Keys.autoPlayBestStream)
         defaults.set(settings.autoPickWait.storedValue, forKey: Keys.autoPickWait)

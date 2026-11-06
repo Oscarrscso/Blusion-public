@@ -111,7 +111,7 @@ struct HeroCarousel: View {
                 .font(.title2.weight(.semibold))
                 .frame(width: 48, height: 48)
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .glassEffect(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .buttonSurface(.regular, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.hoverPlain)
         .disabled(!enabled)
@@ -365,8 +365,10 @@ private struct HeroPage: View {
                         .frame(width: spreads ? nil : 170)
                         .accessibilityHidden(true)
                 } else {
-                    MetaLine(metaParts, genres: metaGenres, identifier: "hero.metaLine", spreads: spreads)
-                        .multilineTextAlignment(.center)
+                    TitleMarkReader(item: item) { mark in
+                        MetaLine(metaParts, genres: metaGenres, identifier: "hero.metaLine", spreads: spreads, mark: mark)
+                    }
+                    .multilineTextAlignment(.center)
                 }
             }
             .animation(.easeOut(duration: 0.2), value: awaitsDetails)
@@ -442,7 +444,7 @@ private struct HeroPage: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if isLandscape {
-                PosterRatingsOverlay(item: item, isLandscape: true)
+                PosterRatingsOverlay(item: item, isLandscape: true, showsMark: false)
                     .padding(.horizontal, metrics.pageMargin)
                     .padding(.bottom, Theme.Spacing.m)
                     .allowsHitTesting(false)

@@ -20,6 +20,7 @@ struct PrimaryActionButtonStyle: PrimitiveButtonStyle {
 /// A view of its own because a button style cannot read the environment itself.
 private struct PrimaryActionButton: View {
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.appAppearance) private var appearance
     let configuration: PrimitiveButtonStyleConfiguration
     let fillsWidth: Bool
     let minWidth: CGFloat
@@ -33,14 +34,13 @@ private struct PrimaryActionButton: View {
                 Haptics.play(.buttons)
                 configuration.trigger()
             } label: {
-                configuration.label
+                filled(configuration.label
                     .fontWeight(.semibold)
                     .padding(.horizontal, Theme.Spacing.s)
                     .frame(minWidth: minWidth, maxWidth: fillsWidth ? .infinity : nil)
                     .frame(height: height)
-                    .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
-                    .glassEffect(glass ?? .regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
-                    .pointerFeedback()
+                    .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton))))
+                    .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
             }
             .buttonStyle(.plain)
         } else {
@@ -57,7 +57,7 @@ private struct PrimaryActionButton: View {
                 .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .playButton)))
                 .pointerFeedback()
         }
-        .configurableGlassButtonStyle(glass)
+        .finishedButtonStyle(glass, finish: appearance.buttonFinish, fill: solidFill ?? (.white, .black))
         .buttonBorderShape(metrics.cornerScale(for: .playButton) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .playButton)))
         .controlSize(.large)
         .frame(height: CircleActionButton.diameter)
@@ -70,7 +70,7 @@ private struct PrimaryActionButton: View {
                 .fontWeight(.semibold)
                 .frame(maxWidth: fillsWidth ? .infinity : nil)
         }
-        .configurableGlassButtonStyle(glass)
+        .finishedButtonStyle(glass, finish: appearance.buttonFinish, fill: solidFill ?? (.white, .black))
         .buttonBorderShape(metrics.cornerScale(for: .playButton) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .playButton)))
         // A main action is one size up from the controls around it.
         .controlSize(controlSize == .regular ? .large : controlSize)
@@ -79,12 +79,40 @@ private struct PrimaryActionButton: View {
         }
     }
 
+    /// Play's own fill: solid white or the accent when Appearance sets one (Colour → Play button), with dark or light text to suit;
+    /// otherwise the tinted glass it was given. A Flat finish leaves the label alone, in that white or accent.
+    @ViewBuilder
+    private func filled<Label: View>(_ label: Label) -> some View {
+        let shape = ScaledCapsule(scale: metrics.cornerScale(for: .playButton))
+        if appearance.buttonFinish == .flat {
+            let colour = solidFill?.fill ?? .white
+            label.foregroundStyle(colour).tint(colour)
+        } else if let solid = solidFill {
+            label.foregroundStyle(solid.text).tint(solid.text).background(solid.fill, in: shape)
+        } else {
+            label.glassEffect(glass ?? .regular.interactive(), in: shape)
+        }
+    }
+
+    private var solidFill: (fill: Color, text: Color)? {
+        switch appearance.playStyle {
+        case .artwork:
+            return nil
+        case .white:
+            return (.white, .black)
+        case .accent:
+            let rgb = appearance.accentRGB
+            let isLight = 0.2126 * rgb.red + 0.7152 * rgb.green + 0.0722 * rgb.blue > 0.55
+            return (rgb.colour, isLight ? .black : .white)
+        }
+    }
 }
 
 /// A secondary action ("Customize", "Open on Best Blurays"): the system's Liquid Glass button as a label-sized capsule.
 /// Do not stack it on other glass and do not use it for the screen's main action.
 struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(\.appAppearance) private var appearance
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role) {
             Haptics.play(.buttons)
@@ -94,7 +122,7 @@ struct GlassCapsuleButtonStyle: PrimitiveButtonStyle {
                 .font(.subheadline.weight(.semibold))
                 .pointerFeedback()
         }
-        .buttonStyle(.glass)
+        .finishedButtonStyle(nil, finish: appearance.buttonFinish)
         .buttonBorderShape(metrics.cornerScale(for: .actionButtons) == 1 ? .capsule : .roundedRectangle(radius: Theme.Radius.surface * metrics.cornerScale(for: .actionButtons)))
     }
 }
@@ -125,21 +153,57 @@ extension View {
         }
     }
 
+    /// The system's glass button, or, for a look whose app draws no glass (Appearance → Colour → Buttons → Finish), the system's
+    /// flat bordered button (Solid: prominent in `fill` for a main action, a quiet white tint otherwise) or its borderless one (Flat:
+    /// the label alone, in `fill`'s colour or white).
+    @ViewBuilder
+    func finishedButtonStyle(_ glass: Glass?, finish: AppearancePreferences.ButtonFinish, fill: (fill: Color, text: Color)? = nil) -> some View {
+        switch finish {
+        case .glass:
+            configurableGlassButtonStyle(glass)
+        case .solid:
+            if let fill {
+                buttonStyle(.borderedProminent).tint(fill.fill).foregroundStyle(fill.text)
+            } else {
+                buttonStyle(.bordered).tint(.white)
+            }
+        case .flat:
+            buttonStyle(.borderless).tint(fill?.fill ?? .white)
+        }
+    }
+
+    /// The system's prominent glass button in the tint, or its bordered (Solid) or borderless (Flat) form, as Finish sets it.
+    @ViewBuilder
+    func finishedProminentButtonStyle(_ finish: AppearancePreferences.ButtonFinish) -> some View {
+        switch finish {
+        case .glass: buttonStyle(.glassProminent)
+        case .solid: buttonStyle(.borderedProminent)
+        case .flat: buttonStyle(.borderless)
+        }
+    }
+
+    /// The glass a button draws in its own label, as Finish sets it: that glass, the bordered button's flat grey fill (Solid), or
+    /// nothing, the label alone (Flat). For buttons only; panels and indicators keep their glass.
+    func buttonSurface(_ glass: Glass = .regular, in shape: some Shape) -> some View {
+        modifier(ButtonSurface(glass: glass, shape: shape))
+    }
+
     /// Makes an icon button the system's round Liquid Glass button, the one the navigation bar draws.
     func glassCircleButton(_ size: ControlSize = .large, glass: Glass? = nil, group: AppearancePreferences.CornerGroup = .actionButtons) -> some View {
         modifier(CircularGlassButton(size: size, glass: glass, group: group))
     }
 }
 
-/// Keep hover tracking inside the native glass button's label on Catalyst.
+/// Keep hover tracking inside the native glass button's label on Catalyst. Bordered or borderless for a Solid or Flat finish.
 struct HoverGlassButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.appAppearance) private var appearance
     var glass: Glass?
 
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role, action: configuration.trigger) {
             configuration.label.pointerFeedback()
         }
-        .configurableGlassButtonStyle(glass)
+        .finishedButtonStyle(glass, finish: appearance.buttonFinish)
     }
 }
 
@@ -158,10 +222,26 @@ struct FixedGlassButtonStyle: PrimitiveButtonStyle {
             configuration.label
                 .frame(width: size, height: size)
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .glassEffect(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .pointerFeedback()
+                .buttonSurface(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .glassHover(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A button's own glass, or the flat grey fill of the bordered button for a Solid finish, or nothing for a Flat one.
+private struct ButtonSurface<S: Shape>: ViewModifier {
+    @Environment(\.appAppearance) private var appearance
+    let glass: Glass
+    let shape: S
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch appearance.buttonFinish {
+        case .glass: content.glassEffect(glass, in: shape)
+        case .solid: content.background(.white.opacity(0.14), in: shape)
+        case .flat: content
+        }
     }
 }
 

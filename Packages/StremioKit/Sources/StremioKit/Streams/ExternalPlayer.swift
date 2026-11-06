@@ -229,7 +229,7 @@ public enum PlayerPreference: String, Sendable, Codable, CaseIterable, Identifia
         switch self {
         case .builtIn: return "Blusion"
         case .infuse: return "Infuse"
-        case .infuseWhenNeeded: return "Infuse for formats Blusion can't play"
+        case .infuseWhenNeeded: return "Infuse when needed"
         }
     }
 

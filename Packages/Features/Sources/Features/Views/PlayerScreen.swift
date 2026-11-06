@@ -37,18 +37,72 @@ private struct UpNextEpisode {
     let model: PlayerViewModel
 }
 
+/// The next episode's player, readied off screen during this one's last minute (`UpNextTiming`).
+private enum NextEpisodeState {
+    case notStarted
+    case readying(Task<Void, Never>)
+    case ready(UpNextEpisode)
+    /// Nothing to ready (no stream started for it), or this screen let it go: it is not tried again.
+    case unavailable
+    /// The readied player went to the next episode's screen: leaving this one must not close it.
+    case handedOver
+}
+
+/// Next Episode's button at the end of an episode.
+private enum UpNextPrompt: Equatable {
+    case hidden
+    /// Up and counting down: how far its countdown has run, 0...1.
+    case counting(Double)
+    /// Watch Credits was chosen: the button stays away until the end comes up again. The episode still moves on when it ends.
+    case creditsChosen
+}
+
+/// Whether this player screen is giving way to another one.
+private enum Departure {
+    case staying
+    /// Moving on to the next episode: its stream is being found, or the readied one handed over.
+    case movingOn
+    /// This screen handed its plan to another player screen (Up Next or a chosen episode): leaving it must not set the new
+    /// session aside.
+    case handedOver
+}
+
 /// The press-and-hold on the picture: whether a hold is under way, the height it began at, and whether the press rested long enough to
 /// be no tap when it lifts. A reference type, so following the finger changes nothing the view draws.
 @MainActor
 private final class PictureHoldTrack {
-    var holdBegan = false
+    /// The hold under way, nil while none is: the height it began at, and whether its press is on a locked hold, so dragged down it
+    /// releases the lock rather than starting a hold (`SpeedHoldRules.unlocks`).
+    var hold: (baselineY: CGFloat, unlocking: Bool)?
     /// Stays latched after release/cancellation until the next touch starts, regardless of callback order.
     var ownsTouch = false
-    var baselineY: CGFloat = 0
     /// The press rested for the hold delay, so it is not a tap when it lifts, whether or not a hold began.
     var restedLong = false
-    /// The press is on a locked hold: dragged down, it releases the lock rather than starting a hold (`SpeedHoldRules.unlocks`).
-    var unlocking = false
+}
+
+/// The one pop-out over the player: a menu from the controls' bar, the episode picker, or the streams.
+private enum PlayerPopOut: Equatable {
+    case closed
+    case menu(PlayerPanelTab)
+    case episodes
+    case streams
+}
+
+/// A drag on the picture, from its first movement to its release.
+private enum PictureDrag: Equatable {
+    case idle
+    /// Moving, with no clear axis yet.
+    case undecided
+    /// Part of a pinch: it neither seeks nor sets a level.
+    case pinch
+    /// Sideways, seeking: the timeline fraction it has reached, and the drag's width when it got there.
+    case seeking(fraction: Double, translation: Double)
+    /// Sideways where it cannot seek.
+    case horizontal
+    /// Up or down, before it has picked brightness or volume, or where it sets neither.
+    case vertical
+    /// Up or down at a side, setting brightness or volume from the level it started at.
+    case level(kind: SwipeLevel.Kind, start: Double)
 }
 
 /// How far the held finger has dragged toward the next lock change (`SpeedHoldRules.lockProgress`, `unlockProgress`). Its own observable
@@ -117,7 +171,7 @@ struct PlayerContent: View {
     @Environment(\.layoutMetrics) private var metrics
     @State private var model: PlayerViewModel
     @State private var infoModel: PlayerInfoModel
-    @State private var isPreparingNext = false
+    @State private var departure = Departure.staying
     @Environment(\.windowSafeArea) private var windowSafeArea
     #if canImport(UIKit) && canImport(AVKit)
     @State private var pip = PiPProxy()
@@ -126,30 +180,40 @@ struct PlayerContent: View {
     @State private var picture = PictureSampler()
     #endif
     @State private var importsSubtitle = false
-    /// The open menu (it sits on the controls' menu bar); nil when none is open.
-    @State private var panel: PlayerPanelTab?
+    @State private var popOut = PlayerPopOut.closed
+    /// The open menu (it sits on the controls' menu bar); nil when none is open. Opening one closes the other pop-outs.
+    private var panel: PlayerPanelTab? {
+        get {
+            if case .menu(let tab) = popOut { return tab }
+            return nil
+        }
+        nonmutating set {
+            if let newValue { popOut = .menu(newValue) } else if case .menu = popOut { popOut = .closed }
+        }
+    }
+    private var panelBinding: Binding<PlayerPanelTab?> { Binding(get: { panel }, set: { panel = $0 }) }
     @State private var noticeVisible = false
     /// The current chapter marker after its three-second Skip prompt has elapsed.
     @State private var hiddenSkipMarker: SkipMarker?
     @State private var importsAudio = false
     @State private var showsOpenSubtitles = false
     /// The episode picker's panel is open, dropped from the Episodes button.
-    @State private var showsEpisodes = false
-    @State private var showsStreams = false
+    private var showsEpisodes: Bool { popOut == .episodes }
+    private var showsStreams: Bool { popOut == .streams }
     /// The level a brightness or volume swipe is setting, for its indicator.
     @State private var swipeLevel: SwipeLevel?
     #if os(iOS) && !targetEnvironment(macCatalyst)
     @State private var systemVolume = SystemVolume()
     #endif
-    @State private var swipeStart: (kind: SwipeLevel.Kind, value: Double)?
+    @State private var drag = PictureDrag.idle
+    private var isDragging: Bool { drag != .idle }
     /// The accumulated timeline fraction of a sideways drag; nil while no drag seeks.
-    @State private var seekSwipeFraction: Double?
-    @State private var seekSwipeTranslation: Double = 0
+    private var seekSwipeFraction: Double? {
+        if case .seeking(let fraction, _) = drag { return fraction }
+        return nil
+    }
     /// A pinch is under way. A drag that is part of one neither seeks nor sets a level.
     @GestureState private var isPinching = false
-    @State private var isDragging = false
-    @State private var dragDirection: Axis?
-    @State private var dragIsPinch = false
     /// Resets when the drag ends or when the system takes the touch, which skips the drag's `onEnded`.
     @GestureState private var isDragGestureActive = false
     /// Ignore release taps from a pinch or swipe, including when one finger lifts before the other.
@@ -160,19 +224,15 @@ struct PlayerContent: View {
     @State private var holdTrack = PictureHoldTrack()
     @State private var holdProgress = HoldDragProgress()
     @State private var nativeFrameEngineID: ObjectIdentifier?
-    /// The next episode, readied during this one's last minute (`UpNextTiming`).
-    @State private var upNext: UpNextEpisode?
-    @State private var upNextTask: Task<Void, Never>?
-    /// How far Next Episode's countdown has run, 0...1; nil while the button is not up.
-    @State private var upNextProgress: Double?
+    @State private var nextEpisode = NextEpisodeState.notStarted
+    @State private var nextPrompt = UpNextPrompt.hidden
+    /// The running countdown of `nextPrompt`, called off with `stopCountdown`.
     @State private var upNextCountdown: Task<Void, Never>?
-    /// Watch Credits was chosen: the button stays away until the end comes up again. The episode still moves on when it ends.
-    @State private var watchesCredits = false
-    /// The readied player went to the next episode's screen: leaving this one must not close it.
-    @State private var handedOverUpNext = false
-    /// This screen handed its plan to another player screen (Up Next or a chosen episode): leaving it must not set the new
-    /// session aside.
-    @State private var handedOverPlan = false
+    /// How far Next Episode's countdown has run, 0...1; nil while the button is not up.
+    private var upNextProgress: Double? {
+        if case .counting(let progress) = nextPrompt { return progress }
+        return nil
+    }
     /// A stall has lasted half a second (`stallSpinnerDelay`): only then does a spinner show, so a momentary wait never flashes one.
     @State private var showsStall = false
     /// Some engines still report 'playing' while their clock has stopped: monitor progress as a fallback.
@@ -263,8 +323,8 @@ struct PlayerContent: View {
             // fade cannot change the video viewport or animate the renderer.
             PlayerControls(model: model, infoModel: infoModel, onClose: close, onNextEpisode: playNextEpisode, pipToggle: pipToggle, pipAvailable: pipAvailable,
                            onShowEpisodes: toggleEpisodes, episodesOpen: showsEpisodes,
-                           panel: $panel, actions: controlActions, upscaling: upscalingRenderer,
-                           onShowStreams: { guard !model.plan.isOffline else { return }; closeMenus(); model.showControls(); showsStreams = true },
+                           panel: panelBinding, actions: controlActions, upscaling: upscalingRenderer,
+                           onShowStreams: { guard !model.plan.isOffline else { return }; closeMenus(); model.showControls(); popOut = .streams },
                            streamsOpen: showsStreams, isVideoReady: isVideoReady, isStalled: showsStall && waitingForPlayback)
                 .opacity(controlsAreVisible ? 1 : 0)
                 .allowsHitTesting(controlsAreVisible)
@@ -338,8 +398,6 @@ struct PlayerContent: View {
             if new != .info { infoModel.closeReviews() }
             // A closed menu leaves the controls up, with a fresh idle delay, whichever way it was closed.
             if old != nil && new == nil { model.showControls() }
-            // One pop-out at a time: a menu opened from the bar closes the episodes.
-            if new != nil { showsEpisodes = false; showsStreams = false }
         }
         #if !targetEnvironment(macCatalyst)
         .onChange(of: isPinching) { _, pinching in
@@ -446,7 +504,7 @@ struct PlayerContent: View {
                     await model.close()
                     livePlayback.forget(model)
                     // A dismissal sets the session aside; a hand-over has already saved the next one.
-                    if !handedOverPlan { await PlaybackSession.clear() }
+                    if departure != .handedOver { await PlaybackSession.clear() }
                 }
             }
         }
@@ -539,23 +597,19 @@ struct PlayerContent: View {
         if showsEpisodes {
             closeEpisodes()
         } else {
-            panel = nil
-            showsStreams = false
-            showsEpisodes = true
+            popOut = .episodes
         }
     }
 
     private func closeEpisodes() {
         guard showsEpisodes else { return }
-        showsEpisodes = false
+        popOut = .closed
         model.showControls()
     }
 
     private func closeMenus() {
-        showsStreams = false
+        popOut = .closed
         model.showControls()
-        panel = nil
-        closeEpisodes()
     }
 
     private var hasVideoFrame: Bool {
@@ -665,7 +719,7 @@ struct PlayerContent: View {
                           systemImage: "forward.fill")
                         .font(.headline)
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.hoverPlain)
@@ -777,7 +831,7 @@ struct PlayerContent: View {
                                                         began: { pictureHoldBegan($0) },
                                                         moved: { pictureHoldMoved($0) },
                                                         ended: {
-                                                            if holdTrack.holdBegan { Haptics.play(.playerGestures) }
+                                                            if holdTrack.hold != nil { Haptics.play(.playerGestures) }
                                                             endPictureHold()
                                                         }))
                 #if !targetEnvironment(macCatalyst)
@@ -817,9 +871,7 @@ struct PlayerContent: View {
         // A press on a locked hold starts no hold of its own: dragged down, it releases the lock (`pictureHoldMoved`).
         guard locked || model.beginHeldSpeed() else { return }
         holdTrack.ownsTouch = true
-        holdTrack.holdBegan = true
-        holdTrack.unlocking = locked
-        holdTrack.baselineY = point.y
+        holdTrack.hold = (baselineY: point.y, unlocking: locked)
         // Confirms the hold has taken. A hold the film cannot take stays silent.
         if !locked { Haptics.play(.playerControls) }
     }
@@ -827,15 +879,15 @@ struct PlayerContent: View {
     /// The held finger moved: its height from where the hold began steps the speed up, and a drag down far enough locks it
     /// (`SpeedHoldRules`). Nothing else reads the movement.
     private func pictureHoldMoved(_ point: CGPoint) {
-        guard holdTrack.holdBegan else { return }
-        let displacement = Double(point.y - holdTrack.baselineY)
-        if holdTrack.unlocking {
+        guard let hold = holdTrack.hold else { return }
+        let displacement = Double(point.y - hold.baselineY)
+        if hold.unlocking {
             // A drag down from a locked hold's press returns the film to the speed it was at: the lock is released.
             guard SpeedHoldRules.unlocks(displacement: displacement) else {
                 holdProgress.update(SpeedHoldRules.unlockProgress(displacement: displacement))
                 return
             }
-            holdTrack.unlocking = false
+            holdTrack.hold?.unlocking = false
             holdProgress.update(0)
             model.endHeldSpeed()
             Haptics.play(.playerGestures)
@@ -857,9 +909,8 @@ struct PlayerContent: View {
     /// leaving the app, the screen going and the film ending may call it too.
     private func endPictureHold() {
         holdProgress.update(0)
-        if holdTrack.holdBegan {
-            holdTrack.holdBegan = false
-            holdTrack.unlocking = false
+        if holdTrack.hold != nil {
+            holdTrack.hold = nil
             pictureGestureEndedAt = Date()
             if model.heldSpeed?.isLocked != true { model.endHeldSpeed() }
         }
@@ -881,27 +932,18 @@ struct PlayerContent: View {
         guard panel == nil, !showsEpisodes, !showsStreams else { return }
         // A hold owns its finger: a drag that follows it neither seeks nor sets a level.
         guard !holdTrack.ownsTouch else { return }
-        if !isDragging {
-            isDragging = true
-            if isPinching { dragIsPinch = true }
-        }
-        guard !dragIsPinch else { return }
-        if dragDirection == nil {
+        if drag == .idle { drag = isPinching ? .pinch : .undecided }
+        if drag == .pinch { return }
+        if drag == .undecided {
             // Wait for a clear axis instead of permanently classifying a slightly
             // diagonal first movement as vertical. The user's starting point can
             // be anywhere, even over the visible transport controls.
             let dx = abs(value.translation.width)
             let dy = abs(value.translation.height)
             if dx >= 14 && dx > dy * 1.2 {
-                dragDirection = .horizontal
-                if canSwipeSeek {
-                    let startingFraction = model.fraction
-                    model.beginScrub()
-                    seekSwipeFraction = startingFraction
-                    seekSwipeTranslation = 0
-                }
+                drag = canSwipeSeek ? seekSwipe(from: 0) : .horizontal
             } else if dy >= 14 && dy > dx * 1.2 {
-                dragDirection = .vertical
+                drag = .vertical
             } else {
                 return
             }
@@ -909,42 +951,38 @@ struct PlayerContent: View {
         // A centre swipe may start upwards, then turn sideways to seek.
         // Side-origin vertical drags remain brightness/volume gestures.
         let third = size.width / 3
-        if dragDirection == .vertical, swipeStart == nil,
+        if drag == .vertical,
            value.startLocation.x >= third, value.startLocation.x <= 2 * third,
            value.translation.height < 0, abs(value.translation.width) >= 14, canSwipeSeek {
-            dragDirection = .horizontal
-            let startingFraction = model.fraction
-            model.beginScrub()
-            seekSwipeFraction = startingFraction
-            seekSwipeTranslation = value.translation.width
+            drag = seekSwipe(from: value.translation.width)
         }
-        if let start = seekSwipeFraction {
-            let fraction = SwipeSeek.fraction(from: start, translation: value.translation.width - seekSwipeTranslation,
+        if case .seeking(let start, let translation) = drag {
+            let fraction = SwipeSeek.fraction(from: start, translation: value.translation.width - translation,
                                               width: size.width, duration: model.duration ?? 0,
                                               heightFraction: value.location.y / max(1, size.height))
-            seekSwipeFraction = fraction
-            seekSwipeTranslation = value.translation.width
+            drag = .seeking(fraction: fraction, translation: value.translation.width)
             guard fraction != start else { return }
             model.updateScrub(fraction: fraction, seekImmediately: true)
             return
         }
-        guard dragDirection == .vertical, model.preferences.swipeGestures else { return }
-        if swipeStart == nil {
+        guard model.preferences.swipeGestures else { return }
+        if drag == .vertical {
             // Up or down on the left: brightness; on the right: device volume.
             guard abs(value.translation.height) > abs(value.translation.width) * 1.5 else { return }
             if value.startLocation.x < third {
-                swipeStart = (.brightness, Double(ScreenBrightness.value))
+                drag = .level(kind: .brightness, start: Double(ScreenBrightness.value))
             } else if value.startLocation.x > 2 * third {
                 #if os(iOS) && !targetEnvironment(macCatalyst)
-                swipeStart = (.volume, systemVolume.value)
+                drag = .level(kind: .volume, start: systemVolume.value)
                 #else
-                swipeStart = (.volume, Double(model.volume))
+                drag = .level(kind: .volume, start: Double(model.volume))
                 #endif
             } else {
                 return
             }
         }
-        guard let start = swipeStart else { return }
+        guard case .level(let kind, let startValue) = drag else { return }
+        let start = (kind: kind, value: startValue)
         let level = min(1, max(0, start.value - value.translation.height / (size.height * 0.7)))
         switch start.kind {
         case .brightness: ScreenBrightness.value = CGFloat(level)
@@ -968,21 +1006,28 @@ struct PlayerContent: View {
         guard panel == nil, !showsEpisodes, !showsStreams else { return }
         // Use the existing seek state to include the final movement before clearing the gesture.
         if seekSwipeFraction != nil { swipeChanged(value, in: size) }
-        let wasPinch = dragIsPinch
+        let ended = drag
+        drag = .idle
         // Only a drag that classified as a swipe can dismiss: a release after a hold (which never classified) must not close the player.
-        let wasSwiping = dragDirection != nil
-        isDragging = false
-        dragIsPinch = false
-        dragDirection = nil
-        if seekSwipeFraction != nil {
+        let wasSwiping: Bool
+        let wasLevel: Bool
+        switch ended {
+        case .seeking:
             // Finish at the live drag's final target.
-            seekSwipeFraction = nil
             Task { await model.endScrub() }
             return
+        case .pinch:
+            return
+        case .idle, .undecided:
+            wasSwiping = false
+            wasLevel = false
+        case .horizontal, .vertical:
+            wasSwiping = true
+            wasLevel = false
+        case .level:
+            wasSwiping = true
+            wasLevel = true
         }
-        guard !wasPinch else { return }
-        let wasLevel = swipeStart != nil
-        swipeStart = nil
         withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
         let third = size.width / 3
         let inMiddle = value.startLocation.x >= third && value.startLocation.x <= 2 * third
@@ -994,29 +1039,33 @@ struct PlayerContent: View {
 
     /// A pinch takes over a drag: keep the last live position and stop issuing seeks.
     private func pinchBegan() {
-        guard isDragging else { return }
-        dragIsPinch = true
-        if seekSwipeFraction != nil {
-            seekSwipeFraction = nil
-            model.cancelScrub()
+        switch drag {
+        case .idle, .pinch: return
+        case .seeking: model.cancelScrub()
+        // The level it was setting stays where it is, and its indicator fades.
+        case .level: withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
+        case .undecided, .horizontal, .vertical: break
         }
+        drag = .pinch
+    }
+
+    /// A sideways drag starts seeking from where playback is now.
+    private func seekSwipe(from translation: Double) -> PictureDrag {
+        let startingFraction = model.fraction
+        model.beginScrub()
+        return .seeking(fraction: startingFraction, translation: translation)
     }
 
     /// The drag is over, ended or cancelled (the system can take the touch and skip `onEnded`). After a normal end there is nothing left
     /// to do. Otherwise a seek still open is made where the swipe left the timeline, whichever of the two runs first, and a level indicator
     /// fades, so the next drag starts clean.
     private func dragFinished() {
-        if seekSwipeFraction != nil {
-            seekSwipeFraction = nil
-            Task { await model.endScrub() }
+        switch drag {
+        case .seeking: Task { await model.endScrub() }
+        case .level: withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
+        case .idle, .undecided, .pinch, .horizontal, .vertical: break
         }
-        if swipeStart != nil {
-            swipeStart = nil
-            withAnimation(.easeOut(duration: 0.3).delay(0.4)) { swipeLevel = nil }
-        }
-        isDragging = false
-        dragIsPinch = false
-        dragDirection = nil
+        drag = .idle
     }
     #endif
 
@@ -1031,16 +1080,17 @@ struct PlayerContent: View {
 
     /// Moves to the next episode: with the player Up Next readied, which then plays at once, or else by finding its stream now.
     private func playNextEpisode() {
-        guard !isPreparingNext else { return }
-        isPreparingNext = true
+        guard departure == .staying else { return }
+        departure = .movingOn
         stopCountdown()
         Task {
             await model.close()
             livePlayback.forget(model)
-            if upNext == nil { await upNextTask?.value }   // a readying under way finishes first: it is the quicker start
-            handedOverPlan = true
-            if let ready = upNext {
-                handedOverUpNext = true
+            // A readying under way finishes first: it is the quicker start.
+            if case .readying(let task) = nextEpisode { await task.value }
+            departure = .handedOver
+            if case .ready(let ready) = nextEpisode {
+                nextEpisode = .handedOver
                 await model.saveSessionSnapshot(for: ready.plan, candidateIndex: ready.model.currentStreamIndex)
                 onNextPlan(ready.plan, ready.model)
             } else if let next = await model.prepareNextEpisode() {
@@ -1051,7 +1101,6 @@ struct PlayerContent: View {
                 await PlaybackSession.clear()
                 dismiss()
             }
-            isPreparingNext = false
         }
     }
 
@@ -1069,8 +1118,8 @@ struct PlayerContent: View {
     /// so the panel is never left over a player that is being replaced.
     private func playChosenEpisode(_ plan: PlaybackPlan) {
         leaveUpNext()
-        showsEpisodes = false
-        handedOverPlan = true
+        if showsEpisodes { popOut = .closed }
+        departure = .handedOver
         Task {
             try? await Task.sleep(for: .milliseconds(300))
             await model.close()
@@ -1085,40 +1134,49 @@ struct PlayerContent: View {
     /// Called every half second. When the end comes up (`UpNextTiming`) the next episode starts loading off screen; once it is ready,
     /// Next Episode shows and counts down. Seeking back out of the end takes the button away again.
     private func updateUpNext() {
-        guard model.hasNextEpisode, model.failureMessage == nil, !isPreparingNext else { return }
+        guard model.hasNextEpisode, model.failureMessage == nil, departure == .staying else { return }
         let creditsToEnd = model.activeSkipMarker.map { $0.kind == .credits && model.skipEndsMedia($0) } ?? false
         let nearEnd = UpNextTiming.isNearEnd(position: model.state.position, duration: model.duration, creditsToEnd: creditsToEnd)
-        if !nearEnd && !(model.duration.map { $0 > 0 && $0 - model.state.position <= 45 } ?? false) { watchesCredits = false }
-        if nearEnd, upNext == nil, upNextTask == nil { readyNextEpisode() }
+        if !nearEnd && !(model.duration.map { $0 > 0 && $0 - model.state.position <= 45 } ?? false), nextPrompt == .creditsChosen {
+            nextPrompt = .hidden
+        }
+        if nearEnd, case .notStarted = nextEpisode { readyNextEpisode() }
         let inLast45Seconds = model.duration.map { $0.isFinite && $0 > 0 && $0 - model.state.position <= 45 } ?? false
         // Show the action even if preload is slow; keep it up once its countdown starts.
+        let isReady = if case .ready = nextEpisode { true } else { false }
+        let isCounting = upNextProgress != nil
         let shows = (nearEnd || inLast45Seconds) &&
-            (upNext != nil || inLast45Seconds || upNextProgress != nil) && !watchesCredits
-        if shows && upNextCountdown == nil {
+            (isReady || inLast45Seconds || isCounting) && nextPrompt != .creditsChosen
+        if shows && !isCounting {
             startCountdown()
-        } else if !shows && upNextCountdown != nil {
+        } else if !shows && isCounting {
             stopCountdown()
         }
     }
 
     /// The next episode's stream, chosen as the end of an episode chooses it, starts muted and holds on its first frame.
     private func readyNextEpisode() {
-        upNextTask = Task {
-            guard let plan = await model.prepareNextEpisode(), !Task.isCancelled else { return }
+        let task = Task {
+            guard let plan = await model.prepareNextEpisode(), !Task.isCancelled else {
+                if case .readying = nextEpisode { nextEpisode = .unavailable }
+                return
+            }
             let next = Self.makeModel(plan: plan, services: services)
             PlayerPreload.begin(plan, services: services)
             await next.prepare()
-            guard !Task.isCancelled, !handedOverUpNext, next.coordinator?.phase == .playing else {
+            guard !Task.isCancelled, case .readying = nextEpisode, next.coordinator?.phase == .playing else {
                 await next.close()   // nothing to play in it, or this screen has gone
+                if case .readying = nextEpisode { nextEpisode = .unavailable }
                 return
             }
-            upNext = UpNextEpisode(plan: plan, model: next)
+            nextEpisode = .ready(UpNextEpisode(plan: plan, model: next))
         }
+        nextEpisode = .readying(task)
     }
 
     /// Counts eight seconds of playback (a pause holds the count), then plays the next episode.
     private func startCountdown() {
-        upNextProgress = 0
+        nextPrompt = .counting(0)
         upNextCountdown = Task {
             let clock = ContinuousClock()
             var last = clock.now
@@ -1129,7 +1187,7 @@ struct PlayerContent: View {
                 let now = clock.now
                 if model.isPlaying { elapsed += now - last }
                 last = now
-                upNextProgress = min(1, elapsed / UpNextTiming.countdown)
+                nextPrompt = .counting(min(1, elapsed / UpNextTiming.countdown))
             }
             playNextEpisode()
         }
@@ -1138,16 +1196,21 @@ struct PlayerContent: View {
     private func stopCountdown() {
         upNextCountdown?.cancel()
         upNextCountdown = nil
-        upNextProgress = nil
+        if case .counting = nextPrompt { nextPrompt = .hidden }
     }
 
     /// This screen is going: a readied next episode it did not hand on is closed, so its stream stops.
     private func leaveUpNext() {
-        upNextTask?.cancel()
         stopCountdown()
-        if !handedOverUpNext, let next = upNext?.model {
-            upNext = nil
-            Task { await next.close() }
+        switch nextEpisode {
+        case .readying(let task):
+            task.cancel()
+            nextEpisode = .unavailable
+        case .ready(let next):
+            nextEpisode = .unavailable
+            Task { await next.model.close() }
+        case .notStarted, .unavailable, .handedOver:
+            break
         }
     }
 
@@ -1159,13 +1222,13 @@ struct PlayerContent: View {
                 Spacer()
                 Button {
                     Haptics.play(.playerControls)
-                    watchesCredits = true
                     stopCountdown()
+                    nextPrompt = .creditsChosen
                 } label: {
                     Text("Watch Credits")
                         .font(.headline)
                         .padding(.horizontal, 18).padding(.vertical, 12)
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.hoverPlain)
@@ -1183,7 +1246,7 @@ struct PlayerContent: View {
                             }
                         }
                         .clipShape(ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
-                        .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
+                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.cornerScale(for: .playerControls)))
                         .pointerInteraction(cornerRadius: 22 * metrics.cornerScale(for: .playerControls))
                 }
                 .buttonStyle(.hoverPlain)

@@ -61,6 +61,7 @@ public struct DataResetService: Sendable {
                 services.posterRatings.isEnabled = PlaybackSettings().showsPosterRatings
                 services.posterRatings.showsColouredLogos = PlaybackSettings().showsColouredRatingLogos
                 services.posterRatings.showsBestDisc = PlaybackSettings().showsBestDiscOnPosters
+                services.posterRatings.markPlacement = PlaybackSettings().posterMarkPlacement
             }
             await services.widgetContent.invalidate()
         case .widgets:

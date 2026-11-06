@@ -14,6 +14,8 @@ struct DetailEpisodes: View {
     /// Shuffle and a tapped episode hand their episode to the page's stream flow, the one Play uses, saying which of them asked: the
     /// streams take the details' place once they are ready.
     let play: (StreamRequest, StreamTrigger) -> Void
+    /// Highest Quality or Data Saver from an episode's hold menu: the best stream at that quality starts.
+    let playAtQuality: (StreamRequest, PlayQuality) -> Void
     /// The request whose streams are loading, from Play, Shuffle or an episode. Shuffle and the episodes take no taps then, since a tap
     /// would call that lookup off or start a second one.
     var loadingRequest: StreamRequest?
@@ -168,11 +170,11 @@ struct DetailEpisodes: View {
             .padding(.horizontal, 10)
             .frame(height: Self.secondaryControlHeight)
             .contentShape(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
-            .glassEffect(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .buttonSurface(.regular.interactive().tint((Theme.playControlColour(hex: model.playColourHex) ?? .clear)), in: ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
+            .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .filters)))
         }
         .buttonStyle(.plain)
         .frame(height: Self.secondaryControlHeight)
-        .pointerFeedback()
         .accessibilityIdentifier("detail.seasonPicker")
     }
 
@@ -199,6 +201,7 @@ struct DetailEpisodes: View {
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.2)) { showsShuffleNext.toggle() }
             }
+            .pointerFeedback()
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(showsShuffleNext ? "Shuffle plays \(next.title) next" : "Show the episode Shuffle plays next")
@@ -383,7 +386,10 @@ struct DetailEpisodes: View {
                 await titleActions.refresh()
             }
         }
-        return UIMenu(children: [controls, UIMenu(options: .displayInline, children: [watchedThroughAction])])
+        var sections = [controls, UIMenu(options: .displayInline, children: [watchedThroughAction])]
+        // A series has no Best Blurays disc, so Highest Quality carries no mark.
+        if canPlay(video, request) { sections.append(PlayQualityMenu.menu(disc: nil) { playAtQuality(request, $0) }) }
+        return UIMenu(children: sections)
     }
 
     /// Each palette item is one image: its glyph in a row of `paletteGlyphSide` points, with its caption, if any, under it. Every item is the
@@ -456,6 +462,14 @@ struct DetailEpisodes: View {
                 await titleActions.refresh()
             }
         }
+        if canPlay(video, request) {
+            PlayQualityMenuItems(disc: nil) { playAtQuality(request, $0) }
+        }
+    }
+
+    /// An episode that has aired and has streams, which its card would play.
+    private func canPlay(_ video: Video, _ request: StreamRequest) -> Bool {
+        video.hasAired() && !unavailableStreams.contains(request.identity)
     }
 
     /// One episode's card at `width`: the card in the list, and the menu's preview at the page's full width. The preview passes

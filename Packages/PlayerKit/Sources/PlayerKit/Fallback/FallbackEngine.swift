@@ -98,29 +98,61 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     private let backend: any FallbackBackend
     private let broadcaster = PlaybackStateBroadcaster()
     private var eventTask: Task<Void, Never>?
-    private var isLoaded = false
+
+    /// Where the current load stands. A failure holds until the next load; a stop is final.
+    private enum Phase: Equatable {
+        /// Sent to the backend and not loaded yet. A cushioned start (`FallbackBackend.startCushion`) is decided once it has loaded.
+        case loading(cushioned: Bool)
+        /// Loaded, with the cushioned start not decided yet: it is once Play is asked for.
+        case awaitingStart
+        /// Loaded, with the start held until the backend has its cushion in hand or the wait runs out. `firstFrame`: the first frame
+        /// came meanwhile; it is shown when playback starts, so the startup spinner covers the wait.
+        case holding(firstFrame: Bool)
+        /// Let through: playing, paused or buffering, as the backend reports.
+        case started
+        /// Played to the end. Play, or a seek back from the end, leaves it.
+        case ended
+        case failed(PlaybackFailure)
+        case stopped
+    }
+    private var phase = Phase.loading(cushioned: false)
+    /// What the backend last reported.
     private var isPaused = true
     private var isBuffering = false
-    private var hasEnded = false
+    /// Playback has run since the load, so a pause reads as paused rather than ready.
     private var hasPlayed = false
-    private var isStopped = false
-    private var failure: PlaybackFailure?
-    /// The first start of a load (`FallbackBackend.startCushion`): not decided yet, waiting for data in hand, or let through.
-    private enum StartGate { case closed, holding, open }
-    private var startGate = StartGate.open
     private var startHold: Task<Void, Never>?
     /// Play was asked for and pause has not been since: what the start does once it is let through.
     private var wantsPlay = false
-    /// The first frame came while the start was held. It is shown when playback starts, so the startup spinner covers the wait.
-    private var heldFirstFrame = false
     private var loadBegan = ContinuousClock.now
+
+    /// The backend has reported the load (and it has not failed or stopped since).
+    private var isLoaded: Bool {
+        switch phase {
+        case .awaitingStart, .holding, .started, .ended: true
+        case .loading, .failed, .stopped: false
+        }
+    }
+
+    private var isHolding: Bool {
+        if case .holding = phase { return true }
+        return false
+    }
+
+    /// The start is let through: no cushion to wait for, or its wait is over.
+    private var isStartOpen: Bool {
+        switch phase {
+        case .loading(cushioned: false), .started, .ended: true
+        default: false
+        }
+    }
 
     public init(backend: any FallbackBackend) {
         self.backend = backend
         let events = backend.makeEventStream()
         eventTask = Task { [weak self] in
             for await event in events {
-                guard let self, !Task.isCancelled, !self.isStopped else { return }
+                guard let self, !Task.isCancelled, self.phase != .stopped else { return }
                 self.handle(event)
             }
         }
@@ -133,17 +165,15 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     // MARK: PlaybackEngine
 
     public func load(_ item: PlaybackItem) {
-        isLoaded = false
+        // A stopped engine has shut its backend down: the coordinator makes a new engine for every stream.
+        guard phase != .stopped else { return }
+        phase = .loading(cushioned: backend.startCushion != nil)
         isPaused = true
         isBuffering = false
-        hasEnded = false
         hasPlayed = false
-        failure = nil
         startHold?.cancel()
         startHold = nil
-        startGate = backend.startCushion == nil ? .open : .closed
         wantsPlay = false
-        heldFirstFrame = false
         loadBegan = .now
         var fresh = PlaybackState()
         fresh.status = .loading
@@ -154,31 +184,31 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     public func play() {
         wantsPlay = true
-        if hasEnded {
-            hasEnded = false
+        switch phase {
+        case .ended:
+            phase = .started
             Task {
                 await self.seek(to: 0)
                 self.backend.setPaused(false)
             }
-            return
-        }
-        switch startGate {
-        case .open: backend.setPaused(false)
+        case .loading(cushioned: false), .started: backend.setPaused(false)
         case .holding: update { _ in }
-        case .closed: if isLoaded { beginStart() }   // otherwise decided once it has loaded
+        case .awaitingStart: beginStart()
+        case .loading(cushioned: true): break   // decided once it has loaded
+        case .failed, .stopped: break
         }
     }
 
     public func pause() {
         wantsPlay = false
         backend.setPaused(true)
-        if startGate == .holding { update { _ in } }
+        if isHolding { update { _ in } }
     }
 
     public func seek(to position: TimeInterval) async {
         let target = max(0, position)
         // A seek back from the end leaves it, so Play continues from there instead of replaying from the start.
-        if hasEnded, target < (state.duration ?? .infinity) { hasEnded = false }
+        if phase == .ended, target < (state.duration ?? .infinity) { phase = .started }
         update { $0.position = target }
         await backend.seek(to: target)
     }
@@ -223,7 +253,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     }
 
     public func stop() {
-        isStopped = true
+        phase = .stopped
         startHold?.cancel()
         startHold = nil
         eventTask?.cancel()
@@ -242,7 +272,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         case .networkBitrate(let bitrate):
             update { $0.preparation?.networkBitrate = bitrate.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } }
         case .loaded(let duration, let audio, let subtitles, let selectedAudio, let selectedSubtitle):
-            isLoaded = true
+            if case .loading(let cushioned) = phase { phase = cushioned ? .awaitingStart : .started }
             update {
                 $0.duration = duration.flatMap { $0 > 0 ? $0 : nil }
                 $0.audioTracks = audio
@@ -250,11 +280,11 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
                 $0.selectedAudioTrackID = selectedAudio
                 $0.selectedEmbeddedSubtitleID = selectedSubtitle
             }
-            if startGate == .closed, wantsPlay { beginStart() }
+            if phase == .awaitingStart, wantsPlay { beginStart() }
         case .duration(let duration):
             if isLoaded, duration.isFinite, duration > 0 { update { $0.duration = duration } }
         case .videoFrameReady:
-            if startGate == .holding { heldFirstFrame = true } else { update { $0.hasVideoFrame = true } }
+            if isHolding { phase = .holding(firstFrame: true) } else { update { $0.hasVideoFrame = true } }
         case .position(let position):
             update { $0.position = max(0, position) }
         case .buffered(let until):
@@ -273,9 +303,12 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         case .chapters(let chapters):
             update { $0.chapters = chapters }
         case .ended:
-            hasEnded = true
+            switch phase {
+            case .failed, .stopped: break
+            default: phase = .ended
+            }
         case .failed(let reason):
-            failure = reason
+            phase = .failed(reason)
         }
         update { _ in }   // re-derive status
     }
@@ -284,7 +317,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
 
     /// Decides the first start of the load: at once, or once the backend holds its `startCushion` (or the wait for it runs out).
     private func beginStart() {
-        guard startGate == .closed, let cushion = backend.startCushion else { return openStart() }
+        guard phase == .awaitingStart, let cushion = backend.startCushion else { return openStart() }
         let loadTook = Self.seconds(loadBegan.duration(to: .now))
         let ahead = backend.bufferedAhead
         let wait = cushion.wait(ahead: ahead, loadTook: loadTook)
@@ -292,7 +325,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
             let reason: PlaybackPreparation.StartReason? = if let ahead, ahead < cushion.seconds { .waitLimit } else { nil }
             return openStart(reason: reason)
         }
-        startGate = .holding
+        phase = .holding(firstFrame: false)
         update { $0.preparation?.waitDeadline = Date().addingTimeInterval(wait) }
         let startAhead = backend.bufferedAhead ?? 0
         startHold = Task { [weak self] in
@@ -300,7 +333,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
             let deadline = began + .seconds(wait)
             while ContinuousClock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(100))
-                guard let self, !Task.isCancelled, self.failure == nil else { return }
+                guard let self, !Task.isCancelled, self.isHolding else { return }
                 let waited = Self.seconds(began.duration(to: .now))
                 let ahead = self.backend.bufferedAhead
                 if cushion.isMet(ahead: ahead, startAhead: startAhead, waited: waited) {
@@ -309,7 +342,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
                     return
                 }
             }
-            guard let self, !Task.isCancelled, self.failure == nil else { return }
+            guard let self, !Task.isCancelled, self.isHolding else { return }
             self.openStart(reason: .waitLimit)
         }
     }
@@ -317,10 +350,17 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
     /// Lets the first start through: playback starts if it is still wanted, and a first frame held back is shown.
     private func openStart(reason: PlaybackPreparation.StartReason? = nil) {
         startHold = nil
-        startGate = .open
+        var frame = false
+        switch phase {
+        case .holding(let firstFrame):
+            frame = firstFrame
+            phase = .started
+        case .awaitingStart:
+            phase = .started
+        default:
+            break
+        }
         if wantsPlay { backend.setPaused(false) }
-        let frame = heldFirstFrame
-        heldFirstFrame = false
         let hasTarget = backend.bufferedAhead != nil
         update {
             if frame { $0.hasVideoFrame = true }
@@ -335,29 +375,31 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
         return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
     }
 
-    /// Derives our status from the backend's flags.
-    private func deriveStatus() -> PlaybackState.Status {
-        if let failure { return .failed(failure) }
-        if hasEnded { return .ended }
-        if !isLoaded { return .loading }
-        if startGate == .holding { return wantsPlay ? .buffering : .ready }
-        if isPaused { return hasPlayed ? .paused : .ready }
-        hasPlayed = true
-        return isBuffering ? .buffering : .playing
+    /// Our status: the phase, with the backend's pause and buffering once the start is through.
+    private var derivedStatus: PlaybackState.Status {
+        switch phase {
+        case .stopped: .idle
+        case .failed(let failure): .failed(failure)
+        case .ended: .ended
+        case .loading: .loading
+        case .holding: wantsPlay ? .buffering : .ready
+        case .awaitingStart, .started: isPaused ? (hasPlayed ? .paused : .ready) : (isBuffering ? .buffering : .playing)
+        }
     }
 
     private func update(_ change: (inout PlaybackState) -> Void) {
         var next = state
         change(&next)
-        next.status = isStopped ? .idle : deriveStatus()
+        next.status = derivedStatus
+        if next.status == .playing { hasPlayed = true }
         if var preparation = next.preparation {
-            if let failure {
+            if case .failed(let failure) = phase {
                 preparation.stage = .failed
                 preparation.failure = failure
                 preparation.waitDeadline = nil
-            } else if next.hasVideoFrame, startGate == .open {
+            } else if next.hasVideoFrame, isStartOpen {
                 preparation.stage = .ready
-            } else if startGate == .holding || isBuffering {
+            } else if isHolding || isBuffering {
                 preparation.stage = .buffering
             } else if isLoaded {
                 preparation.stage = .startingPlayback
@@ -365,7 +407,7 @@ public final class FallbackEngine: PlaybackEngine, VideoSurfaceProviding {
             if isLoaded, state.preparation?.stage != .ready {
                 preparation.bufferedSeconds = backend.preparationBufferedAhead.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
             }
-            next.preparation = isStopped ? nil : preparation
+            next.preparation = phase == .stopped ? nil : preparation
         }
         publish(next)
     }

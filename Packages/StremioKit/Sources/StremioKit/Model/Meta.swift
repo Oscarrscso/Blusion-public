@@ -288,6 +288,15 @@ public struct MetaDetail: Sendable, Equatable, Hashable, Codable, Identifiable {
         }
     }
 
+    /// Gives the episodes of `season` that have no synopsis of their own the text for their number in `overviews`. The addon's
+    /// synopsis always wins.
+    public mutating func fillEpisodeOverviews(season: Int, overviews: [Int: String]) {
+        for index in videos.indices where videos[index].season == season && videos[index].overview?.isEmpty != false {
+            guard let number = videos[index].episode, let text = overviews[number], !text.isEmpty else { continue }
+            videos[index].overview = text
+        }
+    }
+
     /// The episode after `video` in watching order: season by season, specials (season 0) only after the last regular season.
     public func nextVideo(after video: Video) -> Video? {
         let ordered = seasons.flatMap { episodes(inSeason: $0) }

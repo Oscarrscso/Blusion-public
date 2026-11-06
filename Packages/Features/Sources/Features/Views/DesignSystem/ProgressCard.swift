@@ -97,6 +97,9 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
     @Environment(\.zoomScope) private var zoomScope
     /// Appearance's corners, so the loading veil, the zoom and the menu's preview keep the card's own corners.
     @Environment(\.layoutMetrics) private var metrics
+    @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
+    /// The film's best disc as the device knows it, for Highest Quality's mark in the hold menu.
+    @State private var bestDisc: BestDiscFormat?
 
     /// True while a card's streams load on Home: every card ignores taps meanwhile, and looks as it did.
     private var isBusy: Bool { launcher?.isResolving ?? false }
@@ -165,9 +168,24 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
                 Haptics.play(.buttons)
                 onRemove()
             }
+            if launcher != nil {
+                PlayQualityMenuItems(disc: bestDisc) { play(at: $0, sourceID: sourceID) }
+            }
         }
+        .task(id: preview.identity) { bestDisc = await ratings?.knownBestDisc(for: preview) }
         // The menu's "Open title" opens this title's page, so its artwork is looked up while the card is on screen.
         .prewarmsHeroArtwork(preview)
+    }
+
+    /// Highest Quality or Data Saver from the hold menu: the card's streams load on Home and the best at that quality starts, as a tap
+    /// does with Auto Pick on. Data Saver plays a downloaded copy as it is.
+    private func play(at quality: PlayQuality, sourceID: String) {
+        if quality == .dataSaver,
+           let item = downloads?.items.first(where: { $0.request.identity == request.identity && $0.state == .complete }) {
+            Task { if let plan = await downloads?.plan(for: item.id) { router.demoPlan = plan } }
+            return
+        }
+        _ = launcher?.open(itemID: itemID, request: request, preview: preview, sourceID: sourceID, quality: quality)
     }
 
     /// The title's page, with the streams of the item this card resumes.

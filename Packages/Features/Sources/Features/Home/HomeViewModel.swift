@@ -133,12 +133,12 @@ public final class HomeViewModel {
         }
     }
 
-    /// Loads the rows below `id`, which has just come on screen, before they scroll in. It loads as many titles as the Lazy load setting
-    /// keeps ready, and `queuedRowIDs` becomes those rows, so only the rows nearest the screen keep their posters loaded.
+    /// Loads the rows below `id`, which has just come on screen, before they scroll in. It loads as many titles as Optimisation's Home
+    /// preloading keeps ready, and `queuedRowIDs` becomes those rows, so only the rows nearest the screen keep their posters loaded.
     public func loadRowsBelow(_ id: String) async {
         let current = generation
         guard !isOffline, let index = sections.firstIndex(where: { $0.id == id }) else { return }
-        var ahead = LazyLoadLookahead.titlesAhead()
+        var ahead = OptimisationSettings.homeTitlesAhead()
         var queued: [String] = []
         for next in sections.dropFirst(index + 1).map(\.id) {
             guard ahead > 0, current == generation, !Task.isCancelled else { return }

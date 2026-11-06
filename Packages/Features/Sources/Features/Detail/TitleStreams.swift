@@ -58,11 +58,12 @@ struct TitleStreams: Equatable {
         hasStarted = false
     }
 
-    /// A Continue Watching card opened the page on this item: as if Play had been tapped, so Play spins.
-    mutating func open(_ request: StreamRequest) {
+    /// A Continue Watching card opened the page on this item, or a hold menu chose how to play it: as if `trigger` had been tapped, so
+    /// that control spins (Play by default).
+    mutating func open(_ request: StreamRequest, from trigger: StreamTrigger = .play) {
         if self.request != nil { restarts += 1 }
         self.request = request
-        trigger = .play
+        self.trigger = trigger
         isReady = false
         hasStarted = false
     }

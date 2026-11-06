@@ -8,6 +8,13 @@ import UIKit
 /// the credits.
 private enum PlayOpeningMode: Equatable {
     case normal, streamSelector, infuse
+    /// Highest Quality or Data Saver from a hold menu: the best stream at that quality starts, whatever Auto Pick's switch says.
+    case quality(PlayQuality)
+
+    var quality: PlayQuality? {
+        if case .quality(let quality) = self { return quality }
+        return nil
+    }
 }
 
 struct DetailView: View {
@@ -26,6 +33,8 @@ struct DetailView: View {
     @State private var downloadedPlan: PlaybackPlan?
     /// Empty results apply to this visit and this movie or episode only.
     @State private var unavailableStreams: Set<String> = []
+    /// The player app each request was last handed to from this page, by request identity: Play's second line says so.
+    @State private var openedInPlayer: [String: ExternalPlayer] = [:]
     /// The item a Continue Watching card opens the page with. It is picked once the hero has settled (see the lookup task below), so the
     /// picker never loads ahead of the hero's images.
     @State private var pendingStreams: StreamRequest?
@@ -140,10 +149,12 @@ struct DetailView: View {
                             DetailActions(model: model, isConfirmingUnmarkShow: $isConfirmingUnmarkShow,
                                           showsActions: !showsStreams, isLoadingStreams: loadingTrigger == .play,
                                           hasNoStreams: unavailableStreams.contains(model.primaryRequest?.identity ?? ""),
+                                          openedInPlayer: openedInPlayer[model.primaryRequest?.identity ?? ""],
                                           blocksPlay: loadingTrigger != nil && loadingTrigger != .play,
                                           showsMetaLine: false, play: { showStreams($0, from: .play) },
                                            showStreamSelector: { showStreams($0, from: .play, mode: .streamSelector) },
-                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) })
+                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) },
+                                           playAtQuality: { showStreams($0, from: .play, mode: .quality($1)) })
                         } trailer: { width in
                             DetailTrailerPanel(model: model, width: width, playerIsCovered: playerIsCovered)
                         } synopsis: {
@@ -154,6 +165,9 @@ struct DetailView: View {
                             EmptyView()
                         }
                         #else
+                        if showsEditorialHero {
+                            editorialHero(in: geometry.size)
+                        } else {
                         DetailHero(model: model, scroll: heroScroll, size: geometry.size, contentMargin: contentMargin,
                                    topInset: max(topInset, windowSafeArea.top), pictureSlot: pictureSlot,
                                    logoSlot: logoSlot, isRevealed: isHeroRevealed, hidesLogo: hidesLogo,
@@ -161,15 +175,18 @@ struct DetailView: View {
                             DetailActions(model: model, isConfirmingUnmarkShow: $isConfirmingUnmarkShow,
                                           showsActions: !showsStreams, isLoadingStreams: loadingTrigger == .play,
                                           hasNoStreams: unavailableStreams.contains(model.primaryRequest?.identity ?? ""),
+                                          openedInPlayer: openedInPlayer[model.primaryRequest?.identity ?? ""],
                                           blocksPlay: loadingTrigger != nil && loadingTrigger != .play,
                                           play: { showStreams($0, from: .play) },
                                            showStreamSelector: { showStreams($0, from: .play, mode: .streamSelector) },
-                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) })
+                                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) },
+                                           playAtQuality: { showStreams($0, from: .play, mode: .quality($1)) })
                         } trailer: {
                             DetailTrailerPanel(model: model, width: trailerWidth(in: geometry.size), playerIsCovered: playerIsCovered)
                         } synopsis: {
                             DetailSynopsis(description: model.detail.preview.description, isExpanded: $isDescriptionExpanded,
                                            isTruncated: $isDescriptionTruncated, isLoading: model.isLoading)
+                        }
                         }
                         #endif
                         if let request = streams.request {
@@ -185,11 +202,13 @@ struct DetailView: View {
                                              scrollToRow: { proxy.scrollTo($0, anchor: .center) },
                                              episodeScore: model.episodeScore(for: request),
                                              episodeSwitcher: episodeSwitcher(for: request),
-                                             forcesAutomaticStart: playOpeningMode == .infuse,
+                                             forcesAutomaticStart: playOpeningMode == .infuse || playOpeningMode.quality != nil,
                                              onAutomaticStart: { _ in streams.startedAutomatically() },
                                              playColourHex: model.playColourHex,
                                              allowsAutomaticStart: playOpeningMode != .streamSelector,
-                                             preferredAutomaticPlayer: playOpeningMode == .infuse ? .infuse : nil)
+                                             preferredAutomaticPlayer: playOpeningMode == .infuse ? .infuse : nil,
+                                             onOpenedInPlayer: { openedInPlayer[request.identity] = $0 },
+                                             quality: playOpeningMode.quality)
                                 .id(streams.pickerID)
                                 #if targetEnvironment(macCatalyst)
                                 // The picker's rows are inset by its own margin, so the picker starts that much short of the page's margin.
@@ -223,6 +242,7 @@ struct DetailView: View {
                                     DetailEpisodes(model: model, pageWidth: geometry.size.width, pageHeight: geometry.size.height,
                                                    contentMargin: contentMargin,
                                                    isHoldingEpisode: $isHoldingEpisode, play: { showStreams($0, from: $1) },
+                                                   playAtQuality: { showStreams($0, from: .episode, mode: .quality($1)) },
                                                    loadingRequest: streams.loadingRequest, loadingTrigger: loadingTrigger,
                                                    unavailableStreams: unavailableStreams)
                                         .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
@@ -248,8 +268,13 @@ struct DetailView: View {
                                 }
                                 .padding(.top, model.isSeries ? metrics.titleSectionSpacing
                                     : isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
+                                if let franchise = model.franchise {
+                                    titleShelf(franchise.name, titles: franchise.parts, isLoading: false, identifier: "detail.franchise")
+                                        .padding(.top, metrics.titleSectionSpacing)
+                                }
                                 if appearance.showsRelated && (model.isLoadingRelated || !model.relatedTitles.isEmpty) {
-                                    related
+                                    titleShelf("More Like This", titles: model.relatedTitles,
+                                               isLoading: model.isLoadingRelated && model.relatedTitles.isEmpty, identifier: "detail.related")
                                         .padding(.top, metrics.titleSectionSpacing)
                                 }
                                 if appearance.showsWatchAnywhere, let watch = model.titleWatch, !watch.isEmpty {
@@ -265,6 +290,8 @@ struct DetailView: View {
                     .contentShape(Rectangle())
                     .detailLoadingTransition(model.isLoadingReviews)
                     .detailLoadingTransition(model.isLoadingRelated)
+                    // A movie's franchise arrives after its facts: the shelf fades in and the content below moves down with it.
+                    .detailLoadingTransition(model.franchise == nil)
                     // The panel's appearance and disappearance moves the content below it, rather than jumping.
                     .animation(.snappy(duration: 0.35), value: model.trailer.showsPanel)
                     // The reviews' consensus line arrives seconds after them: it fades in and the content below moves down with it.
@@ -353,8 +380,10 @@ struct DetailView: View {
         #endif
         .scrollEdgeEffectHidden(true, for: .top)
         .pageTopBar(hidden: true)
-        // Phone landscape uses the shared corner Back (RootTabView), the same size and place as on See All and category pages.
-        .pageNavigationBar(hidden: isPhoneInLandscape)
+        // Phone landscape uses the shared corner Back (RootTabView), the same size and place as on See All and category pages. The
+        // editorial page sets its own BACK over its picture.
+        .pageNavigationBar(hidden: isPhoneInLandscape || showsEditorialHero)
+        .navigationBarBackButtonHidden(showsEditorialHero)
         .navigationBarTitleDisplayMode(.inline)
         // A detail page's landscape controls start tucked away and omit the title and divider already represented by its hero.
         .onAppear {
@@ -517,7 +546,8 @@ struct DetailView: View {
     /// still leaves the page, by the button or the swipe: the streams are part of the title's page, not a screen of their own.
     private func showStreams(_ request: StreamRequest, from trigger: StreamTrigger, mode: PlayOpeningMode = .normal) {
         Task { @MainActor in
-            if mode == .normal, let manager = services.downloads {
+            // A downloaded copy plays as it is, and uses no data: Data Saver takes it too.
+            if mode == .normal || mode == .quality(.dataSaver), let manager = services.downloads {
                 await manager.start()
                 if let item = manager.item(for: request), item.state == .complete,
                    let plan = await manager.plan(for: item.id) {
@@ -529,6 +559,7 @@ struct DetailView: View {
                 }
             }
             guard !unavailableStreams.contains(request.identity) else { return }
+            openedInPlayer[request.identity] = nil
             if mode == .infuse {
                 guard let scheme = URL(string: "infuse://"), UIApplication.shared.canOpenURL(scheme) else {
                     showsMissingInfuse = true
@@ -540,12 +571,12 @@ struct DetailView: View {
             if mode == .normal {
                 let wasSpecial = playOpeningMode != .normal && streams.request != nil
                 playOpeningMode = .normal
-                if wasSpecial { streams.open(request) }
+                if wasSpecial { streams.open(request, from: trigger) }
                 else { streams.show(request, from: trigger) }
             } else {
                 // Explicit choices replace any existing picker and never change the saved player preference.
                 playOpeningMode = mode
-                streams.open(request)
+                streams.open(request, from: trigger)
             }
         }
     }
@@ -581,6 +612,41 @@ struct DetailView: View {
     }
 
     // MARK: - Header
+
+    /// The editorial title page (the Arthouse preset), on a phone held upright: the picture fills the first screen with the type over it.
+    private var showsEditorialHero: Bool { appearance.showsEditorialPages && !isLandscape }
+
+    /// The editorial first screen, then the trailer's panel when it has one, then the synopsis and the ratings, as the standard page has
+    /// them under its controls. While the streams show, the first screen stays and the streams follow it.
+    @ViewBuilder
+    private func editorialHero(in size: CGSize) -> some View {
+        EditorialTitleHero(model: model, pictureSlot: pictureSlot, isRevealed: isHeroRevealed, size: size,
+                           topInset: max(topInset, windowSafeArea.top), isLoadingStreams: loadingTrigger == .play,
+                           hasNoStreams: unavailableStreams.contains(model.primaryRequest?.identity ?? ""),
+                           blocksPlay: loadingTrigger != nil && loadingTrigger != .play,
+                           isConfirmingUnmarkShow: $isConfirmingUnmarkShow,
+                           play: { showStreams($0, from: .play) },
+                           showStreamSelector: { showStreams($0, from: .play, mode: .streamSelector) },
+                           playWithInfuse: { showStreams($0, from: .play, mode: .infuse) },
+                           playAtQuality: { showStreams($0, from: .play, mode: .quality($1)) },
+                           back: { router.goBackOnTab() })
+        if !showsStreams && model.trailer.showsPanel {
+            DetailTrailerPanel(model: model, width: trailerWidth(in: size), playerIsCovered: playerIsCovered)
+                .padding(.horizontal, contentMargin)
+                .padding(.top, TitleHero.playRowGap)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+        }
+        if !showsStreams {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                DetailSynopsis(description: model.detail.preview.description, isExpanded: $isDescriptionExpanded,
+                               isTruncated: $isDescriptionTruncated, isLoading: model.isLoading)
+                DetailRatings(model: model, startsLoading: model.hasSettledHero)
+            }
+            .padding(.top, Theme.Spacing.l)
+            .padding(.horizontal, contentMargin)
+            .transition(.opacity)
+        }
+    }
 
     /// The trailer's panel is the page's width less its margins. In landscape it is also kept to the screen's height at 16:9, so the panel
     /// never runs off the bottom of a short screen.
@@ -628,13 +694,14 @@ struct DetailView: View {
         await hero.load(urgent: true, picture: heroURL, pictureSize: heroPixelSize, logo: logoURL, logoSize: HeroLoader.logoPixelSize)
     }
 
-    /// Titles TMDb recommends for this one, at the bottom of the page. Each opens its own page.
-    private var related: some View {
+    /// A shelf of TMDb titles at the bottom of the page: the movie's franchise, or the titles TMDb recommends (More Like This). Each opens
+    /// its own page.
+    private func titleShelf(_ title: String, titles: [TMDbRelatedTitle], isLoading: Bool, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
-            SectionHeader("More Like This")
+            SectionHeader(title)
                 .padding(.horizontal, contentMargin)
             ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
-                if model.isLoadingRelated && model.relatedTitles.isEmpty {
+                if isLoading {
                     ForEach(0..<6, id: \.self) { index in
                         RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .artwork))
                             .fill(Theme.placeholder)
@@ -644,17 +711,17 @@ struct DetailView: View {
                             .accessibilityLabel("Loading related title")
                     }
                 }
-                ForEach(model.relatedTitles) { title in
+                ForEach(titles) { title in
                     NavigationLink(value: title.titleDestination) {
                         RelatedTitleCard(title: title, services: services)
                     }
                     .buttonStyle(PressableCardStyle.poster)
                     .titleTapHaptic()
                     .reportsShelfEdge(id: title.id)
-                    .accessibilityIdentifier("detail.related.\(title.id)")
+                    .accessibilityIdentifier("\(identifier).\(title.id)")
                 }
             }
-            .accessibilityIdentifier("detail.related")
+            .accessibilityIdentifier(identifier)
             .environment(\.showsArtworkLoadingSpinner, true)
         }
     }

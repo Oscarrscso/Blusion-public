@@ -71,9 +71,7 @@ struct DetailInformation: View {
         }
         // Most important first: the first rows show until the section opens. A film has no first aired or seasons, so its first five
         // are its release, runtime, genres, director and age rating.
-        let priceLabels: [String] = TitlePrices.Kind.allCases.flatMap { kind in
-            TitlePrices.Quality.allCases.reversed().map { TitleInformation.priceLabel(kind, $0) }
-        }
+        let priceLabels: [String] = TitlePrices.Kind.allCases.map(\.label)
         let importance: [String] = ["Released", "First aired", "Runtime", "Seasons", "Genres", "Director", "Creator", "Creators", "Network",
                                     "Networks", "Age rating", "Writers", "Last aired", "Status", "Studio", "Studios", "Country", "Countries",
                                     "Original language", "Original title", "Budget", "Box office"] + priceLabels + ["Average rating"]

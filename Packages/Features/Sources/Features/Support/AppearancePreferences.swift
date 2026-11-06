@@ -35,6 +35,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         /// The app's own accent, from the asset catalogue.
         case blusion
         case blue, indigo, purple, pink, red, orange, yellow, green, mint, teal, cyan, white
+        /// Colours mixed for the presets: Netflix's red, Plex's amber, Arthouse's olive, Disney+'s royal blue and Prime Video's sky blue.
+        case crimson, amber, olive, royal, sky
         /// `AppearancePreferences.customAccent`.
         case custom
 
@@ -64,6 +66,11 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             case .teal: RGB(red: 0.25, green: 0.78, blue: 0.88)
             case .cyan: RGB(red: 0.39, green: 0.82, blue: 1)
             case .white: RGB(red: 0.92, green: 0.92, blue: 0.94)
+            case .crimson: RGB(red: 0.898, green: 0.035, blue: 0.078)
+            case .amber: RGB(red: 0.898, green: 0.627, blue: 0.05)
+            case .olive: RGB(red: 0.741, green: 0.733, blue: 0.553)
+            case .royal: RGB(red: 0, green: 0.388, blue: 0.898)
+            case .sky: RGB(red: 0, green: 0.659, blue: 0.882)
             case .custom: nil
             }
         }
@@ -71,7 +78,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
     /// The colour behind every page, and the colour hero artwork fades into.
     public enum Background: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
-        case black, graphite, slate, midnight, plum, forest, cocoa
+        case black, graphite, charcoal, slate, steel, ink, navy, midnight, plum, forest, cocoa
         /// A very dark shade of the accent, as dark as `tintStrength` says.
         case tinted
         /// `AppearancePreferences.customBackground`.
@@ -84,8 +91,12 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         public var rgb: RGB? {
             switch self {
             case .black: RGB(red: 0, green: 0, blue: 0)
-            case .graphite: RGB(red: 0.075, green: 0.075, blue: 0.075)
+            case .graphite: RGB(red: 0.078, green: 0.078, blue: 0.078)
+            case .charcoal: RGB(red: 0.11, green: 0.12, blue: 0.13)
             case .slate: RGB(red: 0.055, green: 0.067, blue: 0.085)
+            case .steel: RGB(red: 0.078, green: 0.094, blue: 0.11)
+            case .ink: RGB(red: 0.059, green: 0.09, blue: 0.118)
+            case .navy: RGB(red: 0.102, green: 0.114, blue: 0.161)
             case .midnight: RGB(red: 0.02, green: 0.035, blue: 0.085)
             case .plum: RGB(red: 0.075, green: 0.03, blue: 0.08)
             case .forest: RGB(red: 0.025, green: 0.06, blue: 0.04)
@@ -205,6 +216,58 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         public var label: String { rawValue.capitalized }
     }
 
+    /// How wide headings' letters are: the text's own, or one of their own. Only the default font has widths.
+    public enum HeadingWidth: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case matchText, compressed, condensed, standard, expanded
+
+        public var id: String { rawValue }
+
+        public var label: String {
+            switch self {
+            case .matchText: "Same as Text"
+            case .standard: "Default"
+            default: rawValue.capitalized
+            }
+        }
+
+        /// The width, or nil to follow the text's.
+        public var width: FontWidth? {
+            switch self {
+            case .matchText: nil
+            case .compressed: .compressed
+            case .condensed: .condensed
+            case .standard: .standard
+            case .expanded: .expanded
+            }
+        }
+    }
+
+    /// Extra space between headings' letters: the text's own, or their own.
+    public enum HeadingSpacing: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case matchText, tight, standard, wide, wider
+
+        public var id: String { rawValue }
+
+        public var label: String {
+            switch self {
+            case .matchText: "Same as Text"
+            case .standard: "Default"
+            default: rawValue.capitalized
+            }
+        }
+
+        /// The spacing, or nil to follow the text's.
+        public var spacing: LetterSpacing? {
+            switch self {
+            case .matchText: nil
+            case .tight: .tight
+            case .standard: .standard
+            case .wide: .wide
+            case .wider: .wider
+            }
+        }
+    }
+
     /// The heading's text style: Title 3, Title 2 (the app's own), Title, Large Title.
     public enum HeadingSize: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
         case small, standard, large, huge
@@ -219,16 +282,17 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         case artwork, playButton, actionButtons, filters, reviews, panels, playerControls, settingsPreview, settingsRows
 
         public var id: String { rawValue }
+        /// What the group rounds, in the words the listener sees it by.
         public var label: String {
             switch self {
-            case .artwork: "Artwork"
+            case .artwork: "Posters & Cards"
             case .playButton: "Play Button"
-            case .actionButtons: "Action Buttons"
-            case .filters: "Filters & Badges"
-            case .reviews: "Reviews"
-            case .panels: "Panels"
-            case .playerControls: "Player Controls"
-            case .settingsPreview: "Settings Preview"
+            case .actionButtons: "Glass Buttons"
+            case .filters: "Filters, Chips & Badges"
+            case .reviews: "Review Cards"
+            case .panels: "Stream Cards & Panels"
+            case .playerControls: "Video Player"
+            case .settingsPreview: "Appearance Preview"
             case .settingsRows: "Settings Rows"
             }
         }
@@ -305,6 +369,51 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         }
     }
 
+    // MARK: - Layout
+
+    /// How the app's pages are laid out: its own pages, or the editorial ones (on iPhone for now): a pill bar in place of the tab bar, a
+    /// typeset Search with its results on the accent, and title pages set over their full-screen picture. Only presets set it: Arthouse
+    /// the editorial pages, every other preset the standard ones.
+    public enum Layout: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case standard, editorial
+
+        public var id: String { rawValue }
+        public var label: String { rawValue.capitalized }
+    }
+
+    // MARK: - Buttons and headings
+
+    /// How Play is filled: tinted glass in the title's artwork colour (the app's own), solid white with dark text, or the accent, solid.
+    public enum PlayStyle: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case artwork, white, accent
+
+        public var id: String { rawValue }
+        public var label: String { rawValue.capitalized }
+    }
+
+    /// What the buttons are made of: Liquid Glass, flat fills for a look whose app draws no glass, or no fill at all (Flat: every
+    /// button, Play included, is its label alone).
+    public enum ButtonFinish: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case glass, solid, flat
+
+        public var id: String { rawValue }
+        public var label: String { rawValue.capitalized }
+    }
+
+    /// The colour of shelf and section headings.
+    public enum HeadingColour: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case primary, secondary, accent
+
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .primary: "White"
+            case .secondary: "Grey"
+            case .accent: "Accent"
+            }
+        }
+    }
+
     // MARK: - Title pages, navigation and motion
 
     /// The order of the two sections under a title's episodes.
@@ -352,99 +461,335 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         }
     }
 
+    /// How long the Mac's hover feedback takes to light and fade, as a share of its own timing. Instant draws it at once.
+    public enum HoverSpeed: String, Sendable, Equatable, Codable, CaseIterable, Identifiable {
+        case instant, fast, standard, slow
+
+        public var id: String { rawValue }
+        public var label: String { self == .standard ? "Default" : rawValue.capitalized }
+
+        /// The duration multiplier; zero is Instant.
+        public var factor: Double {
+            switch self {
+            case .instant: 0
+            case .fast: 0.5
+            case .standard: 1
+            case .slow: 2
+            }
+        }
+    }
+
+    /// The Mac's hover feedback: what lights, grows and lifts under the pointer (see `PointerInteraction.swift`). The defaults are the
+    /// look the app always had. The iPhone has no pointer to hover, so nothing here reaches it.
+    public struct Hover: Sendable, Equatable, Codable {
+        public var isEnabled = true
+        /// How much brighter a button or glass control draws under the pointer (`brightnessRange`).
+        public var brightness: Double = 0.15
+        /// How much a button or glass control grows under the pointer, as a share of its size (`growRange`).
+        public var grow: Double = 0.025
+        /// The white fill a glass control and a navigation segment take under the pointer (`fillRange`).
+        public var glassFill: Double = 0.18
+        public var showsRim = true
+        /// The rim drawn round a glass control and a navigation segment under the pointer (`rimRange`).
+        public var rimStrength: Double = 0.35
+        /// How much a card the pointer follows grows under it, as a share of its size (`cardLiftRange`).
+        public var cardLift: Double = 0.04
+        public var cardShadow = true
+        public var showsGlow = true
+        /// The glow that follows the pointer across a card (`glowRange`).
+        public var glowStrength: Double = 0.04
+        public var speed: HoverSpeed = .standard
+        /// The system's own hover highlight alongside the app's.
+        public var systemHighlight = true
+
+        public static let brightnessRange: ClosedRange<Double> = 0...0.4
+        public static let growRange: ClosedRange<Double> = 0...0.1
+        public static let fillRange: ClosedRange<Double> = 0...0.5
+        public static let rimRange: ClosedRange<Double> = 0...1
+        public static let cardLiftRange: ClosedRange<Double> = 0...0.12
+        public static let glowRange: ClosedRange<Double> = 0...0.2
+
+        public init() {}
+
+        // The values the modifiers draw with: zero when hover feedback is off.
+
+        public var buttonBrightness: Double { isEnabled ? brightness : 0 }
+        public var buttonScale: Double { isEnabled ? 1 + grow : 1 }
+        public var glassFillOpacity: Double { isEnabled ? glassFill : 0 }
+        public var glassRimOpacity: Double { isEnabled && showsRim ? rimStrength : 0 }
+        /// A navigation segment's fill and rim, a little quieter than a glass control's (0.16 and 0.3 by default).
+        public var segmentFillOpacity: Double { glassFillOpacity * (0.16 / 0.18) }
+        public var segmentRimOpacity: Double { glassRimOpacity * (0.3 / 0.35) }
+        /// A card's highlight (0.08 by default; 0.012 for a card with the pointer glow), in step with the glass fill.
+        public var cardFillOpacity: Double { glassFillOpacity * (0.08 / 0.18) }
+        public var trackedCardFillOpacity: Double { glassFillOpacity * (0.012 / 0.18) }
+        public var cardScale: Double { isEnabled ? 1 + cardLift : 1 }
+        public var castsShadow: Bool { isEnabled && cardShadow }
+        public var glowOpacity: Double { isEnabled && showsGlow ? glowStrength : 0 }
+        public var usesSystemHighlight: Bool { isEnabled && systemHighlight }
+        /// `duration` at this speed, or nil (no animation) for Instant.
+        public func duration(_ duration: Double) -> Double? { speed.factor == 0 ? nil : duration * speed.factor }
+
+        public init(from decoder: Decoder) throws {
+            self.init()
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            func read<Value: Decodable>(_ key: CodingKeys, _ fallback: Value) -> Value {
+                (try? container.decode(Value.self, forKey: key)) ?? fallback
+            }
+            func clamp(_ key: CodingKeys, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
+                let value = read(key, fallback)
+                return value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : fallback
+            }
+            isEnabled = read(.isEnabled, isEnabled)
+            brightness = clamp(.brightness, brightness, Self.brightnessRange)
+            grow = clamp(.grow, grow, Self.growRange)
+            glassFill = clamp(.glassFill, glassFill, Self.fillRange)
+            showsRim = read(.showsRim, showsRim)
+            rimStrength = clamp(.rimStrength, rimStrength, Self.rimRange)
+            cardLift = clamp(.cardLift, cardLift, Self.cardLiftRange)
+            cardShadow = read(.cardShadow, cardShadow)
+            showsGlow = read(.showsGlow, showsGlow)
+            glowStrength = clamp(.glowStrength, glowStrength, Self.glowRange)
+            speed = read(.speed, speed)
+            systemHighlight = read(.systemHighlight, systemHighlight)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case isEnabled, brightness, grow, glassFill, showsRim, rimStrength, cardLift, cardShadow, showsGlow, glowStrength, speed,
+                 systemHighlight
+        }
+    }
+
     // MARK: - Presets
 
-    /// Ready-made looks. Applying one sets colour, text and cards together and leaves the rest (Home, title pages, navigation and
-    /// motion) as it is. The custom accent and background colours are kept too, so a preset never loses a colour the listener mixed.
+    /// Ready-made looks, each the look of a streaming or film app as closely as these settings draw it: its canvas and accent, how its
+    /// rows are titled, its cards' size, corners, gaps and captions, its progress line, its Home spotlight, the order of its title
+    /// pages, its transitions and, on iPhone, its tab bar. Arthouse is the app's own editorial look (`Layout`).
+    ///
+    /// Applying one sets all of that together, with Play's fill, whether the buttons are glass, the headings' colour and the Mac's hover.
+    /// The listener's text size, custom colours, start tab, Home's Continue Watching bar, the title page sections shown, spoiler hiding
+    /// and animation speed stay their own.
     public enum Preset: String, Sendable, CaseIterable, Identifiable {
-        case original, midnight, cinema, compact, bigScreen, paper, mono, neon, noir, retro, calm
+        case original, netflix, appleTV, disneyPlus, primeVideo, letterboxd, plex, arthouse
 
         public var id: String { rawValue }
 
         public var label: String {
             switch self {
-            case .bigScreen: "Big Screen"
-            default: rawValue.capitalized
+            case .original: "Original"
+            case .netflix: "Netflix"
+            case .appleTV: "Apple TV"
+            case .disneyPlus: "Disney+"
+            case .primeVideo: "Prime Video"
+            case .letterboxd: "Letterboxd"
+            case .plex: "Plex"
+            case .arthouse: "Arthouse"
             }
         }
+
+        /// The glass buttons, filters, the player and Settings' rows keep the capsules and circles they are drawn with, whatever a preset
+        /// does to the posters, cards and panels. Play keeps its capsule too, unless the app squares it.
+        static let controlCorners: [String: Double] = Dictionary(uniqueKeysWithValues: [
+            CornerGroup.playButton, .actionButtons, .filters, .playerControls, .settingsRows,
+        ].map { ($0.rawValue, 1) })
+
+        /// Play as a rectangle with small rounded corners, as Netflix, Disney+ and Prime Video draw it.
+        static let squarePlay = 0.3
 
         /// `appearance` with this preset's look.
         public func applied(to appearance: AppearancePreferences) -> AppearancePreferences {
             var look = AppearancePreferences()
+            if self != .original { look.cornerOverrides = Self.controlCorners }
             switch self {
             case .original:
                 break
-            case .midnight:
-                look.accent = .indigo
-                look.background = .midnight
-                look.cornerScale = 1.8
-            case .cinema:
-                look.accent = .red
-                look.cardScale = 1.2
-                look.spacingScale = 1.35
-                look.cornerScale = 0.5
-                look.phoneGridColumns = 2
-            case .compact:
-                look.textSize = .small
-                look.cardScale = 0.82
-                look.spacingScale = 0.66
-                look.cornerScale = 0.5
-                look.phoneGridColumns = 4
-                look.showsPosterTitles = true
-            case .bigScreen:
-                look.textSize = .xLarge
-                look.boldText = true
-                look.cardScale = 1.42
-                look.spacingScale = 1.35
-                look.phoneGridColumns = 2
-            case .paper:
-                look.accent = .orange
-                look.background = .tinted
-                look.font = .serif
-                look.cornerScale = 1.8
-                look.showsPosterTitles = true
-            case .mono:
-                look.accent = .white
+            case .netflix:
+                // Red on #141414, kept for progress and the switches. Small bold row titles set close; smaller box art with 4-point
+                // corners, no captions, in very tight rows; rectangles throughout: Play, the title page's buttons (circles included),
+                // the stream cards, reviews and Settings' rows, with capsule filters as Netflix's chips are; a tall billboard that stays
+                // on its title, without dots; a thin red line with no minutes; Cast before Reviews; labelled tabs on a fixed bar.
+                look.accent = .crimson
                 look.background = .graphite
-                look.font = .monospaced
-                look.cornerScale = 0
+                look.headingWeight = .bold
+                look.headingSize = .small
+                look.headingSpacing = .tight
+                look.cardScale = 0.9
+                look.spacingScale = 0.5
+                look.cornerScale = 0.4
+                look.cornerOverrides[CornerGroup.playButton.rawValue] = Self.squarePlay
+                look.cornerOverrides[CornerGroup.actionButtons.rawValue] = Self.squarePlay
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 0.4
+                look.includesCircularButtons = true
                 look.outline = .off
-            case .neon:
-                look.accent = .pink
-                look.background = .plum
-                look.font = .rounded
-                look.headingWeight = .black
-                look.cornerScale = 2.2
-                look.outline = .strong
-                look.artworkTone = .vivid
                 look.progressColour = .accent
-                look.progressThickness = .thick
-            case .noir:
+                look.progressThickness = .thin
+                look.showsTimeLeft = false
+                look.showsPageDots = false
+                look.sectionOrder = .castFirst
+                look.phoneTabTitles = true
+                look.minimisesTabBar = false
+                // A white Play and flat grey buttons, no glass; on the Mac a card grows on hover, without rim or glow.
+                look.playStyle = .white
+                look.buttonFinish = .solid
+                look.hover.grow = 0.05
+                look.hover.cardLift = 0.1
+                look.hover.showsRim = false
+                look.hover.showsGlow = false
+                look.hover.speed = .fast
+            case .appleTV:
+                // Black with white as the accent. Large bold row titles; big cards, two across in grids, with generous rounded
+                // corners (reviews, stream cards and Settings' rows alike) and wide gaps, each titled with its genre and year
+                // underneath; a tall spotlight turning every 8 seconds with its dots; a white line with the minutes left; Cast before
+                // Reviews; labelled tabs on a bar that shrinks.
                 look.accent = .white
-                look.font = .serif
-                look.letterSpacing = .wide
+                look.headingSize = .large
+                look.cardScale = 1.25
+                look.spacingScale = 1.35
+                look.phoneGridColumns = 2
+                look.cornerScale = 1.4
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 1.4
+                look.outline = .off
+                look.showsPosterTitles = true
+                look.lineSpacing = .relaxed
+                look.heroAutoAdvance = 8
+                look.sectionOrder = .castFirst
+                look.phoneTabTitles = true
+                // A white Play on Apple's own glass; on the Mac a card lifts with its shadow and a soft glow.
+                look.playStyle = .white
+                look.hover.cardLift = 0.06
+                look.hover.glowStrength = 0.1
+                look.hover.showsRim = false
+            case .disneyPlus:
+                // Royal blue on Disney+'s navy. Semibold row titles with a little air; rounded tiles with a visible edge, as Disney+
+                // outlines its tiles; a squared Play beside round buttons; rounded-rectangle filters; a shorter banner turning every
+                // 5 seconds with its dots; a blue line; icon-only tabs on a bar that stays put.
+                look.accent = .royal
+                look.background = .navy
+                look.headingWeight = .semibold
+                look.headingSpacing = .wide
+                look.cardScale = 1.05
+                look.spacingScale = 1.1
+                look.cornerScale = 0.8
+                look.cornerOverrides[CornerGroup.playButton.rawValue] = Self.squarePlay
+                look.cornerOverrides[CornerGroup.filters.rawValue] = 0.5
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 0.8
+                look.outline = .standard
+                look.progressColour = .accent
+                look.heroAutoAdvance = 5
+                look.phoneTabTitles = false
+                look.minimisesTabBar = false
+                // A white Play and flat buttons; on the Mac a tile lifts inside a bright white rim, as Disney+ frames the one in focus.
+                look.playStyle = .white
+                look.buttonFinish = .solid
+                look.hover.cardLift = 0.05
+                look.hover.rimStrength = 1
+                look.hover.showsGlow = false
+            case .primeVideo:
+                // Sky blue on Prime Video's ink. Small bold row titles set close; 6-point cards in close rows; a squared Play and
+                // rounded-rectangle buttons beside round icons; a spotlight turning every 8 seconds with its dots; a thin blue line;
+                // labelled tabs on a bar that stays put.
+                look.accent = .sky
+                look.background = .ink
+                look.headingSize = .small
+                look.headingSpacing = .tight
+                look.cardScale = 0.95
+                look.spacingScale = 0.75
+                look.cornerScale = 0.6
+                look.cornerOverrides[CornerGroup.playButton.rawValue] = Self.squarePlay
+                look.cornerOverrides[CornerGroup.actionButtons.rawValue] = 0.5
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 0.6
+                look.outline = .off
+                look.progressColour = .accent
+                look.progressThickness = .thin
+                look.heroAutoAdvance = 8
+                look.phoneTabTitles = true
+                look.minimisesTabBar = false
+                // A sky-blue Play and flat buttons; on the Mac a card lifts and brightens, without rim or glow.
+                look.playStyle = .accent
+                look.buttonFinish = .solid
+                look.hover.cardLift = 0.07
+                look.hover.brightness = 0.2
+                look.hover.showsRim = false
+                look.hover.showsGlow = false
+            case .letterboxd:
+                // Green on Letterboxd's steel. Small semibold spaced capitals for section titles and relaxed lines for reading
+                // reviews; a dense wall of small posters, four across, with 3-point corners, a faint edge and narrow gaps; small-cornered
+                // filters, reviews and Settings' rows; a short backdrop that stays put, without dots; a thin green line with no
+                // minutes; the synopsis unfolded and Reviews first; cards open without zooming; icon-only tabs.
+                look.accent = .green
+                look.background = .steel
+                look.headingWeight = .semibold
+                look.headingSize = .small
+                look.headingSpacing = .wide
                 look.uppercaseHeadings = true
-                look.cornerScale = 0
+                look.lineSpacing = .relaxed
+                look.cardScale = 0.75
+                look.spacingScale = 0.6
+                look.phoneGridColumns = 4
+                look.cornerScale = 0.3
+                look.cornerOverrides[CornerGroup.filters.rawValue] = 0.3
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 0.3
                 look.outline = .faint
-                look.artworkTone = .mono
-            case .retro:
-                look.accent = .yellow
-                look.background = .cocoa
-                look.font = .monospaced
-                look.headingWeight = .heavy
+                look.progressColour = .accent
+                look.progressThickness = .thin
+                look.showsTimeLeft = false
+                look.showsPageDots = false
+                look.expandsSynopsis = true
+                look.zoomTransitions = false
+                look.phoneTabTitles = false
+                // Grey section titles; a green Play and flat buttons; on the Mac a poster stays put and takes an outline.
+                look.headingColour = .secondary
+                look.playStyle = .accent
+                look.buttonFinish = .solid
+                look.hover.grow = 0
+                look.hover.cardLift = 0
+                look.hover.cardShadow = false
+                look.hover.rimStrength = 0.7
+                look.hover.showsGlow = false
+                look.hover.speed = .instant
+            case .plex:
+                // Amber on Plex's charcoal. Semibold row titles; 5-point posters, each titled with its year underneath, as a media
+                // library lists them; rounded-rectangle filters and Settings' rows; a shorter spotlight that stays put, without dots;
+                // a thick amber line; Cast before Reviews; labelled tabs.
+                look.accent = .amber
+                look.background = .charcoal
+                look.headingWeight = .semibold
                 look.cornerScale = 0.5
-                look.artworkTone = .muted
+                look.cornerOverrides[CornerGroup.filters.rawValue] = 0.4
+                look.cornerOverrides[CornerGroup.settingsRows.rawValue] = 0.5
+                look.outline = .off
+                look.showsPosterTitles = true
                 look.progressColour = .accent
                 look.progressThickness = .thick
-            case .calm:
-                look.accent = .mint
-                look.background = .forest
-                look.font = .rounded
-                look.headingWeight = .semibold
-                look.lineSpacing = .relaxed
-                look.cornerScale = 1.5
-                look.spacingScale = 1.35
-                look.artworkTone = .muted
+                look.showsPageDots = false
+                look.sectionOrder = .castFirst
+                look.phoneTabTitles = true
+                // An amber Play and flat buttons; on the Mac a poster lifts a little inside a rim.
+                look.playStyle = .accent
+                look.buttonFinish = .solid
+                look.hover.cardLift = 0.03
+                look.hover.rimStrength = 0.6
+                look.hover.showsGlow = false
+            case .arthouse:
+                // Editorial: condensed text, large medium-weight capitals for headings and titles, black-and-white stills in square
+                // frames with their captions, olive as the one colour, and square tags.
+                look.accent = .olive
+                look.fontWidth = .condensed
+                look.headingWeight = .medium
+                look.headingSize = .huge
+                look.uppercaseHeadings = true
+                look.cardScale = 1.2
+                look.spacingScale = 1.25
+                look.phoneGridColumns = 2
+                look.cornerScale = 0
+                look.cornerOverrides[CornerGroup.filters.rawValue] = nil
+                look.showsPosterTitles = true
+                look.captionLines = 2
+                look.uppercaseCaptions = true
+                look.outline = .off
+                look.artworkTone = .mono
+                look.progressThickness = .thin
+                look.layout = .editorial
             }
             var result = appearance
             result.takeLook(from: look)
@@ -457,7 +802,6 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public static let cardScaleRange: ClosedRange<Double> = 0.6...1.6
     public static let cornerScaleRange: ClosedRange<Double> = 0...2.5
     public static let spacingScaleRange: ClosedRange<Double> = 0.3...2
-    public static let heroScaleRange: ClosedRange<Double> = 0.6...1.3
     public static let tintStrengthRange: ClosedRange<Double> = 0.04...0.3
     /// The column counts a phone's portrait poster grid offers. A wide window fits as many columns as the card size allows instead.
     public static let phoneGridColumnRange: ClosedRange<Int> = 2...6
@@ -475,6 +819,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var customBackground = RGB(red: 0.06, green: 0.06, blue: 0.08)
     /// How much of the accent the Tinted background has, as a share of the accent's own brightness (`tintStrengthRange`).
     public var tintStrength: Double = 0.11
+    public var playStyle: PlayStyle = .artwork
+    public var buttonFinish: ButtonFinish = .glass
 
     // MARK: - Text
 
@@ -488,7 +834,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var headingFont: HeadingFont = .matchText
     public var headingWeight: HeadingWeight = .bold
     public var headingSize: HeadingSize = .standard
+    public var headingWidth: HeadingWidth = .matchText
+    public var headingSpacing: HeadingSpacing = .matchText
     public var uppercaseHeadings = false
+    public var headingColour: HeadingColour = .primary
 
     // MARK: - Cards
 
@@ -513,6 +862,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var captionLines = 1
     /// The grey line under a card's title ("Drama · 2008").
     public var showsCaptionDetails = true
+    /// A card's title in capitals.
+    public var uppercaseCaptions = false
     public var outline: Outline = .standard
     public var artworkTone: ArtworkTone = .natural
     public var progressColour: ProgressColour = .white
@@ -520,10 +871,12 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     /// The minutes left beside the progress line on Continue cards.
     public var showsTimeLeft = true
 
+    // MARK: - Layout
+
+    public var layout: Layout = .standard
+
     // MARK: - Home
 
-    /// The spotlight's height, as a share of its own (`heroScaleRange`).
-    public var heroScale: Double = 1
     /// Seconds between the spotlight turning its page by itself; zero never (`heroAutoAdvanceOptions`).
     public var heroAutoAdvance = 0
     /// The dots under the spotlight that show which page it is on.
@@ -560,14 +913,21 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     /// The Continue Watching bar above the iPhone's tab bar.
     public var showsContinueBar = true
 
+    // MARK: - Hover
+
+    /// The Mac's hover feedback.
+    public var hover = Hover()
+
     public init() {}
 
-    /// Copies colour, text and cards from `look`: what a preset sets. The custom colours stay.
+    /// Copies what a preset sets from `look`: colour, Play's fill and the buttons' finish, text but its size, cards, corners, the layout,
+    /// Home's spotlight, the title page's layout, zoom transitions, the iPhone's tab bar and the Mac's hover. The custom colours stay.
     mutating func takeLook(from look: AppearancePreferences) {
         accent = look.accent
         background = look.background
         tintStrength = look.tintStrength
-        textSize = look.textSize
+        playStyle = look.playStyle
+        buttonFinish = look.buttonFinish
         font = look.font
         boldText = look.boldText
         italicText = look.italicText
@@ -577,19 +937,34 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         headingFont = look.headingFont
         headingWeight = look.headingWeight
         headingSize = look.headingSize
+        headingWidth = look.headingWidth
+        headingSpacing = look.headingSpacing
         uppercaseHeadings = look.uppercaseHeadings
+        headingColour = look.headingColour
         cardScale = look.cardScale
         cornerScale = look.cornerScale
+        cornerOverrides = look.cornerOverrides
+        includesCircularButtons = look.includesCircularButtons
         spacingScale = look.spacingScale
         phoneGridColumns = look.phoneGridColumns
         showsPosterTitles = look.showsPosterTitles
         captionLines = look.captionLines
         showsCaptionDetails = look.showsCaptionDetails
+        uppercaseCaptions = look.uppercaseCaptions
         outline = look.outline
         artworkTone = look.artworkTone
         progressColour = look.progressColour
         progressThickness = look.progressThickness
         showsTimeLeft = look.showsTimeLeft
+        layout = look.layout
+        heroAutoAdvance = look.heroAutoAdvance
+        showsPageDots = look.showsPageDots
+        expandsSynopsis = look.expandsSynopsis
+        sectionOrder = look.sectionOrder
+        zoomTransitions = look.zoomTransitions
+        phoneTabTitles = look.phoneTabTitles
+        minimisesTabBar = look.minimisesTabBar
+        hover = look.hover
     }
 
     // MARK: - Coding
@@ -614,6 +989,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         background = read(.background, background)
         customBackground = read(.customBackground, customBackground)
         tintStrength = clamp(read(.tintStrength, tintStrength), Self.tintStrengthRange, 0.11)
+        playStyle = read(.playStyle, playStyle)
+        buttonFinish = read(.buttonFinish, buttonFinish)
 
         textSize = read(.textSize, textSize)
         font = read(.font, font)
@@ -625,7 +1002,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         headingFont = read(.headingFont, headingFont)
         headingWeight = read(.headingWeight, headingWeight)
         headingSize = read(.headingSize, headingSize)
+        headingWidth = read(.headingWidth, headingWidth)
+        headingSpacing = read(.headingSpacing, headingSpacing)
         uppercaseHeadings = read(.uppercaseHeadings, uppercaseHeadings)
+        headingColour = read(.headingColour, headingColour)
 
         // Card size, corners and spacing were fixed steps saved by name; a save from then reads the step's value.
         cardScale = clamp(read(.cardSize, legacy(.legacyCardScale, Self.legacyCardScales) ?? 1), Self.cardScaleRange, 1)
@@ -640,6 +1020,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         showsPosterTitles = read(.showsPosterTitles, showsPosterTitles)
         captionLines = min(max(read(.captionLines, captionLines), Self.captionLineRange.lowerBound), Self.captionLineRange.upperBound)
         showsCaptionDetails = read(.showsCaptionDetails, showsCaptionDetails)
+        uppercaseCaptions = read(.uppercaseCaptions, uppercaseCaptions)
         // The outline was a switch; off reads as Off.
         let legacyOutline: Outline? = (try? container.decode(Bool.self, forKey: .legacyArtworkOutline)).map { $0 ? .standard : .off }
         outline = read(.outline, legacyOutline ?? outline)
@@ -647,8 +1028,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         progressColour = read(.progressColour, progressColour)
         progressThickness = read(.progressThickness, progressThickness)
         showsTimeLeft = read(.showsTimeLeft, showsTimeLeft)
+        layout = read(.layout, layout)
 
-        heroScale = clamp(read(.heroScale, heroScale), Self.heroScaleRange, 1)
         let advance = read(.heroAutoAdvance, heroAutoAdvance)
         heroAutoAdvance = Self.heroAutoAdvanceOptions.contains(advance) ? advance : 0
         showsPageDots = read(.showsPageDots, showsPageDots)
@@ -671,6 +1052,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         phoneTabTitles = read(.phoneTabTitles, phoneTabTitles)
         minimisesTabBar = read(.minimisesTabBar, minimisesTabBar)
         showsContinueBar = read(.showsContinueBar, showsContinueBar)
+
+        hover = read(.hover, hover)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -680,6 +1063,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(background, forKey: .background)
         try container.encode(customBackground, forKey: .customBackground)
         try container.encode(tintStrength, forKey: .tintStrength)
+        try container.encode(playStyle, forKey: .playStyle)
+        try container.encode(buttonFinish, forKey: .buttonFinish)
 
         try container.encode(textSize, forKey: .textSize)
         try container.encode(font, forKey: .font)
@@ -691,7 +1076,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(headingFont, forKey: .headingFont)
         try container.encode(headingWeight, forKey: .headingWeight)
         try container.encode(headingSize, forKey: .headingSize)
+        try container.encode(headingWidth, forKey: .headingWidth)
+        try container.encode(headingSpacing, forKey: .headingSpacing)
         try container.encode(uppercaseHeadings, forKey: .uppercaseHeadings)
+        try container.encode(headingColour, forKey: .headingColour)
 
         try container.encode(cardScale, forKey: .cardSize)
         try container.encode(cornerScale, forKey: .cornerScale)
@@ -702,13 +1090,14 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(showsPosterTitles, forKey: .showsPosterTitles)
         try container.encode(captionLines, forKey: .captionLines)
         try container.encode(showsCaptionDetails, forKey: .showsCaptionDetails)
+        try container.encode(uppercaseCaptions, forKey: .uppercaseCaptions)
         try container.encode(outline, forKey: .outline)
         try container.encode(artworkTone, forKey: .artworkTone)
         try container.encode(progressColour, forKey: .progressColour)
         try container.encode(progressThickness, forKey: .progressThickness)
         try container.encode(showsTimeLeft, forKey: .showsTimeLeft)
+        try container.encode(layout, forKey: .layout)
 
-        try container.encode(heroScale, forKey: .heroScale)
         try container.encode(heroAutoAdvance, forKey: .heroAutoAdvance)
         try container.encode(showsPageDots, forKey: .showsPageDots)
 
@@ -730,19 +1119,23 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(phoneTabTitles, forKey: .phoneTabTitles)
         try container.encode(minimisesTabBar, forKey: .minimisesTabBar)
         try container.encode(showsContinueBar, forKey: .showsContinueBar)
+
+        try container.encode(hover, forKey: .hover)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case accent, customAccent, background, customBackground, tintStrength
+        case accent, customAccent, background, customBackground, tintStrength, playStyle, buttonFinish
         case textSize, font, boldText, italicText, fontWidth, letterSpacing, lineSpacing, headingFont, headingWeight, headingSize,
-             uppercaseHeadings
+             headingWidth, headingSpacing, uppercaseHeadings, headingColour
         case cornerOverrides, includesCircularButtons
-        case cardSize, cornerScale, spacing, phoneGridColumns, showsPosterTitles, captionLines, showsCaptionDetails, outline, artworkTone,
-             progressColour, progressThickness, showsTimeLeft
-        case heroScale, heroAutoAdvance, showsPageDots
+        case cardSize, cornerScale, spacing, phoneGridColumns, showsPosterTitles, captionLines, showsCaptionDetails, uppercaseCaptions,
+             outline, artworkTone, progressColour, progressThickness, showsTimeLeft
+        case layout
+        case heroAutoAdvance, showsPageDots
         case hidesSpoilers, spoilerStills, spoilerSynopses, spoilerTitles, expandsSynopsis, showsReviews, showsCast, showsInformation,
              showsRelated, showsWatchAnywhere, sectionOrder
         case startTab, zoomTransitions, animationSpeed, phoneTabTitles, minimisesTabBar, showsContinueBar
+        case hover
         /// The fixed steps saved before the sliders, read once and never written.
         case legacyCardScale = "cardScale", legacyCorners = "corners", legacyDensity = "density", legacyArtworkOutline = "artworkOutline"
     }
@@ -756,21 +1149,23 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public static func == (lhs: AppearancePreferences, rhs: AppearancePreferences) -> Bool {
         let colours: Bool = lhs.accent == rhs.accent && lhs.customAccent == rhs.customAccent && lhs.background == rhs.background
             && lhs.customBackground == rhs.customBackground && lhs.tintStrength == rhs.tintStrength
+            && lhs.playStyle == rhs.playStyle && lhs.buttonFinish == rhs.buttonFinish
         let text: Bool = lhs.textSize == rhs.textSize && lhs.font == rhs.font && lhs.boldText == rhs.boldText
             && lhs.italicText == rhs.italicText && lhs.fontWidth == rhs.fontWidth
         let spacing: Bool = lhs.letterSpacing == rhs.letterSpacing && lhs.lineSpacing == rhs.lineSpacing
         let headings: Bool = lhs.headingFont == rhs.headingFont && lhs.headingWeight == rhs.headingWeight
             && lhs.headingSize == rhs.headingSize && lhs.uppercaseHeadings == rhs.uppercaseHeadings
+        let headingShape: Bool = lhs.headingWidth == rhs.headingWidth && lhs.headingSpacing == rhs.headingSpacing
+            && lhs.headingColour == rhs.headingColour
         let sizes: Bool = lhs.cardScale == rhs.cardScale && lhs.cornerScale == rhs.cornerScale && lhs.spacingScale == rhs.spacingScale
             && lhs.phoneGridColumns == rhs.phoneGridColumns
             && lhs.cornerOverrides == rhs.cornerOverrides && lhs.includesCircularButtons == rhs.includesCircularButtons
         let captions: Bool = lhs.showsPosterTitles == rhs.showsPosterTitles && lhs.captionLines == rhs.captionLines
-            && lhs.showsCaptionDetails == rhs.showsCaptionDetails
+            && lhs.showsCaptionDetails == rhs.showsCaptionDetails && lhs.uppercaseCaptions == rhs.uppercaseCaptions
         let artwork: Bool = lhs.outline == rhs.outline && lhs.artworkTone == rhs.artworkTone
         let progress: Bool = lhs.progressColour == rhs.progressColour && lhs.progressThickness == rhs.progressThickness
             && lhs.showsTimeLeft == rhs.showsTimeLeft
-        let home: Bool = lhs.heroScale == rhs.heroScale && lhs.heroAutoAdvance == rhs.heroAutoAdvance
-            && lhs.showsPageDots == rhs.showsPageDots
+        let home: Bool = lhs.heroAutoAdvance == rhs.heroAutoAdvance && lhs.showsPageDots == rhs.showsPageDots
         let spoilers: Bool = lhs.hidesSpoilers == rhs.hidesSpoilers && lhs.spoilerStills == rhs.spoilerStills
             && lhs.spoilerSynopses == rhs.spoilerSynopses && lhs.spoilerTitles == rhs.spoilerTitles
         let sections: Bool = lhs.expandsSynopsis == rhs.expandsSynopsis && lhs.showsReviews == rhs.showsReviews
@@ -780,8 +1175,9 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             && lhs.animationSpeed == rhs.animationSpeed
         let tabs: Bool = lhs.phoneTabTitles == rhs.phoneTabTitles && lhs.minimisesTabBar == rhs.minimisesTabBar
             && lhs.showsContinueBar == rhs.showsContinueBar
-        return colours && text && spacing && headings && sizes && captions && artwork && progress && home && spoilers && sections
-            && navigation && tabs
+        let hover: Bool = lhs.hover == rhs.hover && lhs.layout == rhs.layout
+        return colours && text && spacing && headings && headingShape && sizes && captions && artwork && progress && home && spoilers
+            && sections && navigation && tabs && hover
     }
 
     // MARK: - Reading
@@ -809,7 +1205,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
 
     /// The parts of Settings → Appearance, each with a page of its own and its own Restore Defaults.
     public enum Section: String, Sendable, CaseIterable, Identifiable {
-        case colour, text, cards, corners, home, titlePages, motion
+        case colour, text, cards, corners, home, titlePages, motion, hover
 
         public var id: String { rawValue }
     }
@@ -825,6 +1221,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.background = defaults.background
             result.customBackground = defaults.customBackground
             result.tintStrength = defaults.tintStrength
+            result.playStyle = defaults.playStyle
+            result.buttonFinish = defaults.buttonFinish
         case .text:
             result.textSize = defaults.textSize
             result.font = defaults.font
@@ -836,7 +1234,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.headingFont = defaults.headingFont
             result.headingWeight = defaults.headingWeight
             result.headingSize = defaults.headingSize
+            result.headingWidth = defaults.headingWidth
+            result.headingSpacing = defaults.headingSpacing
             result.uppercaseHeadings = defaults.uppercaseHeadings
+            result.headingColour = defaults.headingColour
         case .cards:
             result.cardScale = defaults.cardScale
             result.spacingScale = defaults.spacingScale
@@ -844,6 +1245,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.showsPosterTitles = defaults.showsPosterTitles
             result.captionLines = defaults.captionLines
             result.showsCaptionDetails = defaults.showsCaptionDetails
+            result.uppercaseCaptions = defaults.uppercaseCaptions
             result.outline = defaults.outline
             result.artworkTone = defaults.artworkTone
             result.progressColour = defaults.progressColour
@@ -854,7 +1256,6 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.cornerOverrides = defaults.cornerOverrides
             result.includesCircularButtons = defaults.includesCircularButtons
         case .home:
-            result.heroScale = defaults.heroScale
             result.heroAutoAdvance = defaults.heroAutoAdvance
             result.showsPageDots = defaults.showsPageDots
         case .titlePages:
@@ -875,6 +1276,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.phoneTabTitles = defaults.phoneTabTitles
             result.minimisesTabBar = defaults.minimisesTabBar
             result.showsContinueBar = defaults.showsContinueBar
+        case .hover:
+            result.hover = defaults.hover
         }
         return result
     }
@@ -886,8 +1289,9 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var layoutKey: String {
         let numbers = [cardScale, spacingScale, cornerScale].map { String(format: "%.3f", $0) }
         let text = [textSize.rawValue, font.rawValue, "\(boldText)", "\(italicText)", fontWidth.rawValue, letterSpacing.rawValue,
-                    lineSpacing.rawValue, headingFont.rawValue, headingWeight.rawValue, headingSize.rawValue, "\(uppercaseHeadings)"]
-        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(phoneGridColumns)"]
+                    lineSpacing.rawValue, headingFont.rawValue, headingWeight.rawValue, headingSize.rawValue, headingWidth.rawValue,
+                    headingSpacing.rawValue, "\(uppercaseHeadings)"]
+        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(uppercaseCaptions)", "\(phoneGridColumns)"]
         return (numbers + text + captions).joined(separator: "|")
     }
 
@@ -954,6 +1358,12 @@ public struct AppearanceLooks: Sendable, Equatable, RawRepresentable {
     public var rawValue: String {
         guard let data = try? JSONEncoder().encode(looks), let text = String(data: data, encoding: .utf8) else { return "[]" }
         return text
+    }
+
+    /// Look by look, as `AppearancePreferences` compares itself, rather than `RawRepresentable`'s comparison of the JSON text, whose key
+    /// order can differ between two encodings of the same looks.
+    public static func == (lhs: AppearanceLooks, rhs: AppearanceLooks) -> Bool {
+        lhs.looks == rhs.looks
     }
 
     /// Adds `appearance` under `name`, trimmed, or replaces the look already saved under that name. An empty name is "Look N".

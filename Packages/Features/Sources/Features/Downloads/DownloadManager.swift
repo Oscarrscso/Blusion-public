@@ -35,9 +35,7 @@ public final class DownloadManager {
     private var retryTasks: [UUID: Task<Void, Never>] = [:]
     private var active: [UUID: URLSessionDownloadTask] = [:]
     private var preparing: Set<UUID> = []
-    private var deleting: Set<UUID> = []
     private var playing: Set<UUID> = []
-    private var deleteAfterClose: Set<UUID> = []
     public private(set) var transferSpeeds: [UUID: Double] = [:]
     private var rateSamples: [UUID: (bytes: Int64, date: Date)] = [:]
     private var lastSaved: [UUID: Date] = [:]
@@ -78,7 +76,6 @@ public final class DownloadManager {
         defer { isReady = true }
         do {
             items = try await store.loadAll()
-            deleting = Set(items.filter { $0.pendingDeletion == true }.map(\.id))
             guard persistent else { return }
             // Older records can recover typed release facts from their device-local secret, without querying an addon.
             for item in items where item.mediaDetails == nil {
@@ -94,7 +91,7 @@ public final class DownloadManager {
             let tasks = await adapter.tasks()
             for task in tasks {
                 guard let id = task.taskDescription.flatMap(UUID.init(uuidString:)),
-                      let index = index(id), !deleting.contains(id), ![.paused, .failed, .complete].contains(items[index].state), active[id] == nil,
+                      let index = index(id), !isDeleting(id), ![.paused, .failed, .complete].contains(items[index].state), active[id] == nil,
                       let download = task as? URLSessionDownloadTask else { task.cancel(); continue }
                 active[id] = download
                 items[index].state = .downloading
@@ -109,7 +106,7 @@ public final class DownloadManager {
             try await persist()
             // Records saved before artwork was cached get theirs now, and one that failed offline is tried again at the next launch.
             // A picture whose file has gone is fetched again too.
-            for item in items where !deleting.contains(item.id) {
+            for item in items where item.pendingDeletion != true {
                 let cached = artworkURL(for: item).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
                 if !cached { Task { await cacheArtwork(item.id, request: item.request) } }
             }
@@ -244,7 +241,7 @@ public final class DownloadManager {
         guard let i = index(id), items[i].state != .complete, pausing.insert(id).inserted else { return }
         defer {
             pausing.remove(id)
-            if deleting.contains(id) { Task { await remove(id) } }
+            if isDeleting(id) { Task { await remove(id) } }
             else { Task { await pump() } }
         }
         items[i].state = .paused; items[i].failure = nil
@@ -253,7 +250,7 @@ public final class DownloadManager {
         do { try await persist() } catch { errorMessage = "Could not save pause" }
         if let task = active[id] {
             // didCompleteWithError carries any available resume data. Keep active until that event is consumed.
-            if let data = await task.cancelByProducingResumeData(), index(id) != nil, !deleting.contains(id) {
+            if let data = await task.cancelByProducingResumeData(), index(id) != nil, !isDeleting(id) {
                 do { try await saveResume(data, id: id, task: task) }
                 catch { await fail(id, "Could not save resume data") }
             }
@@ -273,20 +270,20 @@ public final class DownloadManager {
         try await save(saved, id: id)
     }
     public func resume(_ id: UUID) async {
-        guard let i = index(id), [.paused, .failed].contains(items[i].state), !deleting.contains(id) else { return }
+        guard let i = index(id), [.paused, .failed].contains(items[i].state), !isDeleting(id) else { return }
         items[i].state = .queued; items[i].failure = nil; items[i].retries = 0
         do { try await persist(); await pump() } catch { await fail(id, "Could not save download") }
     }
     public func delete(_ id: UUID) async {
         guard let i = index(id) else { return }
-        deleting.insert(id)
         items[i].pendingDeletion = true
         if items[i].state != .complete { items[i].state = .paused }
         retryTasks.removeValue(forKey: id)?.cancel()
         subtitleTasks.removeValue(forKey: id)?.cancel()
         do { try await persist() }
         catch { errorMessage = "Could not save deletion"; return }
-        if playing.contains(id) { deleteAfterClose.insert(id); return }
+        // Open in the player: removed once it closes (`closed`).
+        if playing.contains(id) { return }
         active[id]?.cancel()
         // Retain the record until cancellation's final callback: it may still deliver a file.
         if active[id] != nil { return }
@@ -302,7 +299,6 @@ public final class DownloadManager {
             streamDownloads = streamDownloads.filter { $0.value != id }
             transferSpeeds[id] = nil; rateSamples[id] = nil
             try await persist()
-            deleting.remove(id); deleteAfterClose.remove(id)
         } catch { errorMessage = "Could not delete download" }
         await pump()
     }
@@ -334,13 +330,13 @@ public final class DownloadManager {
     }
     private func pump() async {
         guard persistent, !reconciling, active.count < 3, preparing.isEmpty, pausing.isEmpty,
-              let item = items.last(where: { $0.state == .queued && !deleting.contains($0.id) && retryTasks[$0.id] == nil }),
+              let item = items.last(where: { $0.state == .queued && $0.pendingDeletion != true && retryTasks[$0.id] == nil }),
               let adapter else { return }
         let id = item.id
         preparing.insert(id)
         defer {
             preparing.remove(id)
-            if deleting.contains(id) { Task { await remove(id) } }
+            if isDeleting(id) { Task { await remove(id) } }
             else if active.count < 3 { Task { await pump() } }
         }
         do {
@@ -358,10 +354,10 @@ public final class DownloadManager {
             if offset == 0, credential.resumeCellular == settings.downloadsAllowCellular,
                let encoded = try await secrets.get(key(id) + ".resume") { resume = Data(base64Encoded: encoded) }
             else { resume = nil }
-            guard let i = index(id), items[i].state == .queued, !deleting.contains(id) else { return }
+            guard let i = index(id), items[i].state == .queued, !isDeleting(id) else { return }
             items[i].state = .downloading
             try await persist()
-            guard let current = index(id), items[current].state == .downloading, !deleting.contains(id) else { return }
+            guard let current = index(id), items[current].state == .downloading, !isDeleting(id) else { return }
             transferSpeeds[id] = nil; rateSamples[id] = nil
             active[id] = adapter.start(id: id, url: credential.url, headers: credential.headers,
                                        cellular: settings.downloadsAllowCellular, resume: resume, offset: offset, validator: credential.validator)
@@ -370,7 +366,7 @@ public final class DownloadManager {
         }
     }
     private func fail(_ id: UUID, _ message: String) async {
-        guard let i = index(id), !deleting.contains(id) else { return }
+        guard let i = index(id), !isDeleting(id) else { return }
         // Late transfer callbacks must not undo an explicit pause.
         guard items[i].state != .paused else {
             errorMessage = message
@@ -383,7 +379,7 @@ public final class DownloadManager {
         switch event {
         case .progress(let id, let taskID, let received, let expected, let response):
             guard active[id]?.taskIdentifier == taskID else { return }
-            guard let i = index(id), items[i].state == .downloading, !deleting.contains(id) else { return }
+            guard let i = index(id), items[i].state == .downloading, !isDeleting(id) else { return }
             do {
                 var credential = try await credential(id)
                 if credential.offset == 0, credential.validator == nil {
@@ -416,7 +412,7 @@ public final class DownloadManager {
             guard let root else { return }
             let incoming = root.appendingPathComponent(name)
             defer { try? FileManager.default.removeItem(at: incoming) }
-            guard let i = index(id), !deleting.contains(id),
+            guard let i = index(id), !isDeleting(id),
                   active[id]?.taskIdentifier == taskID || (reconciling && active[id] == nil && items[i].state == .queued) else { return }
             if reconciling, items[i].state == .queued { items[i].state = .downloading }
             if [401, 403, 410].contains(response.status) {
@@ -434,13 +430,13 @@ public final class DownloadManager {
         case .finished(let id, let taskID, let code, let resume, let response):
             guard active[id]?.taskIdentifier == taskID || (reconciling && active[id] == nil && index(id) != nil) else { return }
             let task = active[id]
-            if let resume, index(id) != nil, !deleting.contains(id) {
+            if let resume, index(id) != nil, !isDeleting(id) {
                 do { try await saveResume(resume, id: id, task: task) }
                 catch { await fail(id, "Could not save resume data") }
             }
             active[id] = nil
             transferSpeeds[id] = nil; rateSamples[id] = nil
-            if deleting.contains(id) { await remove(id); return }
+            if isDeleting(id) { await remove(id); return }
             if let i = index(id), items[i].state == .downloading {
                 if [401, 403, 410].contains(response.status) {
                     await retry(id, expired: true)
@@ -454,7 +450,7 @@ public final class DownloadManager {
             }
             await pump()
         case .reconciled:
-            for id in Array(deleting) where active[id] == nil { await remove(id) }
+            for id in items.filter({ $0.pendingDeletion == true }).map(\.id) where active[id] == nil { await remove(id) }
             // A crash can occur between the delegate's move and the store commit. Uncommitted staging is never promoted blindly.
             if let root, let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
                 for item in items where active[item.id] == nil {
@@ -483,7 +479,7 @@ public final class DownloadManager {
         }
     }
     private func retry(_ id: UUID, expired: Bool) async {
-        guard let i = index(id), items[i].state == .downloading, !deleting.contains(id) else { return }
+        guard let i = index(id), items[i].state == .downloading, !isDeleting(id) else { return }
         guard items[i].retries < 3 else {
             await fail(id, "Download failed"); return
         }
@@ -493,12 +489,12 @@ public final class DownloadManager {
         try? await persist()
         retryTasks[id] = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(delay)) } catch { return }
-            guard let self, let i = index(id), items[i].state == .queued, !deleting.contains(id) else { return }
+            guard let self, let i = index(id), items[i].state == .queued, !isDeleting(id) else { return }
             if expired {
                 preparing.insert(id)
                 defer {
                     preparing.remove(id)
-                    if deleting.contains(id) { Task { await remove(id) } }
+                    if isDeleting(id) { Task { await remove(id) } }
                     else { Task { await pump() } }
                 }
                 do { try await refresh(id) } catch {
@@ -525,7 +521,7 @@ public final class DownloadManager {
         guard let match = snapshot.match(in: listing.items),
               let container = DownloadEligibility.container(for: match, config: config), container.rawValue == item.container,
               case .direct(let url) = match.stream.source, let identity = PlaybackStreamIdentity.make(for: match.stream),
-              let current = index(id), items[current].state == .queued, !deleting.contains(id) else { throw DownloadError.credentials }
+              let current = index(id), items[current].state == .queued, !isDeleting(id) else { throw DownloadError.credentials }
         old.url = url; old.headers = match.stream.behaviorHints.proxyHeaders?.request ?? [:]
         old.identity = identity; old.subtitles = match.stream.subtitles
         // Validator and expected total remain the ORIGINAL representation's. If-Range must validate before any append.
@@ -594,7 +590,7 @@ public final class DownloadManager {
         items[current].mediaPath = path
         let size = Int64(try destination.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         items[current].received = size; items[current].expected = size
-        guard let current = index(id), !deleting.contains(id) else { return }
+        guard let current = index(id), !isDeleting(id) else { return }
         items[current].state = .complete; items[current].failure = nil
         items[current].completedAt = Date()
         transferSpeeds[id] = nil; rateSamples[id] = nil
@@ -626,7 +622,7 @@ public final class DownloadManager {
         }
         var seen = Set<URL>()
         for option in options.prefix(32) where seen.insert(option.url).inserted {
-            guard !Task.isCancelled, !deleting.contains(id), index(id) != nil else { return }
+            guard !Task.isCancelled, !isDeleting(id), index(id) != nil else { return }
             let format = SubtitleOption.FileFormat.detect(option.url)
             guard [.srt, .vtt, .ass, .pgs, .unknown].contains(format) else { continue }
             let track = SubtitleOption(id: option.id, language: option.lang, title: "", url: option.url, source: .stream)
@@ -640,7 +636,7 @@ public final class DownloadManager {
                 let tags = (track.isForced ? ".forced" : "") + (track.isHearingImpaired ? ".sdh" : "")
                 let path = id.uuidString + ".sub-\(UUID().uuidString)\(tags).\(ext)"
                 try enoughSpace(Int64(data.count), excluding: id)
-                guard let current = index(id), !deleting.contains(id) else { return }
+                guard let current = index(id), !isDeleting(id) else { return }
                 try data.write(to: root.appendingPathComponent(path), options: .atomic)
                 let language = option.lang.count <= 3 && option.lang.allSatisfy(\.isLetter) ? option.lang : "und"
                 items[current].subtitles.append(DownloadSubtitle(path: path, language: language))
@@ -676,7 +672,7 @@ public final class DownloadManager {
     /// Keeps the title's landscape picture beside the download's file. A picture that cannot be fetched, or is not one, is not kept, and
     /// the card falls back to Metahub's art while it is online.
     private func cacheArtwork(_ id: UUID, request: StreamRequest) async {
-        guard let root, let source = DownloadArtwork.source(for: request), index(id) != nil, !deleting.contains(id),
+        guard let root, let source = DownloadArtwork.source(for: request), index(id) != nil, !isDeleting(id),
               let fetched = try? await URLSession.shared.data(from: source) else { return }
         let (data, response) = fetched
         guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
@@ -684,18 +680,21 @@ public final class DownloadManager {
         let file = root.appendingPathComponent(id.uuidString + ".artwork")
         guard (try? data.write(to: file, options: .atomic)) != nil else { return }
         // The download may have been deleted while its picture was fetched. Its picture goes with it.
-        guard let current = index(id), !deleting.contains(id) else {
+        guard let current = index(id), !isDeleting(id) else {
             try? FileManager.default.removeItem(at: file)
             return
         }
         items[current].artworkPath = file.lastPathComponent
         try? await persist()
     }
+    /// Marked for deletion: kept until its last callback (a transfer cancelling, a pause or start finishing, its player closing), then
+    /// removed. The mark is saved on the item, so a deletion a quit cut short finishes at the next launch.
+    private func isDeleting(_ id: UUID) -> Bool { items.first { $0.id == id }?.pendingDeletion == true }
     public func opened(_ id: UUID) { playing.insert(id) }
     public func closed(_ id: UUID, watched: Bool) async {
         playing.remove(id)
         let preferences = await settings.load()
-        if deleteAfterClose.contains(id) || (watched && preferences.downloadsDeleteWhenWatched) { await delete(id) }
+        if isDeleting(id) || (watched && preferences.downloadsDeleteWhenWatched) { await delete(id) }
     }
     private static func displayText(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).map { word in

@@ -1,18 +1,35 @@
 import Foundation
 
 /// User preferences that affect which stream is picked and how it plays (PLAN M7 surfaces them in Settings).
+/// Where a poster's disc or streamer brand sits ("Mark position"). A corner the ratings already use keeps it in their pill.
+public enum PosterMarkPlacement: String, Sendable, Equatable, Codable, CaseIterable {
+    case withRatings, topLeading, topTrailing, bottomLeading, bottomTrailing
+
+    public var label: String {
+        switch self {
+        case .withRatings: "With ratings"
+        case .topLeading: "Top left"
+        case .topTrailing: "Top right"
+        case .bottomLeading: "Bottom left"
+        case .bottomTrailing: "Bottom right"
+        }
+    }
+}
+
 public struct PlaybackSettings: Sendable, Equatable, Codable {
     /// Preferred vertical resolution (e.g. 1080). nil = best available.
     public var downloadsAllowCellular: Bool = false
     public var downloadsDeleteWhenWatched: Bool = false
     public var preferredResolution: Int?
+    /// Data Saver: automatic choices keep to 1080p or below and prefer efficient encodes to REMUXes and outsized files. Off by default.
+    public var dataSaver: Bool = false
     /// Default subtitle language as an ISO 639-2 or 639-1 code (`eng`, `en`). nil = subtitles off by default.
     public var subtitleLanguage: String?
     /// A Stremio-compatible streaming server (ADR-004). A URL can embed credentials, so it is stored as a secret.
     public var streamingServerURL: String?
     /// Lets the user turn the fallback engine off (it is also off when no engine is linked).
     public var fallbackEngineEnabled: Bool
-    /// The Trakt API client ID the user supplies, needed to read Trakt lists. Stored as a secret, never shipped with the app.
+    /// The Trakt API client ID, needed to read Trakt lists. The app supplies its own; stored as a secret.
     public var traktClientID: String?
     /// Optional review-service credentials, stored in the Keychain.
     public var omdbAPIKey: String?
@@ -28,6 +45,8 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     /// Film posters carry a 4K or Blu-ray mark beside their ratings when Best Blurays names that disc as the film's best. Off by default:
     /// each film is looked up on bestblurays.com.
     public var showsBestDiscOnPosters: Bool = false
+    /// Where a poster's disc or streamer brand sits: in the ratings pill, or on its own in a corner. Top right by default.
+    public var posterMarkPlacement: PosterMarkPlacement = .topTrailing
     /// Play starts the best stream at once instead of showing the list of streams first.
     public var autoPlayBestStream: Bool
     /// Seconds between Trakt playback refreshes. Zero is manual; nil uses the five-minute default for older saved settings.
@@ -94,8 +113,17 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
         return nil
     }
 
-    public var rankingPreferences: RankingPreferences {
-        RankingPreferences(preferredResolution: preferredResolution, sourcePreference: autoPickSource)
+    public var rankingPreferences: RankingPreferences { rankingPreferences(for: nil) }
+
+    /// Settings' ranking, or a quality chosen for one play. Highest ranks by quality alone; Data Saver keeps to 1080p or below.
+    public func rankingPreferences(for quality: PlayQuality?) -> RankingPreferences {
+        let savesData = quality.map { $0 == .dataSaver } ?? dataSaver
+        var resolution = quality == .highest ? nil : preferredResolution
+        if savesData {
+            let cap = RankingPreferences.dataSaverResolution
+            resolution = min(resolution ?? cap, cap)
+        }
+        return RankingPreferences(preferredResolution: resolution, sourcePreference: autoPickSource, savesData: savesData)
     }
 
     /// `decodesAV1InHardware` has no default: a caller that left it out would send AV1 to the engine on capable chips.

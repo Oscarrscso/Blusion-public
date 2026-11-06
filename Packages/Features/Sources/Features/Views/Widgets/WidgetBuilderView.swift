@@ -133,7 +133,7 @@ struct WidgetBuilderView: View {
 
     /// The notice that a TMDB list cannot be read until a TMDB token is saved in Settings.
     private var tokenNotice: some View {
-        Text("TMDB lists need a TMDB Read Access Token. Add one in Settings › Review services, or choose another source.")
+        Text("TMDB lists need a TMDB Read Access Token. Add one in Settings › Ratings, or choose another source.")
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .padding(Theme.Spacing.l)
@@ -309,6 +309,7 @@ private struct SentenceCard: View {
             .font(.title3.weight(.semibold))
             .foregroundStyle(.primary)
             .tokenCapsule(scale: metrics.cornerScale(for: .panels))
+            .glassHover(ScaledCapsule(scale: metrics.cornerScale(for: .panels)))
         }
         .menuIndicator(.hidden)
     }
@@ -441,7 +442,8 @@ private struct PillButton: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, Theme.Spacing.m)
             .frame(maxWidth: .infinity, minHeight: Self.minHeight)
-            .glassEffect(.regular.interactive(), in: shape)
+            .buttonSurface(.regular.interactive(), in: shape)
+            .glassHover(shape)
             .overlay {
                 if isOpen { shape.strokeBorder(.white, lineWidth: 1.5) }
             }
@@ -449,7 +451,6 @@ private struct PillButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!pill.isEnabled)
-        .pointerFeedback()
         .accessibilityLabel("\(pill.title), \(pill.value)")
         .accessibilityIdentifier("widgetBuilder.pill.\(pill.field.rawValue)")
     }
@@ -460,7 +461,7 @@ private extension View {
     func tokenCapsule(scale: CGFloat) -> some View {
         padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, 6)
-            .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: scale))
+            .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: scale))
     }
 }
 #endif

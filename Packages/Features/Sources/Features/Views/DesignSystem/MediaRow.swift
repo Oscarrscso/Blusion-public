@@ -245,7 +245,7 @@ struct MediaRow<Content: View>: View {
     private var bufferedItems: [MetaPreview] {
         guard sectionIsVisible, let visibleRange,
               let range = LazyLoadLookahead.bufferRange(visible: visibleRange, count: artworkItems.count,
-                  titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+                  titles: LazyLoadLookahead.activeTitles(atLevel: lookaheadLevel)) else { return [] }
         return Array(artworkItems[range])
     }
 }
@@ -304,7 +304,7 @@ private struct ShelfLookahead: View {
     private var buffered: [MetaPreview] {
         guard sectionIsVisible, let shown = visible.ranges[Self.id],
               let range = LazyLoadLookahead.bufferRange(visible: shown, count: items.count,
-                                                       titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+                                                       titles: LazyLoadLookahead.activeTitles(atLevel: lookaheadLevel)) else { return [] }
         return Array(items[range])
     }
 }
@@ -333,7 +333,7 @@ extension MediaRow {
 }
 
 /// A lazy grid that preloads the chosen number of titles around the visible cards and requests the next page within that buffer.
-/// `fillsWidth` makes Mac columns span the available width.
+/// `fillsWidth` makes the columns span the available width, so the last one ends on the right margin.
 struct MediaGrid: View {
     let items: [MetaPreview]
     let aspect: CardAspect
@@ -391,26 +391,22 @@ struct MediaGrid: View {
     private var bufferedItems: [MetaPreview] {
         guard let visibleRange,
               let range = LazyLoadLookahead.bufferRange(visible: visibleRange, count: items.count,
-                                                       titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return [] }
+                                                       titles: LazyLoadLookahead.activeTitles(atLevel: lookaheadLevel)) else { return [] }
         return Array(items[range])
     }
 
     private var nextPageID: String? {
         guard let visibleRange,
               visibleRange.upperBound >= LazyLoadLookahead.triggerIndex(count: items.count,
-                  titles: LazyLoadLookahead.titles(atLevel: lookaheadLevel)) else { return nil }
+                  titles: LazyLoadLookahead.activeTitles(atLevel: lookaheadLevel)) else { return nil }
         return items.last?.identity
     }
 
-    /// Mac, for a grid that fills its width: an adaptive column stops at its maximum width and so can leave a gutter on the right, so its
-    /// maximum is lifted and the columns share the whole width (see `GridFill`). The cards ask for their pictures at the size they did,
-    /// whatever the column's width. iPhone and iPad keep their columns.
+    /// A grid that fills its width: an adaptive column stops at its maximum width and so can leave a gutter on the right, so its maximum
+    /// is lifted and the columns share the whole width (see `GridFill`), on every platform. The cards ask for their pictures at the size
+    /// they did, whatever the column's width. A phone's fixed columns already fill it.
     private func filled(_ columns: [GridItem]) -> [GridItem] {
-        #if targetEnvironment(macCatalyst)
-        return fillsWidth ? GridFill.filling(columns) : columns
-        #else
-        return columns
-        #endif
+        fillsWidth ? GridFill.filling(columns) : columns
     }
 
 
@@ -428,15 +424,14 @@ struct MediaGridPlaceholder: View {
     @Environment(\.isLandscape) private var isLandscape
 
     var body: some View {
-        // The grid's columns, and its drawing of a poster in landscape as a wide card (see `MediaGrid`).
-        let landscapePoster = isLandscape && aspect == .poster
+        // The grid's columns; the card draws a poster in landscape as a wide card, as `MediaCard` does.
         var columns = metrics.gridColumns(for: aspect, inLandscape: isLandscape)
-        #if targetEnvironment(macCatalyst)
         if fillsWidth { columns = GridFill.filling(columns) }
-        #endif
         return LazyVGrid(columns: columns, alignment: .leading, spacing: metrics.cardSpacing) {
             ForEach(0..<count, id: \.self) { _ in
-                UnloadedCard(artwork: landscapePoster ? .wide : aspect, showsCaption: aspect.showsCaptionByDefault)
+                CardPlaceholder(aspect: aspect, fill: AnyShapeStyle(.quaternary))
+                    .stretched()
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.horizontal, metrics.pageMargin)
@@ -446,28 +441,6 @@ struct MediaGridPlaceholder: View {
     }
 }
 
-/// The stand-in for a title whose artwork has been released: a blank box of its card's shape, with the two caption lines when the card
-/// has them, so the grid keeps the same row heights and its scroll position.
-private struct UnloadedCard: View {
-    @Environment(\.layoutMetrics) private var metrics
-    let artwork: CardAspect
-    let showsCaption: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            RoundedRectangle(cornerRadius: artwork.cornerRadius * metrics.cornerScale(for: .artwork), style: .continuous)
-                .fill(.quaternary)
-                .aspectRatio(artwork.ratio, contentMode: .fit)
-            if showsCaption {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(" ").font(Theme.Typography.cardTitle).lineLimit(1)
-                    Text(" ").font(Theme.Typography.cardSubtitle).lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
 /// A context menu when there is one to show; the view as it is otherwise.
 struct OptionalContextMenu: ViewModifier {
     let menu: AnyView?

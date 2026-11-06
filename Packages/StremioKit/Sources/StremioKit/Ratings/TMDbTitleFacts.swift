@@ -26,11 +26,15 @@ public struct TMDbTitleFacts: Sendable, Equatable {
     public var lastAired: String?
     public var seasonCount: Int?
     public var episodeCount: Int?
+    /// The title's own TMDb id.
+    public var tmdbID: Int?
+    /// The TMDb collection a movie belongs to, its franchise ("The Lord of the Rings Collection"). Nil for a series or a movie in none.
+    public var collectionID: Int?
 
     public init(studios: [String] = [], networks: [String] = [], creators: [String] = [], countries: [String] = [],
                 originalLanguage: String? = nil, originalTitle: String? = nil, status: String? = nil, budget: Int? = nil,
                 revenue: Int? = nil, releaseDate: String? = nil, firstAired: String? = nil, lastAired: String? = nil,
-                seasonCount: Int? = nil, episodeCount: Int? = nil) {
+                seasonCount: Int? = nil, episodeCount: Int? = nil, tmdbID: Int? = nil, collectionID: Int? = nil) {
         self.studios = studios
         self.networks = networks
         self.creators = creators
@@ -45,6 +49,8 @@ public struct TMDbTitleFacts: Sendable, Equatable {
         self.lastAired = lastAired
         self.seasonCount = seasonCount
         self.episodeCount = episodeCount
+        self.tmdbID = tmdbID
+        self.collectionID = collectionID
     }
 
     /// Reads a `movie/{id}` or `tv/{id}` answer. Blank names are dropped, and a list keeps each name once. Throws `invalidJSON` for an
@@ -70,7 +76,9 @@ public struct TMDbTitleFacts: Sendable, Equatable {
                               firstAired: text(raw.first_air_date),
                               lastAired: text(raw.last_air_date),
                               seasonCount: raw.number_of_seasons.flatMap { $0 > 0 ? $0 : nil },
-                              episodeCount: raw.number_of_episodes.flatMap { $0 > 0 ? $0 : nil })
+                              episodeCount: raw.number_of_episodes.flatMap { $0 > 0 ? $0 : nil },
+                              tmdbID: raw.id.flatMap { $0 > 0 ? $0 : nil },
+                              collectionID: raw.belongs_to_collection?.id.flatMap { $0 > 0 ? $0 : nil })
     }
 
     private static func text(_ value: String?) -> String? {
@@ -84,6 +92,8 @@ public struct TMDbTitleFacts: Sendable, Equatable {
     }
 
     private struct Raw: Decodable {
+        let id: Int?
+        let belongs_to_collection: CollectionLink?
         let title: String?, name: String?, original_title: String?, original_name: String?
         let original_language: String?, status: String?
         let budget: Int?, revenue: Int?
@@ -94,6 +104,7 @@ public struct TMDbTitleFacts: Sendable, Equatable {
     }
 
     private struct Named: Decodable { let name: String? }
+    private struct CollectionLink: Decodable { let id: Int? }
     private struct Language: Decodable { let iso_639_1: String?, english_name: String? }
 }
 

@@ -5,6 +5,37 @@ import StremioKit
 import SwiftUI
 import UIKit
 
+/// The player readied for a stream before its screen opens (see `PlayerViewModel.prepare`), and the stream it is for.
+private struct PreparedPlayer {
+    let player: PlayerViewModel
+    let itemID: RankedStream.ID
+}
+
+/// The stream a picker is readying in the foreground, its play button a spinner, or the one whose readying failed.
+private enum StreamPreparation {
+    case idle
+    /// Its player opens once the film is ready to play.
+    case readying(itemID: RankedStream.ID, beganAt: Date)
+    case failed(Failure)
+
+    struct Failure {
+        let itemID: RankedStream.ID
+        let progress: PlaybackPreparation
+        let beganAt: Date
+        let endedAt: Date
+    }
+
+    var isReadying: Bool {
+        if case .readying = self { return true }
+        return false
+    }
+
+    func failure(for itemID: RankedStream.ID) -> Failure? {
+        if case .failed(let failure) = self, failure.itemID == itemID { return failure }
+        return nil
+    }
+}
+
 /// One title's streams. The header says what is being picked. The best stream is
 /// the one main action, and each addon's streams follow as rows of their own. Links to web pages come last. A stream plays in Blusion or,
 /// when the viewer chose that player, opens in another app.
@@ -16,16 +47,11 @@ struct StreamPickerView: View {
     @State private var autoPickTask: Task<Void, Never>?
     @State private var hasSelectedManually = false
     @State private var isOpeningPlayer = false
-    /// The player readied for a stream before its screen opens (see `PlayerViewModel.prepare`), and which stream it is for. The first
-    /// stream listed starts loading here in the background as soon as it arrives, so playing it is quick; another stream tapped
-    /// replaces it.
-    @State private var prepared: PlayerViewModel?
-    @State private var preparedItemID: RankedStream.ID?
+    /// The first stream listed starts loading here in the background as soon as it arrives, so playing it is quick; another stream
+    /// tapped replaces it.
+    @State private var prepared: PreparedPlayer?
     @State private var backgroundLoadTask: Task<Void, Never>?
-    /// The stream whose play button is a spinner: Blusion is readying it, and its player opens once the film is ready to play.
-    @State private var preparingItemID: RankedStream.ID?
-    @State private var preparationBeganAt: Date?
-    @State private var failedPreparation: (itemID: RankedStream.ID, progress: PlaybackPreparation, beganAt: Date, endedAt: Date)?
+    @State private var streamPreparation = StreamPreparation.idle
     /// True while the stream Auto Pick chose is being readied, so Auto Pick's button spins until the player opens.
     @State private var preparingViaAutoPick = false
     /// The ready player the open player screen took over.
@@ -84,12 +110,17 @@ struct StreamPickerView: View {
     private let isHeadless: Bool
     /// Told once the automatic start on opening (Auto Pick's switch on) has started a stream (true), or has nothing to start (false).
     private let onAutomaticStart: ((Bool) -> Void)?
+    /// Told when a stream has been handed to another player app and the system opened it.
+    private let onOpenedInPlayer: ((ExternalPlayer) -> Void)?
     /// True for a picker that starts the best stream on opening whatever Auto Pick's switch says: a poster held to play it.
     private let forcesAutomaticStart: Bool
     /// A one-off player chosen from the title's Play context menu.
     private let preferredAutomaticPlayer: ExternalPlayer?
-    /// Recovery shows the choices without immediately retrying the stream that just failed.
+    /// False shows the choices and starts nothing, whatever Auto Pick's switch says: Play's Stream Selector, and recovery, which must not
+    /// retry at once the stream that just failed.
     private let allowsAutomaticStart: Bool
+    /// A quality chosen for this play from a hold menu (Highest Quality, Data Saver). Nil follows Settings.
+    private let quality: PlayQuality?
     /// Auto Pick is still choosing or preparing; keep the selector hidden throughout.
     @State private var awaitsAutomaticStart = false
     @Environment(\.openURL) private var openURL
@@ -116,8 +147,10 @@ struct StreamPickerView: View {
          onReady: ((Bool) -> Void)? = nil, scrollToRow: ((AnyHashable) -> Void)? = nil, episodeScore: DetailViewModel.EpisodeScore? = nil,
          episodeSwitcher: EpisodeSwitcher? = nil, isHeadless: Bool = false, forcesAutomaticStart: Bool = false,
          onAutomaticStart: ((Bool) -> Void)? = nil, playColourHex: String? = nil, allowsAutomaticStart: Bool = true,
-         preferredAutomaticPlayer: ExternalPlayer? = nil) {
+         preferredAutomaticPlayer: ExternalPlayer? = nil, onOpenedInPlayer: ((ExternalPlayer) -> Void)? = nil, quality: PlayQuality? = nil) {
         self.episodeScore = episodeScore
+        self.quality = quality
+        self.onOpenedInPlayer = onOpenedInPlayer
         self.episodeSwitcher = episodeSwitcher
         self.playColourHex = playColourHex
         self.isHeadless = isHeadless
@@ -284,7 +317,7 @@ struct StreamPickerView: View {
     /// already has the poster and the title.
     private var content: some View {
         LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            if isRevealed && model.hasLoaded && !model.autoPlaysBestStream {
+            if isRevealed && model.hasLoaded && (!model.autoPlaysBestStream || !allowsAutomaticStart) {
                 // The text and Auto Pick sit one step apart, as the title's text and its Play button do, not a stack gap apart.
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     // A film's embedded header is empty until the streams load, so it takes no step above Auto Pick.
@@ -295,18 +328,22 @@ struct StreamPickerView: View {
                     }
                     playBestButton
                 }
+                .headerColumn(headerWidth)
                 BestEditionView(model: model, rowHeight: autoPickButtonHeight)
                     .padding(.horizontal, streamMargin)
+                    .headerColumn(headerWidth)
                 addonChips
                     .padding(.horizontal, streamMargin)
+                    .headerColumn(headerWidth)
                 resolutionChips
                     .padding(.horizontal, streamMargin)
-                failures
-                emptyState
-                loadingRows
+                    .headerColumn(headerWidth)
+                failures.headerColumn(headerWidth)
+                emptyState.headerColumn(headerWidth)
+                loadingRows.headerColumn(headerWidth)
                 groups(recommended: model.recommendedStream)
-                links
-                hiddenHint
+                links.headerColumn(headerWidth)
+                hiddenHint.headerColumn(headerWidth)
             }
         }
         .frame(maxWidth: columnWidth)
@@ -328,6 +365,7 @@ struct StreamPickerView: View {
                 // Asked once, here: routing hands streams to these players only, and the menus offer only these.
                 model.setInstalledPlayers(Set(ExternalPlayer.allCases.filter(isInstalled)))
                 model.automaticPlayerOverride = preferredAutomaticPlayer
+                model.quality = quality
                 await model.loadAutoPlayPreference()
                 // The previous viewing session for this title, when the app was left or killed: its own stream resumes
                 // (`automaticStartCandidate`), and a stream another player played is handed its position and choices.
@@ -335,7 +373,7 @@ struct StreamPickerView: View {
                 // A picker that is never shown is done once it has started a stream: shown again after the player closes, it does not load.
                 if !model.hasLoaded, !isHeadless || !hasSelectedManually {
                     let settings = await services.settings.load()
-                    let startsAutomatically = settings.autoPlayBestStream || (allowsAutomaticStart && forcesAutomaticStart)
+                    let startsAutomatically = allowsAutomaticStart && (settings.autoPlayBestStream || forcesAutomaticStart)
                     model.startsAutomaticallyAnyway = forcesAutomaticStart
                     if startsAutomatically, !hasSelectedManually { awaitsAutomaticStart = true }
                     if startsAutomatically { await model.loadForAutomaticSelection() } else { await model.load() }
@@ -365,7 +403,8 @@ struct StreamPickerView: View {
                 }
             }
             // Empty results must reach the title page even when Auto Pick keeps the selector hidden.
-            .onChange(of: isReady && !awaitsAutomaticStart && (!model.autoPlaysBestStream || model.addonSections.isEmpty), initial: true) { _, ready in
+            .onChange(of: isReady && !awaitsAutomaticStart && (!model.autoPlaysBestStream || !allowsAutomaticStart || model.addonSections.isEmpty),
+                      initial: true) { _, ready in
                 guard ready else { return }
                 onReady?(!model.addonSections.isEmpty)
             }
@@ -374,10 +413,8 @@ struct StreamPickerView: View {
                 backgroundLoadTask?.cancel()
                 model.cancelLoading()
                 isOpeningPlayer = false
-                preparingItemID = nil
+                streamPreparation = .idle
                 preparingViaAutoPick = false
-                preparationBeganAt = nil
-                failedPreparation = nil
                 // A player readied for a stream nobody played goes with the picker. One the player screen took is no longer held here.
                 discardPrepared()
             }
@@ -392,7 +429,7 @@ struct StreamPickerView: View {
                     cancelPreparation()
                     backgroundLoadTask?.cancel()
                     discardPrepared()
-                    failedPreparation = nil
+                    streamPreparation = .idle
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .playbackHandoffDidFinish)) { notification in
@@ -509,15 +546,30 @@ struct StreamPickerView: View {
         .padding(.top, Theme.Spacing.xs)
     }
 
-    /// The widest the list runs. Embedded under a Mac title page's hero, its rows are as wide as the synopsis and the trailer's panel
-    /// there, from the same leading edge, so the page has one column; elsewhere 760 points.
+    /// The widest the list runs. On a Mac the streams take the page's width, in columns (see `groups`); elsewhere 760 points.
     private var columnWidth: CGFloat {
         #if targetEnvironment(macCatalyst)
-        isEmbedded ? TitleHero.macDetailsWidth + streamMargin * 2 : 760
+        isEmbedded ? .infinity : 1_400
         #else
         760
         #endif
     }
+
+    /// On a Mac, the widest the header runs (Auto Pick, the best disc, the filters, and the notes under the streams). Under a title
+    /// page's hero it is the title column's width, so it shares the logo and the metadata line's edges. Nil elsewhere: the column.
+    private var headerWidth: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        (isEmbedded ? TitleHero.macBlockWidth : 760) + streamMargin * 2
+        #else
+        nil
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// A Mac's stream cards: columns at least this wide, so a card's tags stay on one line, and at most this wide, so a narrow window
+    /// keeps one column of readable cards rather than one stretched across it.
+    private static let macCardColumns = [GridItem(.adaptive(minimum: 520, maximum: 760), spacing: Theme.Spacing.m, alignment: .top)]
+    #endif
 
     /// Whether the embedded header has an episode to show. A film's is empty.
     private var embeddedHeaderShowsText: Bool { episodeHeading != nil }
@@ -754,12 +806,19 @@ struct StreamPickerView: View {
                         if value { autoPick() }
                     }))
                     .labelsHidden()
+                    #if targetEnvironment(macCatalyst)
+                    // The Mac's own switch at its own size (its default there is a checkbox, which scaled up read as an empty box).
+                    .toggleStyle(.switch)
+                    .fixedSize()
+                    .help("Always pick the best stream")
+                    #else
                     .fixedSize()
                     .onGeometryChange(for: CGSize.self) { $0.size } action: { autoPickSwitchSize = $0 }
                     // The switch has one size of its own, so it is scaled to stand exactly as tall as the button beside it.
                     .scaleEffect(autoPickSwitchScale)
                     .frame(width: autoPickSwitchSize.width > 0 ? autoPickSwitchSize.width * autoPickSwitchScale : nil,
                            height: autoPickSwitchSize.height > 0 ? autoPickSwitchSize.height * autoPickSwitchScale : nil)
+                    #endif
                     .accessibilityLabel("Always pick the best stream")
                     .accessibilityHint("Starts the best stream at once whenever you open a title's streams")
                     .accessibilityIdentifier("streams.autoPickAlways")
@@ -908,17 +967,34 @@ struct StreamPickerView: View {
                                uniquingKeysWith: { first, _ in first })
         return ForEach(visibleSections) { section in
             Section {
-                ForEach(section.streams) { item in
-                    let isRecommended = item.id == recommended?.id
-                    keyboardMarked(streamButton(item, isRecommended: isRecommended, order: order[item.id] ?? 0,
-                                                isKeyboardFocused: isKeyboardRow(section.addon.id, item.id)),
-                                   in: section.addon.id, stream: item.id, hasEdge: isRecommended || StreamLook(item.quality) != .plain)
-                        .padding(.horizontal, streamMargin)
+                #if targetEnvironment(macCatalyst)
+                // The cards fill the page in columns, read across and then down; the arrow keys still step through them in that order.
+                LazyVGrid(columns: Self.macCardColumns, alignment: .leading, spacing: Theme.Spacing.m) {
+                    streamCards(in: section, recommended: recommended, order: order)
                 }
+                .padding(.horizontal, streamMargin)
+                #else
+                streamCards(in: section, recommended: recommended, order: order)
+                #endif
             } header: {
                 // One addon chosen: the filter above already names it.
                 if chosenAddon == nil, model.addonSections.count > 1 { sectionTitle(section).padding(.horizontal, streamMargin) }
             }
+        }
+    }
+
+    private func streamCards(in section: StreamPickerViewModel.AddonSection, recommended: RankedStream?,
+                             order: [RankedStream.ID: Int]) -> some View {
+        ForEach(section.streams) { item in
+            let isRecommended = item.id == recommended?.id
+            let card = keyboardMarked(streamButton(item, isRecommended: isRecommended, order: order[item.id] ?? 0,
+                                                   isKeyboardFocused: isKeyboardRow(section.addon.id, item.id)),
+                                      in: section.addon.id, stream: item.id, hasEdge: isRecommended || StreamLook(item.quality) != .plain)
+            #if targetEnvironment(macCatalyst)
+            card
+            #else
+            card.padding(.horizontal, streamMargin)
+            #endif
         }
     }
 
@@ -983,8 +1059,8 @@ struct StreamPickerView: View {
     private func streamButton(_ item: RankedStream, isRecommended: Bool, order: Int, isKeyboardFocused: Bool = false) -> some View {
         let look = StreamLook(item.quality)
         let isPreparing = activePreparationItemID == item.id
-        let failure = failedPreparation.flatMap { $0.itemID == item.id ? $0 : nil }
-        let preparation = isPreparing ? prepared?.preparationProgress : failure?.progress
+        let failure = streamPreparation.failure(for: item.id)
+        let preparation = isPreparing ? prepared?.player.preparationProgress : failure?.progress
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 // A swipe that travelled across the card ends as a touch-up here too. It plays nothing.
@@ -999,7 +1075,7 @@ struct StreamPickerView: View {
                           downloadsNatively: true,
                           isPreparing: isPreparing,
                           preparation: preparation,
-                          preparationBeganAt: isPreparing ? preparationBeganAt : failure?.beganAt,
+                          preparationBeganAt: isPreparing ? readyingBeganAt : failure?.beganAt,
                           preparationEndedAt: failure?.endedAt)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         guard order < 3, height > 0, preparation == nil else { return }
@@ -1130,14 +1206,14 @@ struct StreamPickerView: View {
     /// Starts `item`. `automatically` is set for the start made when the streams open (see `finishAutomaticStart`). Tapping the stream
     /// Blusion is readying again calls that off; tapping another stream moves to it.
     private func select(_ item: RankedStream, automatically: Bool = false) {
-        if preparingItemID != nil {
+        if streamPreparation.isReadying {
             let isSame = activePreparationItemID == item.id
             cancelPreparation()
             if isSame, !automatically { return }
         }
         guard !isOpeningPlayer else { return }
         isOpeningPlayer = true
-        failedPreparation = nil
+        clearFailedPreparation()
         hasSelectedManually = true
         autoPickTask?.cancel()
         autoPickTask = Task {
@@ -1164,17 +1240,26 @@ struct StreamPickerView: View {
     /// that stream after all is still quick.
     private func cancelPreparation() {
         autoPickTask?.cancel()
-        preparingItemID = nil
+        if streamPreparation.isReadying { streamPreparation = .idle }
         preparingViaAutoPick = false
-        preparationBeganAt = nil
         isOpeningPlayer = false
         if awaitsAutomaticStart { finishAutomaticStart(started: false) }
     }
 
+    /// A failed readying's message goes once another start begins.
+    private func clearFailedPreparation() {
+        if case .failed = streamPreparation { streamPreparation = .idle }
+    }
+
     /// Follow automatic candidate changes, without showing any foreground indicators for a background preload.
     private var activePreparationItemID: RankedStream.ID? {
-        guard preparingItemID != nil else { return nil }
-        return prepared?.coordinator?.current?.id ?? preparingItemID
+        guard case .readying(let itemID, _) = streamPreparation else { return nil }
+        return prepared?.player.coordinator?.current?.id ?? itemID
+    }
+
+    private var readyingBeganAt: Date? {
+        if case .readying(_, let beganAt) = streamPreparation { return beganAt }
+        return nil
     }
 
     /// Readies `next` (the plan for `item`) and opens the player once the film is ready to play: its first frame is in, held paused, and
@@ -1188,26 +1273,22 @@ struct StreamPickerView: View {
         if let snapshot = model.resumeHandoff(for: item), let resuming = player as? any PlaybackSnapshotResuming {
             resuming.resumePlayback(from: snapshot)
         }
-        preparingItemID = item.id
-        if preparationBeganAt == nil { preparationBeganAt = Date() }
-        failedPreparation = nil
+        streamPreparation = .readying(itemID: item.id, beganAt: readyingBeganAt ?? Date())
         await player.prepare()
-        guard !Task.isCancelled, prepared === player else { return false }
+        guard !Task.isCancelled, prepared?.player === player else { return false }
         let finishedItemID = activePreparationItemID ?? item.id
-        preparingItemID = nil
+        let beganAt = readyingBeganAt
+        streamPreparation = .idle
         preparingViaAutoPick = false
         isOpeningPlayer = false
         if !isHeadless, let progress = player.preparationProgress, progress.failure != nil {
             let endedAt = Date()
-            failedPreparation = (finishedItemID, progress, preparationBeganAt ?? endedAt, endedAt)
-            preparationBeganAt = nil
+            streamPreparation = .failed(.init(itemID: finishedItemID, progress: progress, beganAt: beganAt ?? endedAt, endedAt: endedAt))
             discardPrepared()
             return false
         }
-        preparationBeganAt = nil
         // The screen takes the player over as soon as the existing preparation completes.
         prepared = nil
-        preparedItemID = nil
         presentedPlayer = player
         plan = player.plan
         return true
@@ -1215,30 +1296,28 @@ struct StreamPickerView: View {
 
     /// The player readied for `item`: the one already loading for it, or a new one, which replaces a player readied for another stream.
     private func preparedPlayer(for next: PlaybackPlan, item: RankedStream) -> PlayerViewModel {
-        if let prepared, preparedItemID == item.id { return prepared }
+        if let prepared, prepared.itemID == item.id { return prepared.player }
         discardPrepared()
         let player = PlayerContent.makeModel(plan: next, services: services)
         // The stream's opening bytes start downloading at once, where its engine can take them.
         PlayerPreload.begin(next, services: services)
-        prepared = player
-        preparedItemID = item.id
+        prepared = PreparedPlayer(player: player, itemID: item.id)
         return player
     }
 
     /// Closes a readied player nobody is going to watch.
     private func discardPrepared() {
-        guard let player = prepared else { return }
+        guard let player = prepared?.player else { return }
         backgroundLoadTask?.cancel()
         prepared = nil
-        preparedItemID = nil
         Task { await player.close() }
     }
 
     /// Starts loading the first stream listed in the background, once it is there, in case it is the one played: muted, held paused
     /// on its first frame, with no progress saved. Only a stream Blusion plays, and not when a stream is starting by itself anyway.
     private func startBackgroundLoad() {
-        guard !hasStartedBackgroundLoad, !hasSelectedManually, !awaitsAutomaticStart, !isHeadless, prepared == nil, plan == nil,
-              scenePhase == .active, let first = model.automaticStartCandidate, first.route.isPlayable else { return }
+        guard OptimisationSettings.readiesFirstStream(), !hasStartedBackgroundLoad, !hasSelectedManually, !awaitsAutomaticStart,
+              !isHeadless, prepared == nil, plan == nil, scenePhase == .active, let first = model.automaticStartCandidate, first.route.isPlayable else { return }
         hasStartedBackgroundLoad = true
         backgroundLoadTask = Task {
             guard case .play(let next)? = await model.choose(first), prepared == nil, plan == nil, !hasSelectedManually,
@@ -1257,7 +1336,7 @@ struct StreamPickerView: View {
     private func autoPick() {
         guard !isOpeningPlayer else { return }
         isOpeningPlayer = true
-        failedPreparation = nil
+        clearFailedPreparation()
         hasSelectedManually = true
         autoPickTask?.cancel()
         autoPickTask = Task {
@@ -1285,7 +1364,7 @@ struct StreamPickerView: View {
     }
 
     private func playInBlusion(_ item: RankedStream) {
-        if preparingItemID != nil { cancelPreparation() }
+        if streamPreparation.isReadying { cancelPreparation() }
         guard !isOpeningPlayer else { return }
         hasSelectedManually = true
         autoPickTask?.cancel()
@@ -1333,6 +1412,8 @@ struct StreamPickerView: View {
                     isOpeningPlayer = false
                     Task { await model.discardHandoff(for: link) }
                     missing = MissingPlayer(player: player, item: item)
+                } else {
+                    onOpenedInPlayer?(player)
                 }
             }
         case .unsupported:
@@ -1413,5 +1494,17 @@ struct EpisodeSwitcher {
 private struct MissingPlayer {
     let player: ExternalPlayer
     let item: RankedStream
+}
+
+private extension View {
+    /// Keeps a part of the picker to the header's width on a Mac (see `StreamPickerView.headerWidth`), from the leading edge.
+    @ViewBuilder
+    func headerColumn(_ width: CGFloat?) -> some View {
+        if let width {
+            frame(maxWidth: width, alignment: .leading)
+        } else {
+            self
+        }
+    }
 }
 #endif

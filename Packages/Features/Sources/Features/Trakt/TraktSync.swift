@@ -65,8 +65,20 @@ public actor TraktSync {
     private var lastCheck = Date.distantPast
     /// Failed syncs in a row, for the growing pause between retries.
     private var failures = 0
-    /// No scheduled sync before this: the pause after a failure, or for ever while Trakt wants a new sign-in.
-    private var pausedUntil = Date.distantPast
+    /// What holds scheduled syncs back.
+    private enum Pause: Equatable {
+        case none
+        /// The pause after a failure: no scheduled sync before this.
+        case until(Date)
+        /// Trakt wants a new sign-in: nothing is scheduled until one.
+        case needsSignIn
+    }
+    private var pause = Pause.none
+    /// The first moment a scheduled sync may run, while no new sign-in is needed.
+    private var pausedUntil: Date {
+        if case .until(let date) = pause { return date }
+        return .distantPast
+    }
     #if canImport(Network)
     private var monitor: NWPathMonitor?
     #endif
@@ -296,17 +308,17 @@ public actor TraktSync {
             }
             let sent = try await send(into: &summary)
             failures = 0
-            pausedUntil = .distantPast
+            pause = .none
             // What was just sent is in Trakt's lists now. They are read again shortly, so a later removal elsewhere is recognised.
             if sent { lastCheck = .distantPast }
             await persist()
             schedule(refreshing: sent)
         } catch {
             if let error = error as? TraktAccountError, Self.needsSignIn(error) {
-                pausedUntil = .distantFuture
+                pause = .needsSignIn
             } else {
                 failures += 1
-                pausedUntil = now().addingTimeInterval(min(3600, 30 * pow(2, Double(failures - 1))))
+                pause = .until(now().addingTimeInterval(min(3600, 30 * pow(2, Double(failures - 1)))))
             }
             // A request that failed may still have reached Trakt. The retry reads Trakt first, so a watch that did arrive is not sent again.
             lastCheck = .distantPast
@@ -576,7 +588,7 @@ public actor TraktSync {
         guard schedulesItself else { return }
         scheduled?.cancel()
         scheduled = nil
-        guard pausedUntil != .distantFuture else { return }
+        guard pause != .needsSignIn else { return }
         guard let next = state.operations.map(\.notBefore).min() ?? (refreshing ? now() : nil) else { return }
         let delay = max(Self.batchDelay, max(next, pausedUntil).timeIntervalSince(now()))
         scheduled = Task { [weak self] in
@@ -594,20 +606,20 @@ public actor TraktSync {
         for index in state.operations.indices where state.operations[index].notBefore > date {
             state.operations[index].notBefore = date
         }
-        pausedUntil = pausedUntil == .distantFuture ? pausedUntil : .distantPast
+        if pause != .needsSignIn { pause = .none }
         _ = try? await sync()
     }
 
     /// The app came to the front, or the network came back: whatever waited on either is tried now.
     public func resume() async {
-        if pausedUntil != .distantFuture { pausedUntil = .distantPast }
+        if pause != .needsSignIn { pause = .none }
         _ = try? await sync()
     }
 
     /// A fresh sign-in: any pause is over, and everything is read.
     @discardableResult
     public func signedIn() async throws -> Summary {
-        pausedUntil = .distantPast
+        pause = .none
         failures = 0
         return try await sync(force: true)
     }
@@ -627,7 +639,7 @@ public actor TraktSync {
         state.activities = nil
         state.lastFullPull = nil
         lastCheck = .distantPast
-        pausedUntil = .distantPast
+        pause = .none
         failures = 0
         await persist()
     }

@@ -52,6 +52,8 @@ struct LibraryView: View {
                 }
             }
         }
+        // The side margin is the gap between cards, on everything on the page (see `LayoutMetrics.gridPage`).
+        .environment(\.layoutMetrics, metrics.gridPage)
         .onChange(of: actions?.savedIdentities) { Task { await model.load() } }
         .onChange(of: actions?.watchedIdentities) { Task { await model.load() } }
         .accessibilityIdentifier("library.list")
@@ -65,21 +67,24 @@ struct LibraryView: View {
             parts.append(.full(id: "downloads", view: AnyView(
                 DownloadsView(services: services, filter: model.downloadFilter, clearFilters: { model.clearFilters() }))))
         } else if !model.hasLoaded {
-            parts.append(.full(id: "loading", view: AnyView(SkeletonRow())))
+            // Blank cards in the Saved grid's own layout, so the posters land where they stand.
+            parts.append(.placeholders(id: "loading"))
         } else if model.isEmpty || !model.hasMatches {
             parts.append(.full(id: "empty", view: AnyView(emptyState)))
         } else {
             if !model.saved.isEmpty {
                 let saved = model.saved
-                parts.append(.grid(MacTitleGrid(id: "saved", items: saved.map(\.preview), spacingAfter: metrics.shelfSpacing) { index, _ in
+                // Both grids fill the width, as Discover's does: a capped column ended short of the right margin at many window widths.
+                parts.append(.grid(MacTitleGrid(id: "saved", items: saved.map(\.preview), fillsWidth: true,
+                                                spacingAfter: metrics.shelfSpacing) { index, _ in
                     AnyView(savedCard(saved[index]))
                 }))
             }
             if !model.watched.isEmpty {
                 let watched = model.watched
-                parts.append(.full(id: "watchedHeader", view: AnyView(SectionHeader("Watched").padding(.horizontal, metrics.pageMargin)),
+                parts.append(.full(id: "watchedHeader", view: AnyView(SectionHeader("Watched").padding(.horizontal, metrics.gridPageMargin)),
                                    spacingAfter: metrics.headerSpacing))
-                parts.append(.grid(MacTitleGrid(id: "watched", items: watched.map(\.preview)) { index, _ in
+                parts.append(.grid(MacTitleGrid(id: "watched", items: watched.map(\.preview), fillsWidth: true) { index, _ in
                     AnyView(watchedCard(watched[index]))
                 }))
             }
@@ -101,7 +106,7 @@ struct LibraryView: View {
                         if model.showsDownloads {
                             DownloadsView(services: services, filter: model.downloadFilter, clearFilters: { model.clearFilters() })
                         } else if !model.hasLoaded {
-                            SkeletonRow()
+                            MediaGridPlaceholder(aspect: .poster, fillsWidth: true)
                         } else if model.isEmpty || !model.hasMatches {
                             emptyState
                         } else {
@@ -264,11 +269,12 @@ struct LibraryView: View {
         }
     }
 
+    /// Both grids fill the width (`GridFill`), so the last column ends on the right margin at every width.
     private var savedSection: some View {
-        LazyVGrid(columns: metrics.gridColumns(for: .poster, inLandscape: isLandscape), spacing: metrics.cardSpacing) {
+        LazyVGrid(columns: GridFill.filling(metrics.gridColumns(for: .poster, inLandscape: isLandscape)), spacing: metrics.cardSpacing) {
             ForEach(model.saved) { savedCard($0) }
         }
-        .padding(.horizontal, metrics.pageMargin)
+        .padding(.horizontal, metrics.gridPageMargin)
     }
 
     private func savedCard(_ item: StremioKit.LibraryItem) -> some View {
@@ -278,11 +284,11 @@ struct LibraryView: View {
 
     private var watchedSection: some View {
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
-            SectionHeader("Watched").padding(.horizontal, metrics.pageMargin)
-            LazyVGrid(columns: metrics.gridColumns(for: .poster, inLandscape: isLandscape), spacing: metrics.cardSpacing) {
+            SectionHeader("Watched").padding(.horizontal, metrics.gridPageMargin)
+            LazyVGrid(columns: GridFill.filling(metrics.gridColumns(for: .poster, inLandscape: isLandscape)), spacing: metrics.cardSpacing) {
                 ForEach(model.watched) { watchedCard($0) }
             }
-            .padding(.horizontal, metrics.pageMargin)
+            .padding(.horizontal, metrics.gridPageMargin)
         }
     }
 

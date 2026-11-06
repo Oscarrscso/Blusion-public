@@ -27,8 +27,9 @@ struct TrailerFullScreenView: View {
                 Image(systemName: "xmark")
                     .font(.title3.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .glassHover(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
             }
             .accessibilityLabel("Close")
             .accessibilityIdentifier("detail.trailerClose")

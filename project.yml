@@ -88,6 +88,8 @@ targets:
         UIUserInterfaceStyle: Dark
         UILaunchScreen:
           UIColorName: LaunchBackground
+          # Centred on the whole screen at its own size; LaunchSplash draws it at the same place, so the handoff does not move.
+          UIImageName: LaunchLogo
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
