@@ -72,6 +72,9 @@ public final class PlayerViewModel {
     private let services: AppServices
     /// The session store this player keeps current: the app's one, or a test's memory.
     private let snapshotStore: any PlaybackSnapshotStore
+    /// A session begun in Ghost mode stays private even if the preference changes before it closes.
+    private let persistsSession: Bool
+    private let isPrivateSession: @Sendable () -> Bool
     private let now: @Sendable () -> Date
     /// Who draws the chosen subtitle file: the engine (loaded into it), or the app's overlay from the cues it loaded. None for Off, an
     /// embedded track (the engine's own) and a file still loading for the first time.
@@ -111,6 +114,7 @@ public final class PlayerViewModel {
     private var subtitleGeneration = 0
     private var subtitleTask: Task<Void, Never>?
     private var lookupTasks: [Task<Void, Never>] = []
+    private var pendingSubtitleLookups = 0
     private var lookedUpCandidates: Set<String> = []
     private var skippedMarkers: Set<SkipMarker> = []
     private var temporaryFiles: [URL] = []
@@ -145,10 +149,13 @@ public final class PlayerViewModel {
     private var lastSnapshotRefresh: Date?
 
     public init(plan: PlaybackPlan, services: AppServices, now: @escaping @Sendable () -> Date = Date.init,
-                snapshotStore: (any PlaybackSnapshotStore)? = nil) {
+                snapshotStore: (any PlaybackSnapshotStore)? = nil,
+                isPrivateSession: @escaping @Sendable () -> Bool = { GhostMode.isOn }) {
         self.plan = plan
         self.services = services
         self.snapshotStore = snapshotStore ?? PlaybackSession.store
+        self.isPrivateSession = isPrivateSession
+        self.persistsSession = !isPrivateSession()
         self.now = now
         self.lastInteraction = now()
     }
@@ -213,12 +220,18 @@ public final class PlayerViewModel {
         async let savedProgress = services.progress.progress(for: plan.request.identity)
         settings = await loadedSettings
         let previous = await savedProgress
+        guard !isClosed, !Task.isCancelled else {
+            if case .beginning = lifecycle { lifecycle = .idle }
+            return
+        }
         if let id = plan.downloadID {
             services.downloads?.opened(id)
-            if let snapshot = await snapshotStore.load(), snapshot.downloadID == id { pendingResume = snapshot }
-            else {
-                let snapshot = PlaybackSnapshot(downloadID: id, request: plan.request, stream: PlaybackStreamIdentity(kind: .direct))
-                try? await snapshotStore.save(snapshot)
+            if persistsSession, !isPrivateSession() {
+                if let snapshot = await snapshotStore.load(), snapshot.downloadID == id { pendingResume = snapshot }
+                else if !isClosed, !Task.isCancelled, !isPrivateSession() {
+                    let snapshot = PlaybackSnapshot(downloadID: id, request: plan.request, stream: PlaybackStreamIdentity(kind: .direct))
+                    try? await snapshotStore.save(snapshot)
+                }
             }
         }
         guard !isClosed, !Task.isCancelled else {
@@ -302,6 +315,7 @@ public final class PlayerViewModel {
     /// Takes over a saved session: where it stopped, whether it was paused, its track choices and its picture. Called before the
     /// player is readied, so the start itself resumes there; called on a running player, it applies at once.
     public func resumePlayback(from snapshot: PlaybackSnapshot) {
+        guard persistsSession, !isPrivateSession() else { return }
         pendingResume = snapshot
         resumeWasPaused = snapshot.wasPaused
         guard hasStartedPlayback else { return }
@@ -323,11 +337,12 @@ public final class PlayerViewModel {
     /// A pause, a seek or the app leaving the front refreshes it at once (`force`). A prepared player has not started for the viewer
     /// yet, and a closed one has no session.
     public func recordSessionSnapshot(force: Bool = false) async {
-        guard lifecycle == .live, hasStartedPlayback else { return }
+        guard persistsSession, !isPrivateSession(), lifecycle == .live, hasStartedPlayback else { return }
         let current = now()
         if !force, let last = lastSnapshotRefresh, current.timeIntervalSince(last) < Self.snapshotRefreshInterval { return }
         lastSnapshotRefresh = current
         guard var snapshot = await snapshotStore.load(), snapshot.request.identity == plan.request.identity else { return }
+        guard !isPrivateSession(), lifecycle == .live, !Task.isCancelled else { return }
         snapshot.apply(saveState)
         try? await snapshotStore.save(snapshot)
     }
@@ -335,6 +350,7 @@ public final class PlayerViewModel {
     /// Saves the session a hand-over starts: the next episode's own stream, so killing the app during it walks back into that episode.
     /// The picture is the one Settings keeps: Zoom Mode, with the next title's own Aspect Ratio.
     public func saveSessionSnapshot(for next: PlaybackPlan, candidateIndex: Int = 0) async {
+        guard persistsSession, !isPrivateSession() else { return }
         guard next.candidates.indices.contains(candidateIndex) else { return }
         let candidate = next.candidates[candidateIndex]
         guard !next.isOffline, let identity = PlaybackStreamIdentity(candidate: candidate) else { return }
@@ -345,6 +361,12 @@ public final class PlayerViewModel {
                                         layout: layout, processing: settings.player.processing)
         try? await snapshotStore.save(snapshot)
         lastSnapshotRefresh = now()
+    }
+
+    /// Closing a private session must not erase the last session recorded outside Ghost mode.
+    public func clearSessionSnapshot() async {
+        guard persistsSession, !isPrivateSession() else { return }
+        await snapshotStore.clear()
     }
 
     private var subtitleSnapshotTrack: SnapshotTrack? {
@@ -370,13 +392,14 @@ public final class PlayerViewModel {
     /// Applies the restored audio and subtitle choices once their lists exist. A list that is still empty keeps the choice waiting,
     /// so a track that arrives a moment later is still taken over; a fresh choice made meanwhile wins.
     private func restoreChoicesIfPossible() {
-        guard let restored = pendingResume, hasStartedPlayback else { return }
+        guard var restored = pendingResume, hasStartedPlayback else { return }
         var applied = true
         if let pick = restored.audioTrack {
             if let track = Self.track(pick, in: state.audioTracks) {
                 userChoseAudio = true
                 audioTrackSelectionID = track.id
                 coordinator?.selectAudioTrack(id: track.id)
+                restored.audioTrack = nil
             } else if state.audioTracks.isEmpty {
                 applied = false
             }
@@ -385,20 +408,23 @@ public final class PlayerViewModel {
             userChoseSubtitle = true
             automaticChoice = nil
             Task { [weak self] in await self?.apply(.off) }
+            restored.subtitlesOff = false
         } else if let pick = restored.subtitleTrack {
-            if let track = Self.track(pick, in: embeddedSubtitleTracks) {
+            if !pick.isExternal, let track = Self.track(pick, in: embeddedSubtitleTracks) {
                 userChoseSubtitle = true
                 automaticChoice = nil
                 Task { [weak self] in await self?.apply(.embedded(track.id)) }
+                restored.subtitleTrack = nil
             } else if let option = Self.option(pick, in: subtitleOptions) {
                 userChoseSubtitle = true
                 automaticChoice = nil
                 Task { [weak self] in await self?.apply(.external(option.id)) }
-            } else if embeddedSubtitleTracks.isEmpty && subtitleOptions.isEmpty {
+                restored.subtitleTrack = nil
+            } else if (pick.isExternal && pendingSubtitleLookups > 0) || (embeddedSubtitleTracks.isEmpty && subtitleOptions.isEmpty) {
                 applied = false
             }
         }
-        if applied { pendingResume = nil }
+        pendingResume = applied ? nil : restored
     }
 
     /// A saved track against a fresh engine's own: its name and language, then its language and flags, then its name alone. A fresh
@@ -731,6 +757,7 @@ public final class PlayerViewModel {
     public var audioDelay: TimeInterval { coordinator?.audioDelay ?? 0 }
 
     public func selectAudioTrack(id: String) {
+        pendingResume?.audioTrack = nil
         userChoseAudio = true
         audioTrackSelectionID = id
         coordinator?.selectAudioTrack(id: id)
@@ -890,6 +917,8 @@ public final class PlayerViewModel {
     }
 
     public func selectSubtitle(_ choice: SubtitleChoice) async {
+        pendingResume?.subtitleTrack = nil
+        pendingResume?.subtitlesOff = false
         userChoseSubtitle = true
         automaticChoice = nil
         showControls()
@@ -1057,8 +1086,10 @@ public final class PlayerViewModel {
     private func startSubtitles() {
         guard let first = plan.candidates.first else { return }
         lookedUpCandidates.insert(first.id)
+        pendingSubtitleLookups += 1
         subtitleTask = Task { [weak self] in
             guard let self else { return }
+            defer { pendingSubtitleLookups -= 1; restoreChoicesIfPossible() }
             subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: first.subtitles))
             restoreChoicesIfPossible()
             await applyDefaultSubtitle()
@@ -1080,8 +1111,10 @@ public final class PlayerViewModel {
     /// The list keeps what it had, so a choice already made stays available.
     private func lookUpSubtitles(for candidate: PlaybackCandidate) {
         guard !plan.isOffline, lookedUpCandidates.insert(candidate.id).inserted else { return }
+        pendingSubtitleLookups += 1
         lookupTasks.append(Task { [weak self] in
             guard let self else { return }
+            defer { pendingSubtitleLookups -= 1; restoreChoicesIfPossible() }
             subtitleOptions = SubtitleService.merge(subtitleOptions, SubtitleService.options(from: candidate.subtitles))
             await applyDefaultSubtitle()
             await collect(services.subtitles.fetch(for: candidate, request: plan.request))
@@ -1245,15 +1278,13 @@ public final class PlayerViewModel {
 
     /// Player changes the listener makes are their new defaults (Settings shows them too).
     /// Saves run one after another, so quick changes in a row cannot overwrite each other.
-    private func savePreferences(_ change: @escaping (inout PlayerPreferences) -> Void) {
+    private func savePreferences(_ change: @escaping @MainActor @Sendable (inout PlayerPreferences) -> Void) {
         change(&settings.player)
         let store = services.settings
         let previous = saveTask
         saveTask = Task {
             await previous?.value
-            var saved = await store.load()
-            change(&saved.player)
-            await store.save(saved)
+            _ = await store.update { change(&$0.player) }
         }
     }
 

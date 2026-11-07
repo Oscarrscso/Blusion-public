@@ -15,15 +15,18 @@ struct WidgetBuilderView: View {
     @State private var showsTraktBrowser = false
     /// True while a text field in the open panel is being edited.
     @State private var isTyping = false
+    /// Called in place of leaving this screen once a new widget is added (see `WidgetEditorView`).
+    private let onAdded: (() -> Void)?
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.dismiss) private var dismiss
 
     /// Makes a widget in `style` when `widget` is nil (a TMDB list of popular movies), or changes `widget`.
     init(mode: WidgetBuilderModel.Mode, widget: HomeWidget?, style: WidgetStyle = .row, manager: WidgetsManagerViewModel,
-         services: AppServices) {
+         services: AppServices, onAdded: (() -> Void)? = nil) {
         self.mode = mode
         self.manager = manager
         self.services = services
+        self.onAdded = onAdded
         _model = State(initialValue: WidgetBuilderModel(mode: mode, widget: widget, style: style, manager: manager, services: services))
     }
 
@@ -127,7 +130,7 @@ struct WidgetBuilderView: View {
                 showsPicker = false
                 try? await Task.sleep(for: .milliseconds(450))
             }
-            dismiss()
+            if mode == .create, let onAdded { onAdded() } else { dismiss() }
         }
     }
 

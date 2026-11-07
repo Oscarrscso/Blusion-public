@@ -854,10 +854,10 @@ private struct PanelSlider: View {
                 Spacer()
                 Text(label(shown)).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(.white.opacity(0.7))
             }
-            Slider(value: Binding(get: { shown }, set: { newValue in
+            CornerSlider(value: Binding(get: { shown }, set: { newValue in
                 dragged = newValue
                 change(newValue, false)
-            }), in: range) { editing in
+            }), in: range, tint: .white) { editing in
                 guard !editing, let final = dragged else { return }
                 Haptics.play(.playerOptions)
                 change(final, true)

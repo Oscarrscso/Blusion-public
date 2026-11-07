@@ -213,6 +213,7 @@ public actor TraktAccount {
         guard pendingPKCE?.state == pending.state, pending.revision == credentialsRevision,
               savedClientID == pending.clientID else { throw TraktAccountError.credentialsChanged }
         pendingPKCE = nil
+        credentialsRevision += 1
         try await save(token)
     }
 
@@ -252,6 +253,7 @@ public actor TraktAccount {
             token.clientID = clientID
             try Task.checkCancellation()
             guard revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
+            credentialsRevision += 1
             try await save(token)
             return .signedIn
         default: throw TraktAccountError.network(.http(status: result.response.statusCode))
@@ -279,6 +281,12 @@ public actor TraktAccount {
         try? await secrets.remove(Keys.token)
         try? await secrets.remove(Keys.clientSecret)
         try? await secrets.remove(Keys.redirectURI)
+    }
+
+    /// A token changed through iCloud. Results requested with the previous credentials must be discarded.
+    public func credentialsDidChangeElsewhere() {
+        credentialsRevision += 1
+        pendingPKCE = nil
     }
 
     /// A signed-in GET of an API path with its query, such as `users/me/lists`, for the Trakt list browser. The token is refreshed like
@@ -449,17 +457,22 @@ public actor TraktAccount {
     }
 
     private func authorizedRequest(path: String, body: [String: Any]? = nil, method: String? = nil, accepting: Set<Int> = []) async throws -> HTTPResult {
+        let revision = credentialsRevision
         let (clientID, clientSecret) = try await credentials()
         guard var token = try await loadToken() else { throw TraktAccountError.needsSignIn }
-        guard token.clientID == clientID else { throw TraktAccountError.credentialsChanged }
+        guard token.clientID == clientID, revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
         if token.expiresAt <= now().addingTimeInterval(60) {
             token = try await refreshed(token, clientID: clientID, clientSecret: clientSecret)
         }
+        guard revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
         var result = try await request(path: path, clientID: clientID, accessToken: token.accessToken, body: body, method: method)
+        guard revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
         if result.response.statusCode == 401 {
             token = try await refreshed(token, clientID: clientID, clientSecret: clientSecret)
+            guard revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
             result = try await request(path: path, clientID: clientID, accessToken: token.accessToken, body: body, method: method)
         }
+        guard revision == credentialsRevision else { throw TraktAccountError.credentialsChanged }
         try checkStatus(result, accepting: accepting)
         return result
     }

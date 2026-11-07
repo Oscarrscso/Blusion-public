@@ -55,8 +55,8 @@ public struct SnapshotTrack: Codable, Sendable, Equatable, Hashable {
 }
 
 /// The stable identity of a stream, enough to recognise it again in a fresh listing without ever saving the link itself: a torrent's
-/// `infoHash`, an id, and for debrid links the file's host, path, name and size. The query and fragment of a URL are dropped, so a
-/// token or key a link carries was never saved, and a refreshed link for the same file still matches.
+/// `infoHash`, an id, and for debrid links the file's host, path, name and size. URLs are one-way fingerprints, so a token or key is never
+/// saved as text. Refreshed links match through the file facts when their URL has changed.
 public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
     public enum Kind: String, Codable, Sendable { case direct, torrent, youtube, external }
 
@@ -64,7 +64,7 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
     public var infoHash: String?
     public var fileIndex: Int?
     public var youtubeID: String?
-    /// Direct and external links: a SHA-256 fingerprint of scheme/host/path, with user-info, query and fragment removed.
+    /// Direct and external links: a versioned SHA-256 fingerprint, including resource-selecting query parameters.
     public var urlPath: String?
     /// What the addon says the file is: the stronger hint when a debrid link's host or path changes between answers.
     public var filename: String?
@@ -172,16 +172,19 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
         }
     }
 
-    /// One-way matching fingerprint. No URL path, user-info, query or fragment is persisted.
+    /// One-way matching fingerprint. Query values can select different files, so they participate without being persisted as text.
     public static func sanitized(_ url: URL) -> String? {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.user = nil
         components?.password = nil
-        components?.query = nil
+        let scheme = components?.scheme?.lowercased()
+        let host = components?.host?.lowercased()
+        components?.scheme = scheme
+        components?.host = host
         components?.fragment = nil
         let text = components?.string
         guard let text, !text.isEmpty else { return nil }
-        return fingerprint(text)
+        return "sha256:v2:" + SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func fingerprint(_ text: String) -> String {
@@ -195,8 +198,12 @@ public struct PlaybackStreamIdentity: Codable, Sendable, Equatable, Hashable {
         guard let other = Self.make(for: fresh), other.kind == kind else { return false }
         switch kind {
         case .direct:
-            if let urlPath, other.urlPath == urlPath { return true }
-            if let videoHash, let otherHash = other.videoHash, videoHash.caseInsensitiveCompare(otherHash) == .orderedSame { return true }
+            if let videoHash, let otherHash = other.videoHash {
+                return videoHash.caseInsensitiveCompare(otherHash) == .orderedSame
+            }
+            if let videoSize, let otherSize = other.videoSize, videoSize != otherSize { return false }
+            if let filename, let otherName = other.filename, filename != otherName { return false }
+            if let urlPath, urlPath.hasPrefix("sha256:v2:"), other.urlPath == urlPath { return true }
             if let filename, filename == other.filename,
                let videoSize, videoSize == other.videoSize { return true }
             return false

@@ -45,10 +45,15 @@ struct LayoutRow: View {
         case .wall: WallLayout(items: items)
         case .parallax: ParallaxLayout(items: items, showsRating: presentation.showsRatings)
         case .spines: SpinesLayout(items: items, showsRating: presentation.showsRatings)
+        case .slots: SlotsLayout(items: items)
+        case .deck: DeckLayout(items: items, showsRating: presentation.showsRatings)
+        case .snapshots: SnapshotsLayout(items: items)
+        case .videoStore: VideoStoreLayout(items: items, showsRating: presentation.showsRatings)
         }
     }
 
-    /// The height `layout` takes under its header, for the placeholder that stands in for it.
+    /// The height `layout` takes under its header, for the placeholder that stands in for it. Flow's is its posters' alone: its caption is
+    /// text, whose room the placeholder keeps with the caption's own lines.
     static func height(of layout: RowLayout, metrics: LayoutMetrics, containerWidth: CGFloat) -> CGFloat {
         switch layout {
         case .mosaic: MosaicLayout.height(metrics)
@@ -56,6 +61,10 @@ struct LayoutRow: View {
         case .wall: WallLayout.height(metrics)
         case .parallax: ParallaxLayout.height(metrics, containerWidth: containerWidth)
         case .spines: SpinesLayout.height(metrics)
+        case .slots: SlotsLayout.height(metrics, containerWidth: containerWidth)
+        case .deck: DeckLayout.height(metrics)
+        case .snapshots: SnapshotsLayout.height(metrics)
+        case .videoStore: VideoStoreLayout.height(metrics)
         }
     }
 }
@@ -71,15 +80,24 @@ struct LayoutRowPlaceholder: View {
     @Environment(\.heroContainerWidth) private var containerWidth
 
     var body: some View {
+        let cards = metrics.layoutCards(size)
         VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             if let title {
                 SectionHeader(title).padding(.horizontal, metrics.pageMargin)
             }
-            RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .artwork), style: .continuous)
-                .fill(Theme.surfaceStrong)
-                .frame(height: LayoutRow.height(of: layout, metrics: metrics.layoutCards(size), containerWidth: containerWidth))
-                .shimmering()
-                .padding(.horizontal, metrics.pageMargin)
+            VStack(spacing: Theme.Spacing.m) {
+                Color.clear.frame(height: LayoutRow.height(of: layout, metrics: cards, containerWidth: containerWidth))
+                if layout == .flow { FlowLayoutRow.captionLines(name: " ", details: " ").hidden() }
+            }
+            // The slot machine's cabinet stands in the middle of the row at its own width.
+            .frame(width: layout == .slots ? SlotsLayout.width(cards, containerWidth: containerWidth) : nil)
+            .background {
+                RoundedRectangle(cornerRadius: Theme.Radius.surface * metrics.cornerScale(for: .artwork), style: .continuous)
+                    .fill(Theme.surfaceStrong)
+            }
+            .shimmering()
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, metrics.pageMargin)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
@@ -100,13 +118,13 @@ extension LayoutMetrics {
 }
 
 /// "Drama · 2008 · ★ 8": the first genre, the year and, when shown, the IMDb rating.
-private func detailLine(_ item: MetaPreview, showsRating: Bool) -> String {
+func layoutDetailLine(_ item: MetaPreview, showsRating: Bool) -> String {
     let rating = showsRating ? item.imdbRating.map { "★ \(ScoreText.wholeScore($0))" } : nil
     return [item.genres.first, item.releaseInfo, rating].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
 }
 
 /// A title's poster filling `width` by `height`, decoded at the size it is drawn. Only its own frame takes touches.
-private struct LayoutPoster: View {
+struct LayoutPoster: View {
     let item: MetaPreview
     let width: CGFloat
     let height: CGFloat
@@ -125,10 +143,13 @@ private struct LayoutPoster: View {
 }
 
 /// A picture that opens its title, for the layouts' own cards: the push, zoom, press, tap haptic, hover and Mac menu a shelf's card has.
-/// `copy` tells apart the repeats of one title in a layout that shows it more than once, so each is its own zoom source.
-private struct LayoutTitleLink<Label: View>: View {
+/// `copy` tells apart the repeats of one title in a layout that shows it more than once, so each is its own zoom source. `prewarms` false
+/// leaves out the title page's artwork lookup ahead of a tap, and with it the poster's watch on whether it is on screen, for a layout
+/// that moves all its posters on every frame.
+struct LayoutTitleLink<Label: View>: View {
     let item: MetaPreview
     var copy = ""
+    var prewarms = true
     let cornerRadius: CGFloat
     @ViewBuilder let label: () -> Label
     @Environment(\.zoomScope) private var zoomScope
@@ -137,37 +158,47 @@ private struct LayoutTitleLink<Label: View>: View {
 
     var body: some View {
         let sourceID = "\(zoomScope)/\(copy)\(item.identity)"
-        NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID)) {
+        let link = NavigationLink(value: TitleDestination(preview: item, sourceID: sourceID)) {
             label()
                 .mediaArtwork(cornerRadius: cornerRadius)
                 .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: cornerRadius * metrics.cornerScale(for: .artwork))
         }
         .buttonStyle(PressableCardStyle.poster)
         .titleTapHaptic()
-        .prewarmsHeroArtwork(item)
+        Group {
+            if prewarms { link.prewarmsHeroArtwork(item) } else { link }
+        }
         .help(item.name)
         .titleCardMenu(item)
         .accessibilityLabel(item.name)
     }
 }
 
-/// A title's logo in a `width` by `height` box, pinned to its bottom leading corner; its name in bold when it has none.
-private struct LayoutLogo: View {
+/// A title's logo in a `width` by `height` box, pinned to its bottom leading corner: the spotlight's logo (the catalog's, else TMDb's from
+/// the spotlight's artwork lookup), loaded as the spotlight loads it, trimmed and made light when it is dark. Its name in bold when it has
+/// none.
+struct LayoutLogo: View {
     let item: MetaPreview
     let width: CGFloat
     let height: CGFloat
-    @State private var image: UIImage?
-    @State private var settled = false
+    @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
+    @State private var hero = HeroLoader()
+    @State private var heroArtwork: TMDbArtwork?
+    /// Set once the spotlight's artwork lookup has answered, so a title with no logo falls back to its name.
+    @State private var artworkChecked = false
 
-    private var url: URL? { item.logo ?? MetahubArtwork.logo(imdbID: item.id) }
+    private var logoURL: URL? { item.logo ?? heroArtwork?.logo }
 
     var body: some View {
         Group {
-            if let image {
+            switch hero.slot(url: logoURL, maxPixelSize: HeroLoader.logoPixelSize, lookupFinished: artworkChecked) {
+            case .ready(let image):
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-            } else if settled {
+            case .pending:
+                Color.clear
+            case .none:
                 Text(item.name)
                     .font(.title3.bold())
                     .lineLimit(2)
@@ -176,16 +207,16 @@ private struct LayoutLogo: View {
         }
         .frame(width: width, height: height, alignment: .bottomLeading)
         .shadow(color: .black.opacity(0.6), radius: 4, y: 1)
-        .task(id: url) {
-            image = url.flatMap { ImagePipeline.shared.cachedImage(for: $0, maxPixelSize: 400) }
-            guard image == nil, let url else {
-                settled = true
-                return
-            }
-            let loaded = try? await ImagePipeline.shared.image(for: url, maxPixelSize: 400)
+        .task(id: item.identity) {
+            // The catalog's own logo needs no lookup; otherwise the spotlight's artwork, known already when the title was prewarmed.
+            guard item.logo == nil else { return }
+            heroArtwork = ratings?.cachedHeroArtwork(for: item)
+            if heroArtwork == nil { heroArtwork = await ratings?.heroArtwork(for: item) }
             guard !Task.isCancelled else { return }
-            image = loaded
-            settled = true
+            artworkChecked = true
+        }
+        .task(id: logoURL) {
+            await hero.load(priority: .medium, picture: nil, pictureSize: 0, logo: logoURL, logoSize: HeroLoader.logoPixelSize)
         }
         .accessibilityHidden(true)
     }
@@ -260,27 +291,78 @@ private struct MosaicPage: View {
 
 // MARK: - Flow
 
-/// `RowLayout.flow`: Cover Flow. The poster in the middle faces the viewer; the others stand turned towards it in two tight stacks, each
+/// `RowLayout.flow`: iPod: Cover Flow. The poster in the middle faces the viewer; the others stand turned towards it in two tight stacks, each
 /// overlapping the next like records in a crate, every poster over its own reflection, with the middle one's name and details under them.
 /// A poster to one side comes to the middle when tapped; the one in the middle opens its title.
 private struct FlowLayoutRow: View {
     let items: [MetaPreview]
     let showsRating: Bool
     @State private var centredID: String?
+    @State private var entryCache = EntryCache()
+    @State private var motion = ScrollMotion()
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.heroContainerWidth) private var containerWidth
     #if targetEnvironment(macCatalyst)
     @State private var isHovering = false
     #endif
 
-    static func cardWidth(_ metrics: LayoutMetrics) -> CGFloat { (metrics.posterWidth * 1.2).rounded() }
-    static func reflection(_ metrics: LayoutMetrics) -> CGFloat { (cardWidth(metrics) * 1.5 * 0.3).rounded() }
-    static func height(_ metrics: LayoutMetrics) -> CGFloat {
-        cardWidth(metrics) * 1.5 + FlowCard.reflectionGap + reflection(metrics) + Theme.Spacing.m + 40
+    /// Starts on the first title in the middle copy, so the last titles already stand in the stack to its left.
+    init(items: [MetaPreview], showsRating: Bool) {
+        self.items = items
+        self.showsRating = showsRating
+        _centredID = State(initialValue: items.first.map { Self.entryID(copy: Self.middleCopy(of: items.count), item: $0) })
     }
 
-    private var current: String? { centredID ?? items.first?.identity }
-    private var currentIndex: Int { items.firstIndex { $0.identity == current } ?? 0 }
+    /// The shelf repeated end to end so the row loops: the user scrolls through the copies, and each time the row comes to rest it is
+    /// silently put back on the same poster in the middle copy. Each side of the middle copy holds at least `runway` posters, so even a
+    /// run of hard flicks never reaches an end, however short the shelf. A single title is not repeated.
+    private static let runway = 400
+    private static func copies(of count: Int) -> Int { count > 1 ? 2 * ((runway + count - 1) / count) + 1 : 1 }
+    private static func middleCopy(of count: Int) -> Int { copies(of: count) / 2 }
+    private static func entryID(copy: Int, item: MetaPreview) -> String { "\(copy)/\(item.identity)" }
+    private struct Entry: Identifiable {
+        let id: String
+        let item: MetaPreview
+        let copy: Int
+        let index: Int
+    }
+    private var entries: [Entry] { entryCache.entries(for: items, copies: Self.copies(of: items.count)) }
+
+    /// The copies' entries, built again only when the titles change: the row redraws each time another poster comes to the middle.
+    @MainActor
+    private final class EntryCache {
+        private var items: [MetaPreview]?
+        private var entries: [Entry] = []
+
+        func entries(for items: [MetaPreview], copies: Int) -> [Entry] {
+            guard items != self.items else { return entries }
+            self.items = items
+            entries = (0..<copies).flatMap { copy in
+                items.enumerated().map { Entry(id: FlowLayoutRow.entryID(copy: copy, item: $1), item: $1, copy: copy, index: $0) }
+            }
+            return entries
+        }
+    }
+    private var middleCopy: Int { Self.middleCopy(of: items.count) }
+
+    /// Whether the row is held or still moving, kept out of the view's state so a change of phase does not redraw the row.
+    @MainActor
+    private final class ScrollMotion {
+        var isMoving = false
+    }
+
+    static func cardWidth(_ metrics: LayoutMetrics) -> CGFloat { (metrics.posterWidth * 1.2).rounded() }
+    static func reflection(_ metrics: LayoutMetrics) -> CGFloat { (cardWidth(metrics) * 1.5 * 0.3).rounded() }
+    /// The posters over their reflections, above the caption.
+    static func height(_ metrics: LayoutMetrics) -> CGFloat {
+        cardWidth(metrics) * 1.5 + FlowCard.reflectionGap + reflection(metrics)
+    }
+
+    private var current: String? { centredID ?? entries.first { $0.copy == middleCopy }?.id }
+    /// The position of the middle poster among all the copies.
+    private var currentPosition: Int { entries.firstIndex { $0.id == current } ?? 0 }
+    /// The middle poster's place in the shelf.
+    private var currentIndex: Int { entries.indices.contains(currentPosition) ? entries[currentPosition].index : 0 }
 
     var body: some View {
         let width = Self.cardWidth(metrics)
@@ -292,13 +374,20 @@ private struct FlowLayoutRow: View {
         let spread = width * 0.68
         // Turns and scales about the poster's own middle, not its reflection's.
         let anchor = UnitPoint(x: 0.5, y: height / 2 / (height + FlowCard.reflectionGap + reflection))
+        // Worked out once for the whole row, not again for each poster.
+        let current = self.current
+        let currentPosition = self.currentPosition
+        let count = items.count
         VStack(spacing: Theme.Spacing.m) {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.identity) { index, item in
-                        FlowCard(item: item, width: width, height: height, reflection: reflection, isCentred: item.identity == current) {
-                            withAnimation(.snappy(duration: 0.4)) { centredID = item.identity }
+                    ForEach(entries) { entry in
+                        let position = entry.copy * count + entry.index
+                        FlowCard(item: entry.item, width: width, height: height, reflection: reflection, isCentred: entry.id == current) {
+                            withAnimation(.snappy(duration: 0.4)) { centredID = entry.id }
                         }
+                        // Another poster coming to the middle redraws only it and the one that leaves.
+                        .equatable()
                         .visualEffect { content, proxy in
                             // How many steps the poster is from the middle, leftwards when negative; past one step it is in a stack.
                             let distance = proxy.bounds(of: .scrollView).map { proxy.size.width / 2 - $0.midX } ?? 0
@@ -311,13 +400,18 @@ private struct FlowLayoutRow: View {
                         }
                         .frame(width: step)
                         // The poster in the middle is drawn over its neighbours, and each one in a stack over the one behind it.
-                        .zIndex(-Double(abs(index - currentIndex)))
+                        .zIndex(-Double(abs(position - currentPosition)))
                     }
                 }
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $centredID, anchor: .center)
             .scrollTargetBehavior(.viewAligned)
+            .onScrollPhaseChange { _, phase in
+                motion.isMoving = phase != .idle
+                // Put back the moment the row is at rest, before a finger can take it again.
+                if phase == .idle { recentre() }
+            }
             .scrollIndicators(.hidden, axes: .horizontal)
             .contentMargins(.horizontal, max(metrics.pageMargin, (containerWidth - step) / 2), for: .scrollContent)
             .scrollClipDisabled()
@@ -331,48 +425,70 @@ private struct FlowLayoutRow: View {
         }
         .onChange(of: centredID) { old, new in
             guard old != nil, new != old else { return }
-            Haptics.play(.shelves)
+            let shelfIndex = { (id: String?) in entries.first { $0.id == id }?.index }
+            if shelfIndex(old) != shelfIndex(new) { Haptics.play(.shelves) }
+            // A tap or a chevron moves the row without a gesture: it is put back once that move has had time to finish.
+            if !motion.isMoving { recentre(after: .milliseconds(600)) }
         }
         #if targetEnvironment(macCatalyst)
         .onHover { isHovering = $0 }
         #endif
     }
 
+    /// When the row rests on a poster in another copy, puts it back on the same poster in the middle copy, without animation: every
+    /// poster stands just where it was, so nothing on screen moves. Never while the row is held or still moving.
+    private func recentre(after delay: Duration = .zero) {
+        guard let id = centredID, let entry = entries.first(where: { $0.id == id }), entry.copy != middleCopy else { return }
+        let target = Self.entryID(copy: middleCopy, item: entry.item)
+        Task { @MainActor in
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            guard !motion.isMoving, centredID == id, entries.contains(where: { $0.id == target }) else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { centredID = target }
+        }
+    }
+
     /// The middle poster's name, and its details under it, crossfading as another poster comes to the middle.
     private var caption: some View {
         let item = items.indices.contains(currentIndex) ? items[currentIndex] : nil
-        return VStack(spacing: 2) {
-            Text(item?.name ?? " ")
+        return Self.captionLines(name: item?.name ?? " ", details: item.map { layoutDetailLine($0, showsRating: showsRating) } ?? " ")
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, metrics.pageMargin)
+            .contentTransition(.opacity)
+            .animation(.easeOut(duration: 0.2), value: current)
+            .accessibilityHidden(true)
+    }
+
+    /// The caption's name over its details, a line each, so blank lines keep the same room as filled ones.
+    static func captionLines(name: String, details: String) -> some View {
+        VStack(spacing: 2) {
+            Text(name)
                 .font(.headline)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-            Text(item.map { detailLine($0, showsRating: showsRating) } ?? " ")
+            Text(details)
                 .font(Theme.Typography.metaLine)
                 .foregroundStyle(Theme.metaText)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, metrics.pageMargin)
-        .contentTransition(.opacity)
-        .animation(.easeOut(duration: 0.2), value: current)
-        .accessibilityHidden(true)
     }
 
     #if targetEnvironment(macCatalyst)
     /// Mac: a chevron at each side while the pointer is over the row, moving the next poster to the middle.
     private var arrows: some View {
         HStack {
-            arrow(systemName: "chevron.left", label: "Previous title", step: -1, enabled: currentIndex > 0)
+            arrow(systemName: "chevron.left", label: "Previous title", step: -1, enabled: items.count > 1)
             Spacer()
-            arrow(systemName: "chevron.right", label: "Next title", step: 1, enabled: currentIndex < items.count - 1)
+            arrow(systemName: "chevron.right", label: "Next title", step: 1, enabled: items.count > 1)
         }
         .padding(.horizontal, Theme.Spacing.l)
     }
 
     private func arrow(systemName: String, label: String, step: Int, enabled: Bool) -> some View {
         Button {
-            let target = min(max(currentIndex + step, 0), items.count - 1)
-            withAnimation(.snappy(duration: 0.4)) { centredID = items[target].identity }
+            let target = min(max(currentPosition + step, 0), entries.count - 1)
+            withAnimation(.snappy(duration: 0.4)) { centredID = entries[target].id }
         } label: {
             Image(systemName: systemName)
                 .font(.headline.weight(.semibold))
@@ -390,7 +506,7 @@ private struct FlowLayoutRow: View {
     #endif
 }
 
-private struct FlowCard: View {
+private struct FlowCard: View, Equatable {
     let item: MetaPreview
     let width: CGFloat
     let height: CGFloat
@@ -401,6 +517,14 @@ private struct FlowCard: View {
     @Environment(\.zoomScope) private var zoomScope
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(\.layoutMetrics) private var metrics
+
+    /// `onCentre` is left out: it only ever brings this poster to the middle.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.item == rhs.item && lhs.width == rhs.width && lhs.height == rhs.height && lhs.reflection == rhs.reflection
+                && lhs.isCentred == rhs.isCentred
+        }
+    }
 
     /// The gap between a poster and its reflection.
     static let reflectionGap: CGFloat = 3
@@ -433,6 +557,8 @@ private struct FlowCard: View {
                 .mask {
                     LinearGradient(colors: [.white.opacity(0.42), .clear], startPoint: .top, endPoint: .bottom)
                 }
+                // Drawn once into a single picture, so the stacks' turning on every frame of a scroll does not mask it again.
+                .drawingGroup()
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -446,9 +572,10 @@ private struct FlowCard: View {
 
 // MARK: - Wall
 
-/// `RowLayout.wall`: a tilted wall of small posters in rows that drift past in opposite directions at different speeds, in a rounded panel
-/// with a soft vignette. Each poster opens its title, and each row can be dragged along by itself; a flick glides on, and the row drifts
-/// again from wherever it is let go. The wall stands still with Reduce Motion, while its row is off screen or the app is in the background,
+/// `RowLayout.wall`: a tilted wall of small posters, three rows tall, in rows that drift past in opposite directions at different speeds,
+/// in a rounded panel with a soft vignette. Each poster opens its title, and each row can be dragged along by itself; a flick glides on and
+/// slows to a stop as a scrolled list does, a row caught while it glides stops under the finger, and the row drifts again from wherever it
+/// is let go. The wall stands still with Reduce Motion, while its row is off screen or the app is in the background,
 /// while a row is held and, on the Mac, while the pointer is over it, so a poster can be clicked.
 private struct WallLayout: View {
     let items: [MetaPreview]
@@ -458,16 +585,19 @@ private struct WallLayout: View {
     @Environment(\.loadsVisibleArtwork) private var sectionIsVisible
     @Environment(\.scenePhase) private var scenePhase
     @State private var clock = DriftClock()
+    @State private var stripCache = WallStripCache()
     @State private var isHovering = false
     /// How far each row has been moved by hand, by its id, on top of its drift.
     @State private var shifts: [Int: CGFloat] = [:]
+    /// Each flicked row's glide, by its id, worked out from the wall's own time.
+    @State private var glides: [Int: WallGlide] = [:]
     /// The row being dragged, and how far along it the finger has gone.
     @State private var drag: (row: Int, distance: CGFloat)?
 
     static let tilt: Double = -8
-    static func posterWidth(_ metrics: LayoutMetrics) -> CGFloat { (metrics.posterWidth * 0.62).rounded() }
+    static func posterWidth(_ metrics: LayoutMetrics) -> CGFloat { (metrics.posterWidth * 0.5).rounded() }
     static func gap(_ metrics: LayoutMetrics) -> CGFloat { max(4, (metrics.cardSpacing * 0.67).rounded()) }
-    static func height(_ metrics: LayoutMetrics) -> CGFloat { (posterWidth(metrics) * 1.5 * 2.2).rounded() }
+    static func height(_ metrics: LayoutMetrics) -> CGFloat { (posterWidth(metrics) * 1.5 * 3).rounded() }
 
     var body: some View {
         let width = Self.posterWidth(metrics)
@@ -480,18 +610,21 @@ private struct WallLayout: View {
         let needed: CGFloat = (panelHeight * cos(angle) + panelWidth * sin(angle)) / (posterHeight + gap)
         let rows = max(3, Int(needed.rounded(.up)) + 1)
         let overhang: CGFloat = (panelHeight * sin(angle)).rounded(.up) + width
-        let strips = WallStrip.strips(for: items, rows: rows, width: width, gap: gap, span: panelWidth + overhang * 2)
-        let paused = reduceMotion || !sectionIsVisible || scenePhase != .active || isHovering || drag != nil
+        let strips = stripCache.strips(for: items, rows: rows, width: width, gap: gap, span: panelWidth + overhang * 2)
+        // On the Mac the wall stops drifting under the pointer, but a row flicked there still glides to a stop.
+        let gliding = glides.values.contains { $0.isMoving(at: clock.glideTime) }
+        let paused = reduceMotion || !sectionIsVisible || scenePhase != .active || (isHovering && !gliding) || drag != nil
         let radius = HeroBanner.cornerRadius * metrics.cornerScale(for: .artwork)
         TimelineView(.animation(minimumInterval: 1.0 / 60, paused: paused)) { context in
-            let time = clock.advance(to: context.date)
+            let time = clock.advance(to: context.date, running: !paused, drifting: !isHovering)
+            let glideTime = clock.glideTime
             VStack(alignment: .leading, spacing: gap) {
                 ForEach(strips) { strip in
                     WallStripView(strip: strip, width: width, height: posterHeight, gap: gap)
                         .equatable()
-                        .modifier(WallStripOffset(strip: strip, time: time, overhang: overhang, shift: shift(of: strip.id)))
+                        .offset(x: strip.offset(at: time, shift: shift(of: strip.id, at: glideTime)) - overhang)
                         .gesture(WallRowPan { distance in
-                            drag = (strip.id, distance)
+                            hold(strip.id, distance: distance)
                         } ended: { distance, velocity in
                             release(strip.id, distance: distance, velocity: velocity)
                         })
@@ -522,53 +655,57 @@ private struct WallLayout: View {
         #endif
     }
 
-    /// How far `row` has been moved by hand, counting the drag under way.
-    private func shift(of row: Int) -> CGFloat {
-        shifts[row, default: 0] + (drag?.row == row ? drag?.distance ?? 0 : 0)
+    /// How far `row` has been moved by hand at `time`: the drags before, the one under way and the glide of the last flick.
+    private func shift(of row: Int, at time: TimeInterval) -> CGFloat {
+        let held = drag?.row == row ? drag?.distance ?? 0 : 0
+        return shifts[row, default: 0] + held + (glides[row]?.distance(at: time) ?? 0)
+    }
+
+    /// The finger on `row`. A row still gliding stops where it stands, so it stays under the finger instead of jumping to where its glide
+    /// would have ended.
+    private func hold(_ row: Int, distance: CGFloat) {
+        if drag?.row != row, let glide = glides.removeValue(forKey: row) {
+            shifts[row, default: 0] += glide.distance(at: clock.glideTime)
+        }
+        drag = (row, distance)
     }
 
     /// Leaves `row` where the finger let go. A flick carries it on and slows to a stop, as a scrolled list does; with Reduce Motion it stays put.
     private func release(_ row: Int, distance: CGFloat, velocity: CGFloat) {
-        let landed = shifts[row, default: 0] + distance
-        let glide = reduceMotion ? 0 : min(max(velocity, -4000), 4000) * 0.3
-        withAnimation(glide == 0 ? nil : .easeOut(duration: 0.6)) {
-            drag = nil
-            shifts[row] = landed + glide
+        shifts[row, default: 0] += distance
+        if !reduceMotion, abs(velocity) > 20 {
+            glides[row] = WallGlide(velocity: min(max(velocity, -4000), 4000), start: clock.glideTime)
         }
+        drag = nil
     }
 }
 
-/// A row of the wall where its drift has taken it at `time`, plus `shift`, how far it has been moved by hand, always within one lap. The
-/// shift animates, so a flicked row glides on and wraps round its lap as it goes instead of running back.
-private struct WallStripOffset: ViewModifier, Animatable {
-    let strip: WallStrip
-    let time: TimeInterval
-    let overhang: CGFloat
-    private var shift: CGFloat
+/// A flicked row of the wall gliding on and slowing to a stop as a scrolled list does. It is worked out from the wall's own time rather
+/// than animated, so where the row stands is known at every moment and a finger can catch it there.
+private struct WallGlide {
+    let velocity: CGFloat
+    let start: TimeInterval
 
-    init(strip: WallStrip, time: TimeInterval, overhang: CGFloat, shift: CGFloat) {
-        self.strip = strip
-        self.time = time
-        self.overhang = overhang
-        self.shift = shift
+    /// UIScrollView's normal deceleration as a time constant: the speed falls by a factor of e every half second.
+    static let decay: TimeInterval = 0.5
+
+    /// How far the row has glided by `time`.
+    func distance(at time: TimeInterval) -> CGFloat {
+        let elapsed = max(0, time - start)
+        return velocity * CGFloat(Self.decay * (1 - exp(-elapsed / Self.decay)))
     }
 
-    /// Not tied to the main actor, as `Animatable` asks: it only reads and writes the modifier's own number.
-    nonisolated var animatableData: CGFloat {
-        get { shift }
-        set { shift = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        content.offset(x: strip.offset(at: time, shift: shift) - overhang)
+    /// Whether the row is still visibly moving at `time`.
+    func isMoving(at time: TimeInterval) -> Bool {
+        abs(velocity) * CGFloat(exp(-max(0, time - start) / Self.decay)) > 4
     }
 }
 
-/// A sideways drag on one of the wall's rows: `moved` with how far the finger has gone along it, `ended` with that distance and its speed
-/// in points a second. It starts only when the finger moves more sideways than up or down, and the page's scroll waits for it to give up,
+/// A sideways drag on one of the wall's rows (or the Deck's top card): `moved` with how far the finger has gone along it, `ended` with that
+/// distance and its speed in points a second. It starts only when the finger moves more sideways than up or down, and the page's scroll waits for it to give up,
 /// so a vertical swipe over the wall still scrolls the page. A drag that starts on a poster does not open it. On the Mac a two-finger
 /// trackpad swipe moves the row too.
-private struct WallRowPan: UIGestureRecognizerRepresentable {
+struct WallRowPan: UIGestureRecognizerRepresentable {
     let moved: (CGFloat) -> Void
     let ended: (_ distance: CGFloat, _ velocity: CGFloat) -> Void
 
@@ -588,7 +725,12 @@ private struct WallRowPan: UIGestureRecognizerRepresentable {
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         let distance = recognizer.translation(in: recognizer.view).x
         switch recognizer.state {
-        case .began, .changed: moved(distance)
+        case .began:
+            // Measured from where the drag is recognised, not where the finger came down, so the row does not jump by the distance the
+            // finger moved before it counted as a drag.
+            recognizer.setTranslation(.zero, in: recognizer.view)
+            moved(0)
+        case .changed: moved(distance)
         case .ended: ended(distance, recognizer.velocity(in: recognizer.view).x)
         case .cancelled, .failed: ended(distance, 0)
         default: break
@@ -609,18 +751,44 @@ private struct WallRowPan: UIGestureRecognizerRepresentable {
 }
 
 /// The wall's own time. It runs only while the wall moves, so after a pause the wall carries on from where it stood rather than jumping.
+/// The rows' drift and their glides keep separate times, so a row can glide while the wall's drift stands still under the Mac's pointer.
 @MainActor
 private final class DriftClock {
     private var elapsed: TimeInterval = 0
     private var last: Date?
+    /// The time the rows' glides were last drawn at.
+    private(set) var glideTime: TimeInterval = 0
 
-    func advance(to date: Date) -> TimeInterval {
-        if let last {
+    /// The drift's time at `date`. `running` false keeps both times where they are, for a wall drawn again while it stands still (a row
+    /// held); `drifting` false keeps only the drift's.
+    func advance(to date: Date, running: Bool = true, drifting: Bool = true) -> TimeInterval {
+        if running, let last {
             // The first frame after a pause moves the wall no further than a frame would.
-            elapsed += min(max(date.timeIntervalSince(last), 0), 1.0 / 30)
+            let step = min(max(date.timeIntervalSince(last), 0), 1.0 / 30)
+            glideTime += step
+            if drifting { elapsed += step }
         }
         last = date
         return elapsed
+    }
+}
+
+/// The wall's rows, built again only when its titles or its size change: a drag or a flick redraws the wall on every move, and its rows
+/// stay the same through it.
+@MainActor
+private final class WallStripCache {
+    private var items: [MetaPreview] = []
+    private var size: [CGFloat] = []
+    private var strips: [WallStrip] = []
+
+    func strips(for items: [MetaPreview], rows: Int, width: CGFloat, gap: CGFloat, span: CGFloat) -> [WallStrip] {
+        let size = [CGFloat(rows), width, gap, span]
+        if size != self.size || items != self.items {
+            self.items = items
+            self.size = size
+            strips = WallStrip.strips(for: items, rows: rows, width: width, gap: gap, span: span)
+        }
+        return strips
     }
 }
 
@@ -651,27 +819,32 @@ private struct WallStrip: Identifiable {
         return (travelled < 0 ? travelled + lap : travelled) - lap
     }
 
-    /// `rows` rows covering `span` points each. With enough titles each row takes its own share in turn; with few, every row shows them
-    /// all, each starting at a different title.
+    /// `rows` rows covering `span` points each. With enough titles each row takes its own share in turn; with fewer, each row takes just
+    /// as many as it needs to cross the panel without a title showing twice, starting at its own place in the shelf, and with fewer still
+    /// every row shows them all. A row never carries more posters than it needs, as every one of them moves on every frame.
     static func strips(for items: [MetaPreview], rows: Int, width: CGFloat, gap: CGFloat, span: CGFloat) -> [WallStrip] {
         guard !items.isEmpty else { return [] }
         let speeds: [CGFloat] = [-14, 11, -17, 9, -12, 15]
-        let shared = items.count >= rows * 4
+        // Each row takes its own share only when that share is long enough to cross the panel without a title showing twice in the row.
+        let shared = CGFloat(items.count / rows) * (width + gap) >= span
+        let crossing = min(items.count, Int((span / (width + gap)).rounded(.up)))
+        // VoiceOver reads each title once, where it first appears.
+        var read = Set<String>()
         return (0..<rows).map { row in
             let own: [MetaPreview]
             if shared {
                 own = stride(from: row, to: items.count, by: rows).map { items[$0] }
             } else {
                 let start = row * items.count / rows
-                own = Array(items[start...]) + Array(items[..<start])
+                own = (0..<crossing).map { items[(start + $0) % items.count] }
             }
             let lap = CGFloat(own.count) * (width + gap)
             let laps = Int((span / lap).rounded(.up)) + 1
             var entries: [Entry] = []
             for copy in 0..<laps {
                 for item in own {
-                    entries.append(Entry(id: "\(copy)/\(item.identity)", item: item, isOriginal: copy == 0 && (shared || row == 0),
-                                         copy: "\(row).\(copy)/"))
+                    let isOriginal = copy == 0 && read.insert(item.identity).inserted
+                    entries.append(Entry(id: "\(copy)/\(item.identity)", item: item, isOriginal: isOriginal, copy: "\(row).\(copy)/"))
                 }
             }
             return WallStrip(id: row, entries: entries, key: entries.map(\.id).joined(separator: "|"), lap: lap,
@@ -697,7 +870,7 @@ private struct WallStripView: View, Equatable {
     var body: some View {
         HStack(spacing: gap) {
             ForEach(strip.entries) { entry in
-                LayoutTitleLink(item: entry.item, copy: entry.copy, cornerRadius: Theme.Radius.small * 0.8) {
+                LayoutTitleLink(item: entry.item, copy: entry.copy, prewarms: false, cornerRadius: Theme.Radius.small * 0.8) {
                     LayoutPoster(item: entry.item, width: width, height: height)
                 }
                 .accessibilityHidden(!entry.isOriginal)
@@ -732,7 +905,9 @@ private struct ParallaxLayout: View {
     var body: some View {
         let width = Self.cardWidth(metrics, containerWidth: containerWidth)
         let height = Self.height(metrics, containerWidth: containerWidth)
-        ShelfScroll(margin: metrics.pageMargin, spacing: metrics.cardSpacing) {
+        // The cards' height follows the window's width, so the shelf measures again when it changes instead of keeping the tallest it
+        // has seen, which left a narrowed window's cards in a row too tall for them.
+        ShelfScroll(margin: metrics.pageMargin, spacing: metrics.cardSpacing, resetKey: "\(width)x\(height)") {
             ForEach(items, id: \.identity) { item in
                 ParallaxCard(item: item, width: width, height: height, showsRating: showsRating)
                     .reportsShelfEdge(id: item.identity)
@@ -786,7 +961,7 @@ private struct ParallaxCard: View {
     private var caption: some View {
         VStack(alignment: .leading, spacing: 6) {
             LayoutLogo(item: item, width: width * 0.5, height: height * 0.24)
-            let details = detailLine(item, showsRating: showsRating)
+            let details = layoutDetailLine(item, showsRating: showsRating)
             if !details.isEmpty {
                 Text(details)
                     .font(Theme.Typography.metaLine.weight(.semibold))
@@ -825,14 +1000,19 @@ private struct SpinesLayout: View {
 
     var body: some View {
         let open = openID ?? items.first?.identity
+        let coverWidth = Self.coverWidth(metrics)
+        let spineWidth = Self.spineWidth(metrics)
+        let height = Self.height(metrics)
         ScrollViewReader { proxy in
             ShelfScroll(margin: metrics.pageMargin, spacing: max(3, (metrics.cardSpacing * 0.4).rounded())) {
                 ForEach(items, id: \.identity) { item in
-                    SpineCard(item: item, isOpen: item.identity == open, coverWidth: Self.coverWidth(metrics),
-                              spineWidth: Self.spineWidth(metrics), height: Self.height(metrics), showsRating: showsRating) {
+                    SpineCard(item: item, isOpen: item.identity == open, coverWidth: coverWidth, spineWidth: spineWidth, height: height,
+                              showsRating: showsRating) {
                         Haptics.play(.choices)
                         withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { openID = item.identity }
                     }
+                    // Opening a spine redraws only it and the one that closes.
+                    .equatable()
                     .reportsShelfEdge(id: item.identity)
                 }
             }
@@ -845,7 +1025,7 @@ private struct SpinesLayout: View {
     }
 }
 
-private struct SpineCard: View {
+private struct SpineCard: View, Equatable {
     let item: MetaPreview
     let isOpen: Bool
     let coverWidth: CGFloat
@@ -857,6 +1037,14 @@ private struct SpineCard: View {
     @Environment(\.zoomScope) private var zoomScope
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(\.layoutMetrics) private var metrics
+
+    /// `onOpenOut` is left out: it only ever opens this card's own title.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.item == rhs.item && lhs.isOpen == rhs.isOpen && lhs.coverWidth == rhs.coverWidth && lhs.spineWidth == rhs.spineWidth
+                && lhs.height == rhs.height && lhs.showsRating == rhs.showsRating
+        }
+    }
 
     private var sourceID: String { "\(zoomScope)/\(item.identity)" }
 

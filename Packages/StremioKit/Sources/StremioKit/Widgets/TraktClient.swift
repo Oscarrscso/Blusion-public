@@ -159,7 +159,8 @@ public struct TraktClient: Sendable {
     private func send(_ path: String, query: String, clientID: String, authorised: Bool, refresh: Bool = false) async throws -> HTTPResult {
         let relative = query.isEmpty ? path : "\(path)?\(query)"
         let key = "\(authorised ? "account" : "public")|\(clientID)|\(relative)"
-        if !refresh, let cached = await cache?.value(for: key) { return cached }
+        // Private responses always pass through current authorization, even after a sign-out or account switch.
+        if !authorised, !refresh, let cached = await cache?.value(for: key) { return cached }
         let result: HTTPResult
         if authorised {
             guard let account else { throw TraktAccountError.needsSignIn }
@@ -170,9 +171,11 @@ public struct TraktClient: Sendable {
             guard let url = URL(string: "\(base)/\(relative)") else { throw AddonError.invalidURL }
             result = try await client.get(url, headers: TraktHeaders.common(clientID: clientID))
         }
-        await cache?.store(result, for: key)
+        if !authorised { await cache?.store(result, for: key) }
         return result
     }
+
+    public func clearCache() async { await cache?.removeAll() }
 
     /// `base/<path>?page=…&limit=…&extended=full`. Lists keep their page and limit; a feed's `paged` is false only for a single object.
     private func apiURL(_ path: String, page: Int, limit: Int, paged: Bool = true) -> URL? {

@@ -30,6 +30,19 @@ import Testing
         #expect(await store.items(for: top) == nil)
     }
 
+    @Test func privateListsAreNeverKeptAsLastLaunchSnapshots() async throws {
+        let source = WidgetSource.traktList(TraktListReference(username: "owner", listSlug: "private", listName: "Private", isPrivate: true))
+        let memory = InMemoryWidgetSnapshotStore()
+        await memory.save(items(2), for: source)
+        #expect(await memory.items(for: source) == nil)
+        let directory = scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory.deletingLastPathComponent()) }
+        let files = FileWidgetSnapshotStore(directory: directory)
+        await files.save(items(2), for: source)
+        #expect(await files.items(for: source) == nil)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
     @Test func aFileStoreRoundTripsAndANewInstanceReadsTheSameItems() async throws {
         let directory = scratchDirectory()
         defer { try? FileManager.default.removeItem(at: directory.deletingLastPathComponent()) }

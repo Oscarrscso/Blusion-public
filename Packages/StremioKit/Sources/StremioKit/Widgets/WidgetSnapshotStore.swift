@@ -13,9 +13,12 @@ public actor InMemoryWidgetSnapshotStore: WidgetSnapshotStore {
 
     public init() {}
 
-    public func items(for source: WidgetSource) async -> [MetaPreview]? { snapshots[source] }
+    public func items(for source: WidgetSource) async -> [MetaPreview]? { source.requiresAccount ? nil : snapshots[source] }
 
-    public func save(_ items: [MetaPreview], for source: WidgetSource) async { snapshots[source] = items }
+    public func save(_ items: [MetaPreview], for source: WidgetSource) async {
+        guard !source.requiresAccount else { snapshots[source] = nil; return }
+        snapshots[source] = items
+    }
 
     public func clear() async { snapshots = [:] }
 }
@@ -48,6 +51,10 @@ public actor FileWidgetSnapshotStore: WidgetSnapshotStore {
     }
 
     public func items(for source: WidgetSource) async -> [MetaPreview]? {
+        guard !source.requiresAccount else {
+            try? FileManager.default.removeItem(at: fileURL(for: source))
+            return nil
+        }
         guard let data = try? Data(contentsOf: fileURL(for: source)),
               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
               snapshot.source == source else { return nil }
@@ -55,6 +62,10 @@ public actor FileWidgetSnapshotStore: WidgetSnapshotStore {
     }
 
     public func save(_ items: [MetaPreview], for source: WidgetSource) async {
+        guard !source.requiresAccount else {
+            try? FileManager.default.removeItem(at: fileURL(for: source))
+            return
+        }
         let snapshot = Snapshot(source: source, items: Array(items.prefix(Self.itemsPerFile)))
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         let url = fileURL(for: source)

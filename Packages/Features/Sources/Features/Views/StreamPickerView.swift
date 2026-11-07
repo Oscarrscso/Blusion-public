@@ -64,7 +64,8 @@ struct StreamPickerView: View {
     private static var lastAutoPickHeight: CGFloat?
     /// Keep the last recommendation text and collapsed card heights while the next picker loads.
     private static var lastAutoPickInfo: String?
-    private static var lastStreamCardHeights: [Int: CGFloat] = [:]
+    /// Held apart for each orientation, since a card's height follows the width it has.
+    private static var lastStreamCardHeights: [Bool: [Int: CGFloat]] = [:]
     @State private var autoPickSwitchSize: CGSize = .zero
     /// The heading's natural size, so its title, rating and logo can shrink together between the fixed chevrons.
     /// The sharpness the chips narrow the list to; nil shows every stream.
@@ -343,7 +344,7 @@ struct StreamPickerView: View {
                     .headerColumn(headerWidth)
                 failures.headerColumn(headerWidth)
                 emptyState.headerColumn(headerWidth)
-                loadingRows.headerColumn(headerWidth)
+                loadingRows
                 groups(recommended: model.recommendedStream)
                 links.headerColumn(headerWidth)
                 hiddenHint.headerColumn(headerWidth)
@@ -955,8 +956,13 @@ struct StreamPickerView: View {
     @ViewBuilder
     private var loadingRows: some View {
         if model.isLoading && model.listing.isEmpty {
-            StreamRowsSkeleton(heights: Self.lastStreamCardHeights)
+            #if targetEnvironment(macCatalyst)
+            StreamRowsSkeleton(heights: Self.lastStreamCardHeights[isLandscape] ?? [:], columns: Self.macCardColumns)
                 .padding(.horizontal, streamMargin)
+            #else
+            StreamRowsSkeleton(heights: Self.lastStreamCardHeights[isLandscape] ?? [:])
+                .padding(.horizontal, streamMargin)
+            #endif
         }
     }
 
@@ -1091,7 +1097,7 @@ struct StreamPickerView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                         guard order < 3, height > 0, preparation == nil else { return }
                         // Include the collapsed footer, regardless of whether this card's details are currently expanded.
-                        Self.lastStreamCardHeights[order] = height + 1 + Theme.Spacing.m * 2
+                        Self.lastStreamCardHeights[isLandscape, default: [:]][order] = height + 1 + Theme.Spacing.m * 2
                             + UIFont.preferredFont(forTextStyle: .footnote).lineHeight.rounded(.up)
                     }
             }

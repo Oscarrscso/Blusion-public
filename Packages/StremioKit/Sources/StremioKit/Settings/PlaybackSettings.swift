@@ -16,6 +16,21 @@ public enum PosterMarkPlacement: String, Sendable, Equatable, Codable, CaseItera
     }
 }
 
+/// How hard automatic choices save data (Settings → Streams → Data Saver).
+public enum DataSaverLevel: String, Sendable, Equatable, CaseIterable, Identifiable {
+    case off, on, ultra
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .off: "Off"
+        case .on: "On"
+        case .ultra: "Ultra"
+        }
+    }
+}
+
 public struct PlaybackSettings: Sendable, Equatable, Codable {
     /// Preferred vertical resolution (e.g. 1080). nil = best available.
     public var downloadsAllowCellular: Bool = false
@@ -23,6 +38,8 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     public var preferredResolution: Int?
     /// Data Saver: automatic choices keep to 1080p or below and prefer efficient encodes to REMUXes and outsized files. Off by default.
     public var dataSaver: Bool = false
+    /// Ultra Saver, with `dataSaver` on: automatic choices keep to 720p or below and favour the smallest good encodes. Off by default.
+    public var ultraSaver: Bool = false
     /// Default subtitle language as an ISO 639-2 or 639-1 code (`eng`, `en`). nil = subtitles off by default.
     public var subtitleLanguage: String?
     /// A Stremio-compatible streaming server (ADR-004). A URL can embed credentials, so it is stored as a secret.
@@ -115,15 +132,27 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
 
     public var rankingPreferences: RankingPreferences { rankingPreferences(for: nil) }
 
-    /// Settings' ranking, or a quality chosen for one play. Highest ranks by quality alone; Data Saver keeps to 1080p or below.
+    /// Data Saver as one choice: off, on, or Ultra Saver.
+    public var dataSaverLevel: DataSaverLevel {
+        get { dataSaver ? (ultraSaver ? .ultra : .on) : .off }
+        set {
+            dataSaver = newValue != .off
+            ultraSaver = newValue == .ultra
+        }
+    }
+
+    /// Settings' ranking, or a quality chosen for one play. Highest ranks by quality alone; Data Saver keeps to 1080p or below, and
+    /// Ultra Saver to 720p.
     public func rankingPreferences(for quality: PlayQuality?) -> RankingPreferences {
-        let savesData = quality.map { $0 == .dataSaver } ?? dataSaver
+        let savesMoreData = quality.map { $0 == .ultraSaver } ?? (dataSaverLevel == .ultra)
+        let savesData = quality.map(\.savesData) ?? dataSaver
         var resolution = quality == .highest ? nil : preferredResolution
         if savesData {
-            let cap = RankingPreferences.dataSaverResolution
+            let cap = savesMoreData ? RankingPreferences.ultraSaverResolution : RankingPreferences.dataSaverResolution
             resolution = min(resolution ?? cap, cap)
         }
-        return RankingPreferences(preferredResolution: resolution, sourcePreference: autoPickSource, savesData: savesData)
+        return RankingPreferences(preferredResolution: resolution, sourcePreference: autoPickSource, savesData: savesData,
+                                  savesMoreData: savesMoreData)
     }
 
     /// `decodesAV1InHardware` has no default: a caller that left it out would send AV1 to the engine on capable chips.
@@ -134,9 +163,53 @@ public struct PlaybackSettings: Sendable, Equatable, Codable {
     }
 }
 
+public typealias SettingsMutation = @MainActor @Sendable (inout PlaybackSettings) -> Void
+
 public protocol SettingsStore: Sendable {
     func load() async -> PlaybackSettings
     func save(_ settings: PlaybackSettings) async
+    func update(_ change: @escaping SettingsMutation) async -> PlaybackSettings
+}
+
+public extension SettingsStore {
+    func update(_ change: @escaping SettingsMutation) async -> PlaybackSettings {
+        var value = await load()
+        await change(&value)
+        await save(value)
+        return value
+    }
+}
+
+/// One queue for every settings writer in the app. Each mutation reads only after the preceding save finishes.
+@MainActor
+public final class QueuedSettingsStore: SettingsStore {
+    private let base: any SettingsStore
+    private var pending: Task<PlaybackSettings, Never>?
+
+    public nonisolated init(base: any SettingsStore) { self.base = base }
+
+    public func load() async -> PlaybackSettings {
+        _ = await pending?.value
+        return await base.load()
+    }
+
+    public func save(_ settings: PlaybackSettings) async {
+        _ = await update { $0 = settings }
+    }
+
+    public func update(_ change: @escaping SettingsMutation) async -> PlaybackSettings {
+        let previous = pending
+        let base = base
+        let task = Task { @MainActor in
+            _ = await previous?.value
+            var value = await base.load()
+            change(&value)
+            await base.save(value)
+            return value
+        }
+        pending = task
+        return await task.value
+    }
 }
 
 public actor InMemorySettingsStore: SettingsStore {

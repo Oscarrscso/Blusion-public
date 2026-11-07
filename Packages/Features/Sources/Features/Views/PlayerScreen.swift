@@ -504,7 +504,7 @@ struct PlayerContent: View {
                     await model.close()
                     livePlayback.forget(model)
                     // A dismissal sets the session aside; a hand-over has already saved the next one.
-                    if departure != .handedOver { await PlaybackSession.clear() }
+                    if departure != .handedOver { await model.clearSessionSnapshot() }
                 }
             }
         }
@@ -1072,7 +1072,7 @@ struct PlayerContent: View {
     private func close() {
         Task {
             await model.close()
-            await PlaybackSession.clear()
+            await model.clearSessionSnapshot()
             livePlayback.forget(model)
             dismiss()
         }
@@ -1098,7 +1098,7 @@ struct PlayerContent: View {
                 onNextPlan(next, nil)
             } else {
                 // No auto-selectable stream: back to the picker, with no session for the episode that just ended.
-                await PlaybackSession.clear()
+                await model.clearSessionSnapshot()
                 dismiss()
             }
         }
@@ -1109,7 +1109,7 @@ struct PlayerContent: View {
             playNextEpisode()
         } else {
             // Watched through: there is nothing to walk back into.
-            await PlaybackSession.clear()
+            await model.clearSessionSnapshot()
             model.showControls()
         }
     }

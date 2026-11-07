@@ -77,7 +77,8 @@ public struct AppServices: Sendable {
         self.addonSpeed = addonSpeed
         self.streams = streams ?? StreamService(registry: registry, client: client, timings: addonSpeed)
         self.subtitles = subtitles ?? SubtitleService(registry: registry, client: client)
-        let settings = settings ?? InMemorySettingsStore()
+        let providedSettings = settings ?? InMemorySettingsStore()
+        let settings: any SettingsStore = providedSettings is QueuedSettingsStore ? providedSettings : QueuedSettingsStore(base: providedSettings)
         self.settings = settings
         let plainProgress = progress ?? InMemoryProgressStore()
         let plainLibrary = library ?? InMemoryLibraryStore()

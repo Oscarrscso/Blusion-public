@@ -482,9 +482,7 @@ public final class DetailViewModel {
     /// choice is then saved, so every title page opens the same way.
     public func setMatchesEpisodeWidthToText(_ value: Bool) async {
         matchesEpisodeWidthToText = value
-        var settings = await services.settings.load()
-        settings.matchesEpisodeWidthToText = value
-        await services.settings.save(settings)
+        _ = await services.settings.update { $0.matchesEpisodeWidthToText = value }
     }
 
     /// Library membership, watched marks and saved progress, from the local stores. `afterUserChange` is for a change the user just made

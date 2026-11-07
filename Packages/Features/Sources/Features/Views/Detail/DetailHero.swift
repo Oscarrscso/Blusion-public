@@ -62,7 +62,9 @@ struct DetailHero<Controls: View, TrailerPanel: View, Synopsis: View>: View {
     /// the ratings in a column over its lower leading edge. The scores are the rating buttons here and nowhere else in the hero.
     private var landscapeTop: some View {
         VStack(alignment: .leading, spacing: TitleHero.logoTextGap) {
+            // The logo keeps the box it was given while loading, so the column under it does not move up when it arrives.
             titleArt(alignment: .leading)
+                .frame(minHeight: TitleHero.landscapeLogoMaxHeight, alignment: .bottomLeading)
             controls
             if showsDetails {
                 landscapeOverview

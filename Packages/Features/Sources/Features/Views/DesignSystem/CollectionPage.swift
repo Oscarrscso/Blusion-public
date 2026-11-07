@@ -169,8 +169,14 @@ struct CollectionPage: UIViewRepresentable {
             }
             let environment = environment
             // The page places its cells itself: a cell under the window's title bar must not add the bar's inset to its own content.
-            cell.contentConfiguration = UIHostingConfiguration { content.environment(\.self, environment).environment(\.isInCollectionCell, true).ignoresSafeArea() }
-                .margins(.all, 0)
+            // Nor does the page's own top margin reach the scroll views inside a cell: on the Mac the room for the navigation
+            // (`macPageScroll`) is this page's `topInset`, and a shelf in a cell that took it drew its cards that far down, into the
+            // row below. It is set inside the page's environment, which would otherwise put the margin back.
+            cell.contentConfiguration = UIHostingConfiguration {
+                content.contentMargins(.top, 0, for: .scrollContent)
+                    .environment(\.self, environment).environment(\.isInCollectionCell, true).ignoresSafeArea()
+            }
+            .margins(.all, 0)
             cell.backgroundConfiguration = .clear()
             cell.clipsToBounds = false
             pointerPause?.prepare(cell)

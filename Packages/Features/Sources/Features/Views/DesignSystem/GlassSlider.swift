@@ -29,10 +29,11 @@ struct GlassSlider: View {
                 }
                 .padding(.horizontal, thumb / 2 - 2)
                 .allowsHitTesting(false)
-                Circle()
+                RoundedRectangle(cornerRadius: thumb / 2 * min(metrics.circularButtonScale(for: .actionButtons), 1), style: .continuous)
                     .fill(.clear)
                     .frame(width: thumb, height: thumb)
-                    .glassEffect(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                    .glassEffect(.regular.interactive(), in: RoundedRectangle(
+                        cornerRadius: thumb / 2 * min(metrics.circularButtonScale(for: .actionButtons), 1), style: .continuous))
                     .offset(x: travel * fraction)
             }
             .frame(height: thumb)

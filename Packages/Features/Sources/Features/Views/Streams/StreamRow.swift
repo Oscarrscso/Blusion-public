@@ -444,7 +444,7 @@ struct StreamSaveButton: View {
                 .foregroundStyle(.white)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: StreamCardMetrics.markSize, height: StreamCardMetrics.markSize)
-                .background(Theme.surfaceStrong, in: Circle())
+                .background(Theme.surfaceStrong, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                 .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
         }
         .buttonStyle(.plain)
@@ -560,22 +560,32 @@ struct StreamTechnicalDetails: View {
 struct StreamRowsSkeleton: View {
     @Environment(\.layoutMetrics) private var metrics
     var heights: [Int: CGFloat] = [:]
+    /// The columns of the grid the cards are laid out in (the Mac's); nil stacks them, as the list does.
+    var columns: [GridItem]?
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
-                    .fill(Theme.surface)
-                    .frame(height: heights[index] ?? StreamCardMetrics.skeletonHeight)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
-                            .strokeBorder(index == 0 ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.artworkBorder),
-                                          lineWidth: index == 0 ? 1.5 : 0.7)
-                    }
+        Group {
+            if let columns {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Spacing.m) { cards }
+            } else {
+                VStack(spacing: Theme.Spacing.m) { cards }
             }
         }
         .shimmering()
         .accessibilityHidden(true)
+    }
+
+    private var cards: some View {
+        ForEach(0..<3, id: \.self) { index in
+            RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
+                .fill(Theme.surface)
+                .frame(height: heights[index] ?? StreamCardMetrics.skeletonHeight)
+                .overlay {
+                    RoundedRectangle(cornerRadius: StreamCardMetrics.cornerRadius * metrics.cornerScale(for: .panels), style: .continuous)
+                        .strokeBorder(index == 0 ? AnyShapeStyle(Theme.brandGradient) : AnyShapeStyle(Theme.artworkBorder),
+                                      lineWidth: index == 0 ? 1.5 : 0.7)
+                }
+        }
     }
 }
 #endif

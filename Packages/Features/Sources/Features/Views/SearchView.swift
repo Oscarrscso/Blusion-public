@@ -37,6 +37,8 @@ struct SearchView: View {
         }
         // Coming from another tab, Search starts on an empty field.
         .onChange(of: router.searchBrowseRevision) { model.query = "" }
+        // A title opened from the results has just been recorded.
+        .onChange(of: router.recentSearchRevision) { model.reloadRecents() }
         .onChange(of: model.query) { model.queryDidChange() }
         .task {
             await model.refreshAvailability()
@@ -137,9 +139,10 @@ struct SearchView: View {
         }
     }
 
-    /// The idle page: the streaming services, each opening everything it streams, then the categories.
+    /// The idle page: the recent searches, the streaming services, each opening everything it streams, then the categories.
     private var browse: some View {
         VStack(alignment: .leading, spacing: metrics.shelfSpacing) {
+            if !model.recentQueries.isEmpty { recentSearches }
             tileSection("Streaming Services") {
                 ForEach(StreamProvider.browsable, id: \.self) { provider in
                     NavigationLink(value: CatalogListRequest(title: provider.name, sources: [provider.catalogSource])) {
@@ -164,6 +167,53 @@ struct SearchView: View {
                 }
             }
         }
+    }
+
+    /// The last titles opened from Search, newest first. A tap searches for one again, a hold removes it, and Clear removes them all.
+    private var recentSearches: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader("Recent Searches")
+                Button("Clear") {
+                    Haptics.play(.buttons)
+                    withAnimation(.snappy(duration: 0.3)) { model.clearRecents() }
+                }
+                .buttonStyle(.hoverPlain)
+                .foregroundStyle(.tint)
+                .accessibilityIdentifier("search.recents.clear")
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(model.recentQueries, id: \.self) { term in
+                    Button { searchAgain(term) } label: {
+                        Label {
+                            Text(term).foregroundStyle(.primary).lineLimit(1)
+                        } icon: {
+                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.hoverPlain)
+                    .contextMenu {
+                        Button("Remove", systemImage: "xmark", role: .destructive) {
+                            withAnimation(.snappy(duration: 0.3)) { model.removeRecent(term) }
+                        }
+                    }
+                    .accessibilityIdentifier("search.recent.\(term)")
+                    if term != model.recentQueries.last { Divider() }
+                }
+            }
+        }
+        .padding(.horizontal, metrics.gridPageMargin)
+        .accessibilityIdentifier("search.recents")
+    }
+
+    /// Searches for a recent search again, with the keyboard put away so the results show.
+    private func searchAgain(_ term: String) {
+        Haptics.play(.buttons)
+        isSearchFocused = false
+        model.query = term
+        Task { await model.submit() }
     }
 
     private func tileSection(_ title: String, @ViewBuilder tiles: () -> some View) -> some View {

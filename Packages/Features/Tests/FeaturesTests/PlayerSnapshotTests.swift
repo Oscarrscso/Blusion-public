@@ -113,6 +113,95 @@ import Testing
         await model.close()
     }
 
+    @Test func aGhostSessionNeitherResumesNorChangesTheSavedSession() async throws {
+        let snapshot = PlaybackSnapshot(request: request, stream: PlaybackStreamIdentity(kind: .direct), position: 42, duration: 100)
+        let store = InMemoryPlaybackSnapshotStore(snapshot)
+        let engines = Engines { MockEngine(.plays(duration: 100)) }
+        let plan = PlaybackPlan(request: request, candidates: [candidate()])
+        let model = PlayerViewModel(plan: plan, services: try await services(engines: engines), snapshotStore: store,
+                                    isPrivateSession: { true })
+        model.resumePlayback(from: snapshot)
+        await model.start()
+        let engine = try #require(engines.made.last)
+        #expect(engine.loadedItems.first?.startPosition == 0)
+        engine.simulate(position: 64)
+        try await waitUntil { model.position == 64 }
+        await model.recordSessionSnapshot(force: true)
+        await model.saveSessionSnapshot(for: plan)
+        await model.clearSessionSnapshot()
+        await model.close()
+        #expect(await store.load() == snapshot)
+    }
+
+    @Test func anExternalSubtitleRestoreWaitsForTheAddonDespiteExistingEmbeddedTracks() async throws {
+        let gate = AsyncTestGate()
+        let manifest = Manifest(id: "subs", name: "Subtitles", version: "1", resources: [ResourceDescriptor(name: "subtitles")], types: ["movie"])
+        let transport = StubTransport { request, _ in
+            if request.url?.host == "subs.example.com" {
+                return StubTransport.response(Data("1\n00:00:01,000 --> 00:00:03,000\nHola\n".utf8), for: request)
+            }
+            await gate.wait()
+            return StubTransport.response(Data(#"{"subtitles":[{"id":"es","url":"https://subs.example.com/es.srt","lang":"spa"}]}"#.utf8), for: request)
+        }
+        let (registry, client) = try await makeStubbedRegistry(manifests: [manifest], transport: transport)
+        let engines = Engines { MockEngine(.plays(duration: 100), subtitles: [MediaTrack(id: "en", title: "English", language: "eng")]) }
+        let services = AppServices(registry: registry, client: client, settings: InMemorySettingsStore(PlaybackSettings(subtitleLanguage: nil)),
+                                   makeEngine: { engines.engine($0) })
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [candidate()]), services: services,
+                                    snapshotStore: InMemoryPlaybackSnapshotStore(), isPrivateSession: { false })
+        model.resumePlayback(from: PlaybackSnapshot(request: request, stream: PlaybackStreamIdentity(kind: .direct), position: 42,
+                                                    subtitleTrack: SnapshotTrack(title: "Spanish", language: "spa", isExternal: true)))
+        await model.start()
+        #expect(!model.embeddedSubtitleTracks.isEmpty)
+        await gate.release()
+        await model.waitForSubtitles()
+        let restored = try #require(model.subtitleOptions.first { $0.language == "spa" })
+        try await waitUntil { model.subtitleChoice == .external(restored.id) }
+        await model.close()
+    }
+
+    #if canImport(Darwin)
+    @Test func closingBeforeSettingsLoadDoesNotLeaveADownloadInUse() async throws {
+        let gate = AsyncTestGate()
+        let settings = DelayedReadSettingsStore(gate: gate)
+        let transport = StubTransport(data: Data("{}".utf8))
+        let (registry, client) = try await makeStubbedRegistry(manifests: [], transport: transport)
+        var item = DownloadItem(request: request, addonID: UUID(), container: .mp4, usesFallback: false)
+        item.state = .complete
+        let store = InMemoryDownloadStore()
+        await store.save([item])
+        let downloads = DownloadManager(store: store, secrets: InMemorySecretStore(), settings: InMemorySettingsStore(),
+                                        streams: StreamService(registry: registry, client: client),
+                                        subtitles: SubtitleService(registry: registry, client: client), fallback: false, hardwareAV1: false,
+                                        persistent: false)
+        await downloads.start()
+        let services = AppServices(registry: registry, client: client, settings: settings, downloads: downloads)
+        let offline = PlaybackCandidate(id: "download:\(item.id.uuidString)", title: "Offline", addonName: "Downloads",
+                                        route: .native(URL(fileURLWithPath: "/unused.mp4")))
+        let model = PlayerViewModel(plan: PlaybackPlan(request: request, candidates: [offline]), services: services,
+                                    snapshotStore: InMemoryPlaybackSnapshotStore())
+        let starting = Task { await model.start() }
+        while !(await settings.hasStartedRead) { await Task.yield() }
+        await model.close()
+        await gate.release()
+        await starting.value
+        await downloads.delete(item.id)
+        #expect(downloads.items.isEmpty, "the closed player must not reserve the download when its settings finally arrive")
+    }
+
+    private actor DelayedReadSettingsStore: SettingsStore {
+        let gate: AsyncTestGate
+        private(set) var hasStartedRead = false
+        init(gate: AsyncTestGate) { self.gate = gate }
+        func load() async -> PlaybackSettings {
+            hasStartedRead = true
+            await gate.wait()
+            return PlaybackSettings()
+        }
+        func save(_ settings: PlaybackSettings) {}
+    }
+    #endif
+
     @Test func theSnapshotFollowsOnlyTheSessionOwnRequest() async throws {
         let engines = Engines { MockEngine(.plays(duration: 100)) }
         let other = PlaybackSnapshot(request: StreamRequest(type: "movie", id: "tt2", title: "Other"),
@@ -144,7 +233,7 @@ import Testing
         let saved = try #require(await store.load())
         #expect(saved.request.identity == nextRequest.identity)
         #expect(saved.stream.kind == .direct)
-        #expect(saved.stream.urlPath == "https://e.example.com/f.mkv", "the token never reaches the file")
+        #expect(saved.stream.urlPath == "sha256:v2:c25af76f200e2be41c552852a7bf0a04fd72eba8eee5d557e4cd78d13d8acca9", "the token never reaches the file")
         #expect(saved.stream.filename == "Movie.2020.2160p.REMUX.mkv" && saved.stream.videoSize == 8_800_000_000)
         #expect(saved.position == 0 && saved.wasPaused == false)
         await model.close()

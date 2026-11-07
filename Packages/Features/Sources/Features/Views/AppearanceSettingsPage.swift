@@ -359,22 +359,23 @@ private struct AppearanceControls {
                     .foregroundStyle(.secondary)
             }
             .accessibilityHidden(true)
-            Slider(value: value, in: range, step: step) {
-                Text(title)
-            } minimumValueLabel: {
+            HStack {
                 Image(systemName: low).imageScale(.small).foregroundStyle(.secondary)
-            } maximumValueLabel: {
-                Image(systemName: high).imageScale(.large).foregroundStyle(.secondary)
-            } onEditingChanged: { editing in
-                isSliding.wrappedValue = editing
-                guard !editing, let look = draft.wrappedValue else { return }
-                draft.wrappedValue = nil
-                if look != appearance.wrappedValue {
-                    Haptics.play(.sliders)
-                    appearance.wrappedValue = look
+                    .accessibilityHidden(true)
+                CornerSlider(value: value, in: range, step: step) { editing in
+                    isSliding.wrappedValue = editing
+                    guard !editing, let look = draft.wrappedValue else { return }
+                    draft.wrappedValue = nil
+                    if look != appearance.wrappedValue {
+                        Haptics.play(.sliders)
+                        appearance.wrappedValue = look
+                    }
                 }
+                .accessibilityLabel(title)
+                .accessibilityValue(shown)
+                Image(systemName: high).imageScale(.large).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
-            .accessibilityValue(shown)
         }
         .accessibilityIdentifier("settings.appearance.\(id)")
     }
@@ -460,6 +461,21 @@ private struct AppearanceCardsPage: View {
                                 low: "arrow.down.right.and.arrow.up.left", high: "arrow.up.left.and.arrow.down.right", id: "spacing")
                 if isPhone {
                     controls.numbers("Columns", \.phoneGridColumns, in: AppearancePreferences.phoneGridColumnRange, id: "columns")
+                }
+            }
+            Section("Shelves") {
+                controls.slider("Shelf spacing", read: { $0.effectiveShelfSpacingScale }, write: { $0.shelfSpacingScale = $1 },
+                                in: AppearancePreferences.shelfSpacingScaleRange, step: 0.05,
+                                low: "arrow.down.right.and.arrow.up.left", high: "arrow.up.left.and.arrow.down.right", id: "shelfSpacing")
+                controls.slider("Side margin", \.sideMarginScale, in: AppearancePreferences.sideMarginScaleRange, step: 0.05,
+                                low: "arrow.right.to.line", high: "arrow.left.and.right", id: "sideMargin")
+                controls.toggle("Lines between shelves", \.showsShelfDividers, id: "shelfDividers")
+                if controls.current.showsShelfDividers {
+                    controls.slider("Line thickness", \.shelfDividerThickness, in: AppearancePreferences.shelfDividerThicknessRange,
+                                    step: 0.5, low: "minus", high: "minus", id: "dividerThickness")
+                    controls.slider("Line strength", \.shelfDividerOpacity, in: AppearancePreferences.shelfDividerOpacityRange,
+                                    step: 0.01, low: "circle.lefthalf.filled", high: "circle.fill", id: "dividerStrength")
+                    controls.toggle("Line edge to edge", \.shelfDividerFullWidth, id: "dividerFullWidth")
                 }
             }
             Section("Captions") {

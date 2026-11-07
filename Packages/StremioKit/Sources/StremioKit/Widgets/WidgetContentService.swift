@@ -63,6 +63,7 @@ public final class WidgetContentService: Sendable {
     public func items(for source: WidgetSource, limit: Int = 20, skip: Int = 0, cacheTTL: Int = 3600) async throws -> [MetaPreview] {
         guard limit > 0 else { return [] }
         let offset = max(skip, 0)
+        if source.requiresAccount { return Array(try await fetch(source, limit: limit, skip: offset).prefix(limit)) }
         let ttl = max(cacheTTL, 0)
         let items = try await cache.load(source: source, limit: limit, skip: offset, ttl: TimeInterval(ttl), at: now()) { [self] in
             let items = try await fetch(source, limit: limit, skip: offset)
@@ -76,6 +77,7 @@ public final class WidgetContentService: Sendable {
     /// The items most recently loaded for a source, however old, so Home can show them while it loads again. The in-memory cache is
     /// asked first, then the snapshot store. Nothing is requested from an addon; nil when the source was never loaded.
     public func lastKnownItems(for source: WidgetSource, limit: Int = 20) async -> [MetaPreview]? {
+        guard !source.requiresAccount else { return nil }
         let known: [MetaPreview]?
         if let inMemory = await cache.latestFirstPage(for: source) {
             known = inMemory

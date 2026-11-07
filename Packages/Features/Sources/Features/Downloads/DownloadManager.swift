@@ -50,6 +50,9 @@ public final class DownloadManager {
         var offset: Int64 = 0
         var total: Int64 = 0
         var resumeCellular: Bool?
+        /// The verified prefix kept outside URLSession's opaque temporary suffix.
+        var resumeOffset: Int64?
+        var usesResumeData: Bool?
     }
     public init(store: any DownloadStore, secrets: any SecretStore, settings: any SettingsStore, streams: StreamService,
                 subtitles: SubtitleService, fallback: Bool, hardwareAV1: Bool, persistent: Bool = true) {
@@ -259,14 +262,11 @@ public final class DownloadManager {
     }
     private func saveResume(_ data: Data, id: UUID, task: URLSessionTask?) async throws {
         var saved = try await credential(id)
-        // A temporary file from an explicit Range task contains only a suffix. Never replace the verified prefix with it.
-        guard saved.offset == 0 else {
-            try await secrets.remove(key(id) + ".resume")
-            return
-        }
+        // URLSession can resume its suffix too. Keep the base offset so that suffix can never replace the verified prefix.
         try await secrets.set(data.base64EncodedString(), for: key(id) + ".resume")
-        _ = adapter?.preservePartial(data, id: id)
+        if saved.offset == 0 { _ = adapter?.preservePartial(data, id: id) }
         saved.resumeCellular = task?.originalRequest?.allowsCellularAccess ?? false
+        saved.resumeOffset = saved.offset
         try await save(saved, id: id)
     }
     public func resume(_ id: UUID) async {
@@ -347,13 +347,14 @@ public final class DownloadManager {
             // Only send Range with both a full-representation validator and a usable partial.
             let offset = count > 0 && credential.validator != nil ? count : 0
             credential.offset = offset
-            try await save(credential, id: id)
-            try enoughSpace(max(item.expected - offset, 0), excluding: id)
-            // Explicit Range is preferred; OS resume data is a fallback when its private temporary file can't be copied.
+            // A suffix already being downloaded keeps its own opaque resume data and the same verified base prefix.
             let resume: Data?
-            if offset == 0, credential.resumeCellular == settings.downloadsAllowCellular,
+            if offset == (credential.resumeOffset ?? 0), credential.resumeCellular == settings.downloadsAllowCellular,
                let encoded = try await secrets.get(key(id) + ".resume") { resume = Data(base64Encoded: encoded) }
             else { resume = nil }
+            credential.usesResumeData = resume != nil
+            try await save(credential, id: id)
+            try enoughSpace(max(item.expected - (resume == nil ? offset : item.received), 0), excluding: id)
             guard let i = index(id), items[i].state == .queued, !isDeleting(id) else { return }
             items[i].state = .downloading
             try await persist()
@@ -546,8 +547,9 @@ public final class DownloadManager {
         let incomingSize = Int64(try incoming.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         var source = incoming
         if response.status == 206, credential.offset > 0 {
-            guard let range = response.range, let parsed = Self.range(range), parsed.0 == credential.offset,
-                  parsed.1 >= parsed.0, parsed.1 - parsed.0 + 1 == incomingSize, parsed.1 + 1 == parsed.2,
+            guard let range = response.range, let parsed = Self.range(range),
+                  (credential.usesResumeData == true ? parsed.0 >= credential.offset : parsed.0 == credential.offset),
+                  parsed.1 >= parsed.0, incomingSize == parsed.2 - credential.offset, parsed.1 + 1 == parsed.2,
                   credential.total <= 0 || credential.total == parsed.2,
                   let validator = credential.validator, validator == response.validator,
                   Int64(try partial.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) == credential.offset else {

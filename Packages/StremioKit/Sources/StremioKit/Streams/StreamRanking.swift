@@ -32,14 +32,21 @@ public struct RankingPreferences: Sendable, Equatable {
     /// Data Saver: efficient encodes win over REMUXes and outsized files (see `AutoStreamRanking`). The resolution cap that goes with it
     /// is already in `preferredResolution` (see `PlaybackSettings.rankingPreferences(for:)`).
     public var savesData: Bool
+    /// Ultra Saver: Data Saver pushed further, for the smallest files that still watch well. Implies `savesData`; its 720p cap is in
+    /// `preferredResolution` too.
+    public var savesMoreData: Bool
 
     /// The highest resolution Data Saver plays when there is a choice.
     public static let dataSaverResolution = 1080
+    /// The highest resolution Ultra Saver plays when there is a choice.
+    public static let ultraSaverResolution = 720
 
-    public init(preferredResolution: Int? = nil, sourcePreference: StreamSourcePreference = .balanced, savesData: Bool = false) {
+    public init(preferredResolution: Int? = nil, sourcePreference: StreamSourcePreference = .balanced, savesData: Bool = false,
+                savesMoreData: Bool = false) {
         self.preferredResolution = preferredResolution
         self.sourcePreference = sourcePreference
-        self.savesData = savesData
+        self.savesData = savesData || savesMoreData
+        self.savesMoreData = savesMoreData
     }
 }
 
@@ -49,6 +56,11 @@ public enum PlayQuality: String, Sendable, Equatable {
     case highest
     /// Data Saver's choice for this play, whether or not it is on in Settings.
     case dataSaver
+    /// Ultra Saver's choice for this play: 720p or below, the smallest good encode.
+    case ultraSaver
+
+    /// Data Saver or Ultra Saver: a play that keeps its data down, which a downloaded copy also does.
+    public var savesData: Bool { self == .dataSaver || self == .ultraSaver }
 }
 
 public enum StreamIdentity {

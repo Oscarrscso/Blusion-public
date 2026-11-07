@@ -238,12 +238,14 @@ struct FixedGlassButtonStyle: PrimitiveButtonStyle {
     var glass: Glass = .regular.interactive()
 
     func makeBody(configuration: Configuration) -> some View {
-        Button(role: configuration.role, action: configuration.trigger) {
+        let shape = RoundedRectangle(cornerRadius: size / 2 * min(metrics.circularButtonScale(for: .actionButtons), 1),
+                                     style: .continuous)
+        return Button(role: configuration.role, action: configuration.trigger) {
             configuration.label
                 .frame(width: size, height: size)
-                .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .buttonSurface(glass, in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                .glassHover(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
+                .contentShape(shape)
+                .buttonSurface(glass, in: shape)
+                .glassHover(shape)
         }
         .buttonStyle(.plain)
     }

@@ -97,7 +97,7 @@ struct HomeView: View {
                 if old == .settings || old == .widgets { Task { await model.load() } }
             }
             // The path shrinks when a title opened from the spotlight pops. Such a title opens and closes with no animation (see
-            // `instantDestination()`), so the pop starts and ends together, and nothing is left to finish before Home resets. Resetting
+            // `AppRouter.goBack`), so the pop starts and ends together, and nothing is left to finish before Home resets. Resetting
             // during a zoom or a swipe that may still be cancelled would move the spotlight under the screen.
             .onChange(of: router.homePath.count) { _, count in
                 guard let depth = router.spotlightDepth, count < depth else { return }
@@ -384,6 +384,15 @@ struct HomeView: View {
             sectionView(section)
         }
         .equatable()
+        .modifier(ShelfDivider(metrics: metrics, isShown: showsDivider(after: index)))
+    }
+
+    /// A line under every section but the last, and none at the showcase: not under it, nor over it under the section before.
+    private func showsDivider(after index: Int) -> Bool {
+        let sections = model.sections
+        guard sections.indices.contains(index + 1) else { return false }
+        let isShowcase = { (section: HomeViewModel.Section) in if case .hero = section.widget.content { true } else { false } }
+        return !isShowcase(sections[index]) && !isShowcase(sections[index + 1])
     }
 
     private var continueRow: some View {

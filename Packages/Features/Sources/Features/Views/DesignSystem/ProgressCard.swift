@@ -178,9 +178,9 @@ private struct ContinueWatchingHoldModifier: ViewModifier {
     }
 
     /// Highest Quality or Data Saver from the hold menu: the card's streams load on Home and the best at that quality starts, as a tap
-    /// does with Auto Pick on. Data Saver plays a downloaded copy as it is.
+    /// does with Auto Pick on. Data Saver and Ultra Saver play a downloaded copy as it is.
     private func play(at quality: PlayQuality, sourceID: String) {
-        if quality == .dataSaver,
+        if quality.savesData,
            let item = downloads?.items.first(where: { $0.request.identity == request.identity && $0.state == .complete }) {
             Task { if let plan = await downloads?.plan(for: item.id) { router.demoPlan = plan } }
             return

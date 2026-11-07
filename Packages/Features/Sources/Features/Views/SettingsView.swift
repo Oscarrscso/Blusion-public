@@ -298,7 +298,7 @@ struct SettingsView: View {
     /// Whether Auto Pick starts on its own, the quality asked for, and the source Auto Pick prefers when it is not balanced.
     private var streamsSummary: String {
         let settings = model.settings
-        let quality = settings.dataSaver ? "Data Saver"
+        let quality = settings.dataSaverLevel == .ultra ? "Ultra Saver" : settings.dataSaver ? "Data Saver"
             : SettingsViewModel.resolutionOptions.first { $0.value == settings.preferredResolution }?.label ?? "Best available"
         var parts = [settings.autoPlayBestStream ? "Auto Pick" : "Manual", quality]
         if settings.autoPlayBestStream, settings.autoPickSource != .balanced { parts.append(settings.autoPickSource.title) }
@@ -471,9 +471,12 @@ private struct StreamsSettingsPage: View {
                     ForEach(SettingsViewModel.resolutionOptions) { Text($0.label).tag($0.value) }
                 }
                 .accessibilityIdentifier("settings.resolution")
-                Toggle("Data Saver", isOn: Binding(get: { model.settings.dataSaver }, set: { value in
-                    Task { await model.setDataSaver(value) }
-                }))
+                // Ultra keeps to 720p and the leanest encodes.
+                Picker("Data Saver",
+                       selection: Binding(get: { model.settings.dataSaverLevel },
+                                          set: { level in Haptics.play(.choices); Task { await model.setDataSaverLevel(level) } })) {
+                    ForEach(DataSaverLevel.allCases) { Text($0.title).tag($0) }
+                }
                 .accessibilityIdentifier("settings.dataSaver")
             }
             Section("Auto Pick") {

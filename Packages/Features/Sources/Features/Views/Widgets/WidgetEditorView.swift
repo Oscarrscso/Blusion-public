@@ -13,6 +13,8 @@ struct WidgetEditorView: View {
     let mode: Mode
     /// The style a new widget starts in, chosen before this screen opens.
     private var style: WidgetStyle = .row
+    /// Called in place of leaving this screen once a new widget is added, so Add Widget, which opened it, leaves with it.
+    private var onAdded: (() -> Void)?
     @State private var widget: HomeWidget
     /// False while the title follows the source's name (the field then shows it as a placeholder).
     @State private var titleIsCustom = true
@@ -29,10 +31,11 @@ struct WidgetEditorView: View {
     }
 
     /// Makes a new widget in `style`, which `WidgetBuilderView` builds from its own default source.
-    init(style: WidgetStyle, model: WidgetsManagerViewModel, services: AppServices) {
+    init(style: WidgetStyle, model: WidgetsManagerViewModel, services: AppServices, onAdded: (() -> Void)? = nil) {
         self.model = model
         self.services = services
         self.style = style
+        self.onAdded = onAdded
         mode = .create
         _widget = State(initialValue: HomeWidget(title: "", content: .row(RowConfiguration(source: .unsupported(kind: "")))))
     }
@@ -47,7 +50,7 @@ struct WidgetEditorView: View {
     var body: some View {
         if WidgetEditorView.row(of: widget) != nil {
             WidgetBuilderView(mode: mode == .create ? .create : .edit, widget: mode == .create ? nil : widget, style: style,
-                              manager: model, services: services)
+                              manager: model, services: services, onAdded: onAdded)
         } else {
             form
         }
@@ -132,7 +135,7 @@ struct WidgetEditorView: View {
         let saved = widget
         Task {
             if mode == .create { await model.add(saved) } else { await model.update(saved) }
-            dismiss()
+            if mode == .create, let onAdded { onAdded() } else { dismiss() }
         }
     }
 

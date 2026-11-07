@@ -340,6 +340,8 @@ function serveFile(req, res, file, mime, headers = {}) {
 function handleMedia(req, res, ctx) {
   const pathname = new URL(req.url, 'http://x').pathname;
   const rel = pathname.replace(/^\/media\//, '');
+  if (rel === 'redirect-hls') return send(res, 302, '', { Location: '/media/hls/index.m3u8' });
+  if (rel === 'hls/opaque') return serveFile(req, res, path.join(ctx.fixtures, 'hls/index.m3u8'), MIME['.m3u8']);
   if (rel === 'sample.srt') return send(res, 200, SRT, { 'Content-Type': MIME['.srt'] });
   if (rel === 'sample.vtt') return send(res, 200, VTT, { 'Content-Type': MIME['.vtt'] });
   const blobs = { 'blob/mp4': 'sample.mp4', 'blob/mkv': 'sample-ac3.mkv', 'blob/hls': 'hls/index.m3u8' };

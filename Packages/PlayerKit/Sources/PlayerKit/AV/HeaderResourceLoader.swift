@@ -24,7 +24,7 @@ enum AVAssetFactory {
 /// ATS applies to these URLSession loads: plain-http streams to non-local hosts fail by design (ADR-005).
 final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSessionDataDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "app.blusion.resource-loader")
-    private enum ResponseAction { case allow, cancel, finish, unsupportedRange }
+    private enum ResponseAction { case allow, cancel, finish, unsupportedRange, reloadPlaylist }
 
     private final class Job {
         let loadingRequest: AVAssetResourceLoadingRequest
@@ -34,12 +34,14 @@ final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSe
         var buffer = Data()
         var info: HTTPURLResponse?
         var isPlaylist = false
+        var fetchingWholePlaylist: Bool
 
-        init(loadingRequest: AVAssetResourceLoadingRequest, realURL: URL, requestedOffset: Int64, remaining: Int?) {
+        init(loadingRequest: AVAssetResourceLoadingRequest, realURL: URL, requestedOffset: Int64, remaining: Int?, wholePlaylist: Bool) {
             self.loadingRequest = loadingRequest
             self.realURL = realURL
             self.requestedOffset = requestedOffset
             self.remaining = remaining
+            self.fetchingWholePlaylist = wholePlaylist
         }
     }
 
@@ -88,14 +90,24 @@ final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSe
         } else if loadingRequest.contentInformationRequest != nil {
             request.setValue("bytes=0-1", forHTTPHeaderField: "Range")   // just enough to learn type and total length
         }
+        let wholePlaylist = real.pathExtension.lowercased() == "m3u8"
+        // Rewriting changes the representation's length and offsets. Fetch its whole bounded body before slicing it for AVPlayer.
+        if wholePlaylist { request.setValue(nil, forHTTPHeaderField: "Range") }
         let task = session.dataTask(with: request)
-        lock.withLock { jobs[task.taskIdentifier] = Job(loadingRequest: loadingRequest, realURL: real, requestedOffset: offset, remaining: remaining) }
+        lock.withLock {
+            jobs[task.taskIdentifier] = Job(loadingRequest: loadingRequest, realURL: real, requestedOffset: offset,
+                                          remaining: remaining, wholePlaylist: wholePlaylist)
+        }
         task.resume()
         return true
     }
 
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, didCancel loadingRequest: AVAssetResourceLoadingRequest) {
-        let ids = lock.withLock { jobs.filter { $0.value.loadingRequest === loadingRequest }.map(\.key) }
+        let ids = lock.withLock {
+            let ids = jobs.filter { $0.value.loadingRequest === loadingRequest }.map(\.key)
+            for id in ids { jobs[id] = nil }
+            return ids
+        }
         session.getAllTasks { tasks in
             for task in tasks where ids.contains(task.taskIdentifier) { task.cancel() }
         }
@@ -113,13 +125,20 @@ final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSe
             guard let job = jobs[dataTask.taskIdentifier] else { return .cancel }
             job.info = http
             let mime = http.mimeType?.lowercased() ?? ""
-            job.isPlaylist = mime.contains("mpegurl") || job.realURL.pathExtension.lowercased() == "m3u8"
+            job.isPlaylist = job.fetchingWholePlaylist || mime.contains("mpegurl") || http.url?.pathExtension.lowercased() == "m3u8"
+            if job.isPlaylist, http.statusCode == 206 {
+                return job.fetchingWholePlaylist ? .unsupportedRange : .reloadPlaylist
+            }
             // A deep seek must not redownload the movie from byte zero when a server ignores Range.
             if http.statusCode == 200, job.requestedOffset > 0, !job.isPlaylist { return .unsupportedRange }
             if !job.isPlaylist { Self.fillContentInformation(job.loadingRequest.contentInformationRequest, from: http, url: job.realURL, bodyLength: nil) }
             return !job.isPlaylist && job.loadingRequest.dataRequest == nil ? .finish : .allow
         }
-        if disposition == .unsupportedRange {
+        if disposition == .reloadPlaylist {
+            // An opaque URL was identified as HLS by its response. Discard the ranged body and restart without Range.
+            reloadPlaylist(taskID: dataTask.taskIdentifier, at: http.url)
+            completionHandler(.cancel)
+        } else if disposition == .unsupportedRange {
             finish(taskID: dataTask.taskIdentifier, error: URLError(.badServerResponse))
             completionHandler(.cancel)
         } else if http.statusCode >= 400 {
@@ -159,6 +178,23 @@ final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSe
 
     // MARK: Completion
 
+    private func reloadPlaylist(taskID: Int, at finalURL: URL?) {
+        let replacement: URLSessionDataTask? = lock.withLock {
+            guard let job = jobs.removeValue(forKey: taskID) else { return nil }
+            var request = URLRequest(url: finalURL ?? job.realURL)
+            for (name, value) in headers where name.caseInsensitiveCompare("Range") != .orderedSame {
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+            job.fetchingWholePlaylist = true
+            job.buffer = Data()
+            job.info = nil
+            let task = session.dataTask(with: request)
+            jobs[task.taskIdentifier] = job
+            return task
+        }
+        replacement?.resume()
+    }
+
     private func finish(taskID: Int, error: Error?) {
         guard let job = lock.withLock({ jobs.removeValue(forKey: taskID) }) else { return }
         if let error {
@@ -167,9 +203,10 @@ final class HeaderResourceLoader: NSObject, AVAssetResourceLoaderDelegate, URLSe
         }
         if job.isPlaylist {
             let text = String(decoding: job.buffer, as: UTF8.self)
-            let rewritten = Data(HLSPlaylistRewriter.rewrite(text, baseURL: job.realURL, map: CustomScheme.encode).utf8)
+            let baseURL = job.info?.url ?? job.realURL
+            let rewritten = Data(HLSPlaylistRewriter.rewrite(text, baseURL: baseURL, map: CustomScheme.encode).utf8)
             if let info = job.info {
-                Self.fillContentInformation(job.loadingRequest.contentInformationRequest, from: info, url: job.realURL, bodyLength: Int64(rewritten.count))
+                Self.fillContentInformation(job.loadingRequest.contentInformationRequest, from: info, url: baseURL, bodyLength: Int64(rewritten.count))
             }
             if let data = job.loadingRequest.dataRequest {
                 let start = min(Int(job.requestedOffset), rewritten.count)

@@ -179,6 +179,9 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cloudSecretsDidChange)) { _ in
             userStateRevision += 1
             Task {
+                await environment.services.traktAccount.credentialsDidChangeElsewhere()
+                await environment.services.trakt.clearCache()
+                await environment.services.widgetContent.forgetEverything()
                 await reloadReviewServices()
                 environment.services.posterRatings.settingsDidChangeElsewhere()
             }

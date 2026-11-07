@@ -57,7 +57,7 @@ public final class DownloadSession: NSObject, URLSessionDownloadDelegate, @unche
     public func start(id: UUID, url: URL, headers: [String: String], cellular: Bool, resume: Data? = nil,
                       offset: Int64 = 0, validator: String? = nil) -> URLSessionDownloadTask {
         let task: URLSessionDownloadTask
-        if let resume, offset == 0 {
+        if let resume {
             task = session.downloadTask(withResumeData: resume)
         } else {
             var request = URLRequest(url: url)

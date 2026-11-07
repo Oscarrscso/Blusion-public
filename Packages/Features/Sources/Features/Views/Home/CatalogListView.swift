@@ -53,11 +53,24 @@ struct CatalogListView: View {
     /// The streaming service this page lists, when it is one (a service's tile on Search or Home opens it).
     private var provider: StreamProvider? { StreamProvider(tileTitle: request.title) }
 
-    /// A service's heading, in the large title's place. Phone landscape names the page in its own bar instead.
+    /// Landscape iPhone and Mac categories need an in-page heading because their navigation bar is hidden.
     @ViewBuilder
     private var serviceHeading: some View {
         if let provider, !isPhoneInLandscape {
             ServiceHeading(provider: provider)
+        }
+        #if targetEnvironment(macCatalyst)
+        let showsCategoryHeading = provider == nil
+        #else
+        let showsCategoryHeading = isPhoneInLandscape
+        #endif
+        if showsCategoryHeading {
+            Text(request.title)
+                .headingStyle()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, metrics.pageMargin)
+                .padding(.bottom, metrics.headerSpacing)
+                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -74,7 +87,8 @@ struct CatalogListView: View {
         // A phone in landscape has no navigation bar here, so the filters and grid use the full height behind the floating Back control.
         .trackLandscapeTabScroll()
         .screenBackground()
-        .browsePageTopMargin()
+        // A service's page has its own heading in place of the large title.
+        .browsePageTopMargin(underLargeTitle: provider == nil)
     }
 
     #if targetEnvironment(macCatalyst)
@@ -82,7 +96,7 @@ struct CatalogListView: View {
     /// `MacGridPage`).
     private var macPage: some View {
         var parts: [MacGridPage.Part] = []
-        if provider != nil { parts.append(.full(id: "heading", view: AnyView(serviceHeading))) }
+        parts.append(.full(id: "heading", view: AnyView(serviceHeading)))
         parts.append(.full(id: "filters", view: AnyView(filters)))
         let presentation = request.presentation
         if model.items.isEmpty {

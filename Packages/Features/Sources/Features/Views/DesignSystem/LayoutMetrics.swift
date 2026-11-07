@@ -59,6 +59,11 @@ struct LayoutMetrics: Equatable, Sendable {
     }
     /// Poster columns of a grid on a phone held upright (Appearance's Columns).
     var phonePosterColumns: Int = 3
+    /// Appearance's Shelves: a line between shelves.
+    var showsShelfDividers = false
+    var shelfDividerThickness: CGFloat = 1
+    var shelfDividerOpacity: Double = 0.12
+    var shelfDividerFullWidth = false
 
     static let compact = LayoutMetrics(
         isRegular: false, pageMargin: Theme.Spacing.l, shelfSpacing: 28, headerSpacing: 10, cardSpacing: 12,
@@ -85,7 +90,12 @@ struct LayoutMetrics: Equatable, Sendable {
         metrics.wideCardWidth = (wideCardWidth * size).rounded()
         metrics.squareWidth = (squareWidth * size).rounded()
         metrics.tileWidth = (tileWidth * size).rounded()
-        metrics.shelfSpacing = (shelfSpacing * gaps).rounded()
+        metrics.shelfSpacing = (shelfSpacing * CGFloat(appearance.effectiveShelfSpacingScale)).rounded()
+        metrics.pageMargin = (pageMargin * min(1, gaps) * CGFloat(appearance.sideMarginScale)).rounded()
+        metrics.showsShelfDividers = appearance.showsShelfDividers
+        metrics.shelfDividerThickness = CGFloat(appearance.shelfDividerThickness)
+        metrics.shelfDividerOpacity = appearance.shelfDividerOpacity
+        metrics.shelfDividerFullWidth = appearance.shelfDividerFullWidth
         metrics.headerSpacing = (headerSpacing * gaps).rounded()
         metrics.cardSpacing = max(2, (cardSpacing * gaps).rounded())
         metrics.controlSpacing = max(2, (controlSpacing * gaps).rounded())
@@ -98,7 +108,7 @@ struct LayoutMetrics: Equatable, Sendable {
 
     /// The side margin of the grid pages (Discover, Library, See All, Search): the gap between cards, but never less than
     /// `Theme.Spacing.l`, so the grid, and the filters and headings above it, keep to the same edge as Back and the large title.
-    var gridPageMargin: CGFloat { max(cardSpacing, Theme.Spacing.l) }
+    var gridPageMargin: CGFloat { pageMargin }
 
     /// These metrics for a grid page, whose page margin is `gridPageMargin`. The page hands them to everything on it.
     var gridPage: LayoutMetrics {
@@ -109,7 +119,7 @@ struct LayoutMetrics: Equatable, Sendable {
 
     /// The horizontal inset of a title page's content: the page margin, but never less than `Theme.Spacing.l`. Home uses it too, so its
     /// headings, selector and shelves line up with the title page.
-    var contentMargin: CGFloat { max(pageMargin, Theme.Spacing.l) }
+    var contentMargin: CGFloat { pageMargin }
 
     /// The folded width of a TMDb review card on a title page.
     var reviewCardWidth: CGFloat { isRegular ? 340 : 280 }

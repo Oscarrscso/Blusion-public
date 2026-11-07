@@ -54,6 +54,8 @@ public final class TraktAccountViewModel {
     public func finishPKCESignIn(callbackURL: URL) async {
         await perform {
             try await self.services.traktAccount.finishPKCESignIn(callbackURL: callbackURL)
+            await self.services.trakt.clearCache()
+            await self.services.widgetContent.forgetEverything()
             self.isSignedIn = true
             self.authorizationURL = nil
         }
@@ -75,6 +77,8 @@ public final class TraktAccountViewModel {
         await perform {
             await self.services.traktAccount.signOut()
             await self.services.traktSync.signedOut()
+            await self.services.trakt.clearCache()
+            await self.services.widgetContent.forgetEverything()
             self.isSignedIn = false
             self.message = "Disconnected from Trakt. Your local library and history are kept."
         }

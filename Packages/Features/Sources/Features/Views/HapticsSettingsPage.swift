@@ -90,7 +90,7 @@ struct HapticsSettingsPage: View {
                 Spacer()
                 Text(HapticFormat.percent(value)).foregroundStyle(.secondary).monospacedDigit()
             }
-            Slider(value: Binding(get: { draft.overall }, set: { raw in
+            CornerSlider(value: Binding(get: { draft.overall }, set: { raw in
                 let value = HapticFormat.snapped(raw)
                 draft.overallStrength = value
                 guard lastPreview != value else { return }
@@ -206,7 +206,7 @@ private struct HapticPlacePage: View {
                 Spacer()
                 Text(HapticFormat.percent(value)).foregroundStyle(.secondary).monospacedDigit()
             }
-            Slider(value: Binding(get: { draft.strength(place) }, set: { raw in
+            CornerSlider(value: Binding(get: { draft.strength(place) }, set: { raw in
                 let value = HapticFormat.snapped(raw)
                 draft[place].strength = value
                 guard lastPreview != value else { return }
@@ -233,7 +233,7 @@ private struct HapticPlacePage: View {
                 Spacer()
                 Text("\(Int(value.rounded())) pt").foregroundStyle(.secondary).monospacedDigit()
             }
-            Slider(value: Binding(get: { draft.shelfTickSpacingPoints }, set: { draft.shelfTickSpacing = $0.rounded() }),
+            CornerSlider(value: Binding(get: { draft.shelfTickSpacingPoints }, set: { draft.shelfTickSpacing = $0.rounded() }),
                    in: HapticPreferences.Limits.shelfTickSpacing, step: 2, onEditingChanged: { editing in
                 if !editing { save() }
             })
@@ -267,7 +267,7 @@ private struct HapticPlacePage: View {
             .accessibilityIdentifier("settings.haptics.choices.test")
         case .sliders:
             LabeledContent("Test slider") {
-                Slider(value: Binding(get: { sampleStop }, set: { value in
+                CornerSlider(value: Binding(get: { sampleStop }, set: { value in
                     guard value != sampleStop else { return }
                     sampleStop = value
                     Haptics.play(.sliders)

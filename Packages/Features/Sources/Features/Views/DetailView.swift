@@ -228,29 +228,25 @@ struct DetailView: View {
                         }
                         if !showsStreams {
                             Group {
-                                Rectangle()
-                                    .fill(Theme.separator)
-                                    .frame(height: 1)
-                                    .padding(.horizontal, contentMargin)
+                                TitleSectionLine(contentMargin: contentMargin)
                                     // The hero already reserves space below its rating pills. Account for that inset, then use the
                                     // same section gap on both sides so the divider actually sits between the two sections.
                                     .padding(.top, isLandscape
                                         ? metrics.titleRatingsGap - TitleHero.landscapeContentBottomInset
                                         : metrics.titleRatingsGap)
-                                    .accessibilityHidden(true)
-                                if model.isSeries {
-                                    DetailEpisodes(model: model, pageWidth: geometry.size.width, pageHeight: geometry.size.height,
-                                                   contentMargin: contentMargin,
-                                                   isHoldingEpisode: $isHoldingEpisode, play: { showStreams($0, from: $1) },
-                                                   playAtQuality: { showStreams($0, from: .episode, mode: .quality($1)) },
-                                                   loadingRequest: streams.loadingRequest, loadingTrigger: loadingTrigger,
-                                                   unavailableStreams: unavailableStreams)
-                                        .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
-                                }
                                 // Appearance's Section order puts Cast & Crew and Information before the reviews or after them.
                                 let credits = appearance.showsCast || appearance.showsInformation
                                     ? DetailCredits(model: model, contentMargin: contentMargin, pageWidth: geometry.size.width) : nil
-                                VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
+                                // Each section below has a faint line above it, as far from it as the one under the ratings.
+                                TitleSections(contentMargin: contentMargin) {
+                                    if model.isSeries {
+                                        DetailEpisodes(model: model, pageWidth: geometry.size.width, pageHeight: geometry.size.height,
+                                                       contentMargin: contentMargin,
+                                                       isHoldingEpisode: $isHoldingEpisode, play: { showStreams($0, from: $1) },
+                                                       playAtQuality: { showStreams($0, from: .episode, mode: .quality($1)) },
+                                                       loadingRequest: streams.loadingRequest, loadingTrigger: loadingTrigger,
+                                                       unavailableStreams: unavailableStreams)
+                                    }
                                     if appearance.sectionOrder == .castFirst, let credits { credits }
                                     if appearance.showsReviews && (model.isLoadingReviews || !model.reviews.isEmpty) {
                                         DetailReviews(reviews: model.reviews, isLoading: model.isLoadingReviews && model.reviews.isEmpty,
@@ -265,22 +261,18 @@ struct DetailView: View {
                                             .id(ReviewConsensusReader.key(for: model.reviews))
                                     }
                                     if appearance.sectionOrder == .reviewsFirst, let credits { credits }
+                                    if let franchise = model.franchise {
+                                        titleShelf(franchise.name, titles: franchise.parts, isLoading: false, identifier: "detail.franchise")
+                                    }
+                                    if appearance.showsRelated && (model.isLoadingRelated || !model.relatedTitles.isEmpty) {
+                                        titleShelf("More Like This", titles: model.relatedTitles,
+                                                   isLoading: model.isLoadingRelated && model.relatedTitles.isEmpty, identifier: "detail.related")
+                                    }
+                                    if appearance.showsWatchAnywhere, let watch = model.titleWatch, !watch.isEmpty {
+                                        DetailWatchAnywhere(watch: watch, contentMargin: contentMargin)
+                                    }
                                 }
-                                .padding(.top, model.isSeries ? metrics.titleSectionSpacing
-                                    : isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
-                                if let franchise = model.franchise {
-                                    titleShelf(franchise.name, titles: franchise.parts, isLoading: false, identifier: "detail.franchise")
-                                        .padding(.top, metrics.titleSectionSpacing)
-                                }
-                                if appearance.showsRelated && (model.isLoadingRelated || !model.relatedTitles.isEmpty) {
-                                    titleShelf("More Like This", titles: model.relatedTitles,
-                                               isLoading: model.isLoadingRelated && model.relatedTitles.isEmpty, identifier: "detail.related")
-                                        .padding(.top, metrics.titleSectionSpacing)
-                                }
-                                if appearance.showsWatchAnywhere, let watch = model.titleWatch, !watch.isEmpty {
-                                    DetailWatchAnywhere(watch: watch, contentMargin: contentMargin)
-                                        .padding(.top, metrics.titleSectionSpacing)
-                                }
+                                .padding(.top, isLandscape ? Theme.Spacing.s : metrics.titleRatingsGap)
                             }
                             .transition(.opacity)
                         }
@@ -548,8 +540,8 @@ struct DetailView: View {
     /// still leaves the page, by the button or the swipe: the streams are part of the title's page, not a screen of their own.
     private func showStreams(_ request: StreamRequest, from trigger: StreamTrigger, mode: PlayOpeningMode = .normal) {
         Task { @MainActor in
-            // A downloaded copy plays as it is, and uses no data: Data Saver takes it too.
-            if mode == .normal || mode == .quality(.dataSaver), let manager = services.downloads {
+            // A downloaded copy plays as it is, and uses no data: Data Saver and Ultra Saver take it too.
+            if mode == .normal || mode.quality?.savesData == true, let manager = services.downloads {
                 await manager.start()
                 if let item = manager.item(for: request), item.state == .complete,
                    let plan = await manager.plan(for: item.id) {
@@ -705,9 +697,9 @@ struct DetailView: View {
             ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
                 if isLoading {
                     ForEach(0..<6, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .artwork))
-                            .fill(Theme.placeholder)
+                        Theme.placeholder
                             .frame(width: metrics.landscapePosterWidth, height: metrics.landscapePosterWidth / CardAspect.wide.ratio)
+                            .mediaArtwork(cornerRadius: Theme.Radius.card)
                             .loadingCardSpinner()
                             .reportsShelfEdge(id: index)
                             .accessibilityLabel("Loading related title")

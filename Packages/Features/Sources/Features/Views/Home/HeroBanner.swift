@@ -43,7 +43,7 @@ struct HeroBannerSection: View {
     private var content: some View {
         switch section.state {
         case .idle, .loading:
-            HeroBannerPlaceholder()
+            HeroBannerPlaceholder(size: row.presentation.cardStyle.cardSize)
                 .modifier(OptionalContextMenu(menu: menu))
         case .loaded(let items) where !items.isEmpty:
             // Keyed by the featured title, so a reload that features another title doesn't keep the last one's looked-up picture.
@@ -69,7 +69,7 @@ struct HeroBannerSection: View {
     }
 }
 
-/// One rounded card: the featured title's backdrop on top with its name and year at the top left, and the rest of the list as a
+/// One rounded card: the featured title's backdrop on top with its logo and year at the bottom left, and the rest of the list as a
 /// row of small landscape cards on a tray tinted by the same picture, blurred.
 struct HeroBanner: View {
     let items: [MetaPreview]
@@ -113,9 +113,11 @@ struct HeroBanner: View {
         min((width - margin * 2) * 9 / 16, isPhoneLandscape ? 180 : 260)
     }
 
+    private var cardWidth: CGFloat { Self.cardWidth(metrics, size: row.presentation.cardStyle.cardSize) }
+
     /// The small cards of the tray: about a third of the banner's width on a phone, a little under a shelf poster's width.
-    private var cardWidth: CGFloat {
-        (metrics.posterWidth * 0.96 * row.presentation.cardStyle.cardSize.scale).rounded()
+    static func cardWidth(_ metrics: LayoutMetrics, size: CardSize) -> CGFloat {
+        (metrics.posterWidth * 0.96 * size.scale).rounded()
     }
 
     /// The featured picture, blurred and darkened, so the tray picks up the colours above it. It waits for the same lookup as the feature
@@ -129,7 +131,7 @@ struct HeroBanner: View {
     }
 }
 
-/// The featured title of a banner: its backdrop, with its name and year at the top left and a soft fade into the tray at the bottom.
+/// The featured title of a banner: its backdrop, with its logo (or name) and year at the bottom left and a soft fade into the tray.
 private struct BannerFeature: View {
     let item: MetaPreview
     let showsRating: Bool
@@ -141,6 +143,12 @@ private struct BannerFeature: View {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
     @Environment(\.zoomNamespace) private var zoomNamespace
     @Environment(PosterRatingsStore.self) private var ratings
+    /// Loads the title's logo as the spotlight does: trimmed, made light when it is dark, and kept for the session.
+    @State private var hero = HeroLoader()
+
+    /// The spotlight's logo for the title: the catalog's, else TMDb's from the same lookup as the backdrop.
+    private var logoURL: URL? { item.logo ?? heroArtwork?.logo }
+    private var logoSlot: HeroSlot { hero.slot(url: logoURL, maxPixelSize: HeroLoader.logoPixelSize, lookupFinished: artworkChecked) }
 
     var body: some View {
         let sourceID = "banner/\(item.identity)"
@@ -190,14 +198,35 @@ private struct BannerFeature: View {
                 heroArtwork = loaded
                 artworkChecked = true
             }
+            .task(id: logoURL) {
+                await hero.load(picture: nil, pictureSize: 0, logo: logoURL, logoSize: HeroLoader.logoPixelSize)
+            }
     }
 
-    /// The name in bold, the year (and the rating, when shown) in a lighter line under it.
+    /// The logo's box: the spotlight's, kept to half the banner's width and a third of its picture's height.
+    private var logoBox: CGSize {
+        let width = containerWidth - metrics.pageMargin * 2
+        let height = HeroBanner.featureHeight(width: containerWidth, margin: metrics.pageMargin, isPhoneLandscape: isPhoneLandscape)
+        return CGSize(width: min(HeroLogo.box.width, (width * 0.5).rounded()), height: min(HeroLogo.box.height, (height / 3).rounded()))
+    }
+
+    /// The title's logo, or its name in bold when it has none, and the year (and the rating, when shown) in a lighter line under it.
     private var caption: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(item.name)
-                .font(.title2.bold())
-                .lineLimit(2)
+        VStack(alignment: .leading, spacing: 6) {
+            switch logoSlot {
+            case .ready(let image):
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: logoBox.width, height: logoBox.height, alignment: .bottomLeading)
+            case .pending:
+                // Holds the logo's place while it loads, so the year does not move when it arrives.
+                Color.clear.frame(width: logoBox.width, height: logoBox.height)
+            case .none:
+                Text(item.name)
+                    .font(.title2.bold())
+                    .lineLimit(2)
+            }
             Text([item.releaseInfo, rating].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.75))
@@ -214,8 +243,11 @@ private struct BannerFeature: View {
     }
 }
 
-/// The grey stand-in for a banner, the same shape as the loaded card, shimmering while the items load.
+/// The grey stand-in for a banner, the same shape as the loaded card, shimmering while the items load: the feature's height over the tray's
+/// card placeholders, at the tray's card width, gaps and margins.
 struct HeroBannerPlaceholder: View {
+    /// The widget's card size, which the tray's cards follow.
+    var size: CardSize = .medium
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.heroContainerWidth) private var containerWidth
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
@@ -223,7 +255,18 @@ struct HeroBannerPlaceholder: View {
     var body: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: HeroBanner.featureHeight(width: containerWidth, margin: metrics.pageMargin, isPhoneLandscape: isPhoneLandscape))
-            Color.clear.frame(height: 130)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: metrics.cardSpacing) {
+                    ForEach(0..<6, id: \.self) { _ in
+                        CardPlaceholder(aspect: .wide, size: size, width: HeroBanner.cardWidth(metrics, size: size),
+                                        fill: AnyShapeStyle(Theme.surfaceStrong))
+                    }
+                }
+            }
+            .scrollIndicators(.hidden, axes: .horizontal)
+            .scrollDisabled(true)
+            .contentMargins(.horizontal, metrics.pageMargin, for: .scrollContent)
+            .padding(.vertical, Theme.Spacing.m)
         }
         .frame(maxWidth: .infinity)
         .background { Rectangle().fill(Theme.surface) }

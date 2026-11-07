@@ -72,9 +72,10 @@ public enum AutoStreamRanking {
             previous.addonID != nil && previous.addonID == item.addon.id && previous.bingeGroup == item.bingeContext?.bingeGroup
         } ?? false
 
-        // Data Saver wants the smallest file that still looks good: a REMUX costs points instead of earning them.
+        // Data Saver wants the smallest file that still looks good: a REMUX costs points instead of earning them, and more under Ultra Saver.
         let savesData = preferences.savesData
-        let remux = remuxCounts ? (savesData ? -dataSaverRemuxCost : remuxPoints) : 0
+        let savesMoreData = preferences.savesMoreData
+        let remux = remuxCounts ? (savesMoreData ? -ultraSaverRemuxCost : savesData ? -dataSaverRemuxCost : remuxPoints) : 0
         let contributions = [
             Contribution(fact: "resolution", detail: resolution.map(resolutionLabel), points: resolutionPoints(resolution)),
             Contribution(fact: "source", detail: source?.label, points: sourcePoints(source)),
@@ -83,9 +84,11 @@ public enum AutoStreamRanking {
             Contribution(fact: "bit depth", detail: quality.bitDepth.map { "\($0)-bit" }, points: bitDepthPoints(quality.bitDepth)),
             Contribution(fact: "HDR", detail: hdrLabel(quality), points: hdrPoints(quality)),
             Contribution(fact: "bitrate", detail: bitrate.map { "\(format($0)) Mbps" },
-                         points: savesData ? dataSaverBitratePoints(bitrate, resolution: resolution, codec: codec)
+                         points: savesData ? dataSaverBitratePoints(bitrate, resolution: resolution, codec: codec,
+                                                                     sweetSpot: savesMoreData ? ultraSaverSweetSpot : dataSaverSweetSpot)
                              : bitratePoints(bitrate, resolution: resolution, codec: codec)),
-            Contribution(fact: "audio", detail: audioLabel(playableAudio), points: audioPoints(playableAudio, savesData: savesData)),
+            Contribution(fact: "audio", detail: audioLabel(playableAudio),
+                         points: audioPoints(playableAudio, savesData: savesData, savesMoreData: savesMoreData)),
             Contribution(fact: "provider", detail: quality.provider?.name, points: quality.provider == nil ? 0 : 3),
             Contribution(fact: "release group", detail: quality.hasReputableGroup ? "reputable" : nil, points: quality.hasReputableGroup ? 3 : 0),
             Contribution(fact: "contradictions", detail: contradictions == 0 ? nil : "\(contradictions)", points: -8 * Double(contradictions)),
@@ -156,6 +159,12 @@ public enum AutoStreamRanking {
     private static let remuxPoints: Double = 10
     /// What a REMUX costs under Data Saver: enough that a good encode of the same disc wins.
     private static let dataSaverRemuxCost: Double = 12
+    /// What a REMUX costs under Ultra Saver: it is the largest file there is.
+    private static let ultraSaverRemuxCost: Double = 20
+    /// Where Data Saver's bitrate scores best, as a share of the rate the resolution usually needs: a good encode.
+    private static let dataSaverSweetSpot = 0.5
+    /// Ultra Saver's: a lean encode, as streaming services send on a weak connection.
+    private static let ultraSaverSweetSpot = 0.3
 
     private static func distance(_ quality: StreamQuality, from preferred: Int) -> Int {
         guard !quality.hasConflictingResolution, let resolution = quality.resolution else { return Int.max }
@@ -246,11 +255,12 @@ public enum AutoStreamRanking {
         return min(6, max(-8, 5 * log2(mbps / (reference * efficiency(codec)))))
     }
 
-    /// Data Saver's view of the rate: best at about half what the resolution usually needs (a good encode), less above that, and a
-    /// starved encode still loses, as it does otherwise. Each doubling above the sweet spot costs 6 points, down to -12.
-    private static func dataSaverBitratePoints(_ mbps: Double?, resolution: Int?, codec: VideoCodec?) -> Double {
+    /// Data Saver's view of the rate: best at `sweetSpot` of what the resolution usually needs (about half, a good encode, or less under
+    /// Ultra Saver), less above that, and a starved encode still loses, as it does otherwise. Each doubling above the sweet spot costs
+    /// 6 points, down to -12.
+    private static func dataSaverBitratePoints(_ mbps: Double?, resolution: Int?, codec: VideoCodec?, sweetSpot: Double) -> Double {
         guard let mbps, let resolution, let reference = referenceMbps(resolution) else { return 0 }
-        let ratio = mbps / (reference * efficiency(codec) * 0.5)
+        let ratio = mbps / (reference * efficiency(codec) * sweetSpot)
         if ratio < 0.5 { return max(-8, 4 + 5 * log2(ratio / 0.5)) }
         if ratio <= 1 { return 4 }
         return max(-12, 4 - 6 * log2(ratio))
@@ -294,12 +304,15 @@ public enum AutoStreamRanking {
 
     /// The best track the text names counts, since the player picks a track it can play. Channels add a little, and Atmos counts only with
     /// a codec that carries it: an Atmos label beside AAC contradicts itself.
-    /// Under Data Saver a lossless track counts as DD+ does: it is most of what makes a REMUX large.
-    private static func audioPoints(_ quality: StreamQuality, savesData: Bool = false) -> Double {
-        var points = quality.audioCodecs.map { savesData ? min(audioCodecPoints($0), audioCodecPoints(.eac3)) : audioCodecPoints($0) }.max() ?? 0
+    /// Under Data Saver a lossless track counts as DD+ does: it is most of what makes a REMUX large. Under Ultra Saver nothing counts above
+    /// Dolby Digital, and Atmos adds less.
+    private static func audioPoints(_ quality: StreamQuality, savesData: Bool = false, savesMoreData: Bool = false) -> Double {
+        let ceiling: AudioCodec? = savesMoreData ? .ac3 : savesData ? .eac3 : nil
+        var points = quality.audioCodecs.map { codec in ceiling.map { min(audioCodecPoints(codec), audioCodecPoints($0)) } ?? audioCodecPoints(codec) }
+            .max() ?? 0
         if let channels = quality.audioChannels { points += channels >= 8 ? 6 : channels >= 6 ? 4 : 0 }
-        if quality.atmosFormat == .lossless { points += savesData ? 6 : 9 }
-        if quality.atmosFormat == .streaming { points += 6 }
+        if quality.atmosFormat == .lossless { points += savesMoreData ? 3 : savesData ? 6 : 9 }
+        if quality.atmosFormat == .streaming { points += savesMoreData ? 3 : 6 }
         if quality.hasDTSX { points += 7 }
         if let kbps = quality.audioBitrateKbps { points += min(3, max(0, log2(kbps / 192))) }
         return points

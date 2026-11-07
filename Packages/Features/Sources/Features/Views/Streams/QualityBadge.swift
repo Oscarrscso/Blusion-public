@@ -36,14 +36,25 @@ struct QualityBadge: View {
 extension View {
     /// The hairline capsule that a quality marker and the Dolby Atmos badge share: the tint lightly filled, with a fine edge of the same colour.
     func qualityBadgeChrome(tint: Color) -> some View {
-        self
+        modifier(QualityBadgeChrome(tint: tint))
+    }
+}
+
+/// See `qualityBadgeChrome(tint:)`. The capsule takes Pickers, Chips & Badges' corners.
+private struct QualityBadgeChrome: ViewModifier {
+    let tint: Color
+    @Environment(\.layoutMetrics) private var metrics
+
+    func body(content: Content) -> some View {
+        let shape = ScaledCapsule(scale: metrics.cornerScale(for: .filters))
+        content
             .font(.caption2.weight(.semibold))
             .foregroundStyle(tint.opacity(0.92))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(tint.opacity(0.10), in: Capsule())
-            .overlay { Capsule().strokeBorder(tint.opacity(0.32), lineWidth: 0.6) }
+            .background(tint.opacity(0.10), in: shape)
+            .overlay { shape.strokeBorder(tint.opacity(0.32), lineWidth: 0.6) }
             .accessibilityElement(children: .combine)
     }
 }

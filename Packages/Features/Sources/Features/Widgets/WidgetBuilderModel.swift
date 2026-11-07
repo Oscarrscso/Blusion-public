@@ -406,15 +406,16 @@ public final class WidgetBuilderModel {
         }
     }
 
-    /// A shuffle schedule in a few words: "Daily", "Every 1 to 6 hours". Nil is the widgets page's setting.
-    public static func shuffleText(_ shuffle: WidgetShuffle?) -> String {
+    /// A shuffle schedule in a few words: "Daily", "Every 1 to 6 hours". Nil is the widgets page's setting. `compact` is the shorter
+    /// wording a menu beside a row's title has room for on one line.
+    public static func shuffleText(_ shuffle: WidgetShuffle?, compact: Bool = false) -> String {
         switch shuffle {
         case nil: "Like Other Widgets"
         case .off?: "Off"
-        case .everyOpen?: "Every Time Home Opens"
+        case .everyOpen?: compact ? "Every Visit" : "Every Time Home Opens"
         case .hourly?: "Hourly"
         case .daily?: "Daily"
-        case .randomTimes(let low, let high)?: "At Random, Every \(low) to \(high) Hours"
+        case .randomTimes(let low, let high)?: compact ? "Every \(low)–\(high) Hours" : "At Random, Every \(low) to \(high) Hours"
         }
     }
 

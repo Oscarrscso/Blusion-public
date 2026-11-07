@@ -33,6 +33,8 @@ struct DetailEpisodes: View {
     @State private var showsShuffleNext = false
     /// The name's size: a little under `caption2`, and scaled with the text size.
     @ScaledMetric(relativeTo: .caption2) private var shuffleNextSize: CGFloat = 10
+    /// A loading card's information height, scaled as the episode cards' own is.
+    @ScaledMetric(relativeTo: .caption) private var episodeInformationHeight: CGFloat = EpisodeRow.informationHeightAtDefaultSize
     /// Handed on to an episode's menu preview, which is drawn outside the page and does not get the page's environment.
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
 
@@ -64,7 +66,8 @@ struct DetailEpisodes: View {
         let width = episodeWidth(pageWidth: pageWidth)
         let initialEpisode = model.episodes.first { $0.id == model.nextUp?.id }
             ?? model.episodes.first
-        return VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+        // The season row stands as far above the episodes as the Cast heading does above its photos.
+        return VStack(alignment: .leading, spacing: metrics.headerSpacing) {
             HStack(spacing: Theme.Spacing.m) {
                 seasonMenu
                 shuffleButton
@@ -84,11 +87,17 @@ struct DetailEpisodes: View {
                                     .loadingCardSpinner()
                                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                     DetailSkeletonLine(font: Theme.Typography.eyebrow, width: 70)
-                                    DetailSkeletonParagraph(style: .footnote, lines: 2)
-                                    DetailSkeletonParagraph(style: .caption1, lines: 2)
+                                        .padding(.top, setsShortCardText ? 0 : -Theme.Spacing.xs)
+                                    DetailSkeletonParagraph(style: setsShortCardText ? .footnote : .body, lines: 2)
+                                    Rectangle().fill(Theme.separator).frame(height: 0.5)
+                                    DetailSkeletonParagraph(style: setsShortCardText ? .caption1 : .body, lines: 3)
+                                        .frame(minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+                                        .clipped()
+                                    Rectangle().fill(Theme.separator).frame(height: 0.5)
                                     DetailSkeletonLine(font: .caption2, width: width * 0.65)
                                 }
-                                .padding(Theme.Spacing.s)
+                                .padding(Theme.Spacing.s + EpisodeRow.overlayInset(stillRadius: Theme.Radius.card))
+                                .frame(width: width, height: episodeInformationHeight, alignment: .topLeading)
                             }
                             .frame(width: width)
                             .background(Theme.placeholder)
@@ -254,6 +263,15 @@ struct DetailEpisodes: View {
         .help("Episode width")
         .accessibilityValue(isWide ? (isLandscape ? "Wide" : "Full width") : "Fixed width")
         .accessibilityIdentifier("detail.episodeWidthToggle")
+    }
+
+    /// Whether the cards set their text at the fixed-width card's sizes: always on iPhone and iPad; on the Mac only at the fixed width.
+    private var setsShortCardText: Bool {
+        #if targetEnvironment(macCatalyst)
+        !model.matchesEpisodeWidthToText
+        #else
+        true
+        #endif
     }
 
     /// Wide mode fills the text column in portrait and uses a compact wider card in landscape. Normal cards match the reviews.
@@ -517,7 +535,9 @@ private struct EpisodeRow: View {
         runtimeMinutes.map { Duration.seconds($0 * 60).formatted(.units(allowed: [.hours, .minutes], width: .wide)) }
     }
     let width: CGFloat
-    @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = 140
+    /// The information block's height at the default text size; it scales with Dynamic Type.
+    static let informationHeightAtDefaultSize: CGFloat = 140
+    @ScaledMetric(relativeTo: .caption) private var informationHeight: CGFloat = EpisodeRow.informationHeightAtDefaultSize
     @State private var overviewTextHeight: CGFloat = 0
     @State private var overviewFrameHeight: CGFloat = 0
     /// Menu previews show all the text; shelf cards let the synopsis absorb title wrapping inside a fixed height.
@@ -545,7 +565,8 @@ private struct EpisodeRow: View {
     private var hidesTitle: Bool { hidesSpoilers && appearance.spoilerTitles }
 
     /// How far the progress line and the watched mark move in from the still's edges, so a rounder corner does not cut into them.
-    private var overlayInset: CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
+    private var overlayInset: CGFloat { Self.overlayInset(stillRadius: stillRadius) }
+    static func overlayInset(stillRadius: CGFloat) -> CGFloat { max(0, stillRadius - Theme.Radius.small) * 0.3 }
 
     var body: some View {
         stacked

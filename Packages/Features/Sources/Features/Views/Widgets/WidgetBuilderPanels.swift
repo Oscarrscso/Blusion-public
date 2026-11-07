@@ -278,7 +278,7 @@ struct WidgetFieldPanel: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: Binding(get: { value }, set: { next in
+            CornerSlider(value: Binding(get: { value }, set: { next in
                 if next != value { Haptics.play(.sliders) }
                 update(next)
             }), in: 0...10, step: 0.5)

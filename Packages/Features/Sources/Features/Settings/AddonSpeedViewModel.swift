@@ -45,9 +45,7 @@ public final class AddonSpeedViewModel {
     /// Saves what Auto Pick waits for, then calls `saved`. Choosing Auto before anything has been tested starts a test, after that.
     public func choose(_ wait: AutoPickWait, saved: () -> Void = {}) async {
         self.wait = wait
-        var settings = await services.settings.load()
-        settings.autoPickWait = wait
-        await services.settings.save(settings)
+        _ = await services.settings.update { $0.autoPickWait = wait }
         saved()
         if wait == .fastest, await services.addonSpeed.results().isEmpty { await test() }
     }

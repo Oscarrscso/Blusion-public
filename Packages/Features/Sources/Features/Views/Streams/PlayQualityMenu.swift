@@ -4,8 +4,8 @@ import StremioKit
 import UIKit
 
 /// A hold menu's ways to play at a chosen quality, below a divider: Highest Quality, beside the remux symbol and, when Best Blurays names
-/// the film's best disc, that disc's mark after it (none for a title that is only streamed), then Data Saver. Play, an episode's card and a
-/// Continue Watching card share it.
+/// the film's best disc, that disc's mark after it (none for a title that is only streamed), then Data Saver and Ultra Saver. Play, an
+/// episode's card and a Continue Watching card share it.
 struct PlayQualityMenuItems: View {
     /// The film's best disc, as the device keeps Best Blurays' answer. Nil shows the remux symbol alone.
     let disc: BestDiscFormat?
@@ -27,6 +27,10 @@ struct PlayQualityMenuItems: View {
             Haptics.play(.buttons)
             play(.dataSaver)
         }
+        Button(PlayQualityMenu.ultraSaverTitle, systemImage: PlayQualityMenu.ultraSaverSymbol) {
+            Haptics.play(.buttons)
+            play(.ultraSaver)
+        }
     }
 }
 
@@ -36,6 +40,8 @@ enum PlayQualityMenu {
     static let highestTitle = "Highest Quality"
     static let dataSaverTitle = "Data Saver"
     static let dataSaverSymbol = "leaf"
+    static let ultraSaverTitle = "Ultra Saver"
+    static let ultraSaverSymbol = "tortoise"
 
     static func menu(disc: BestDiscFormat?, play: @escaping (PlayQuality) -> Void) -> UIMenu {
         let highest = UIAction(title: highestTitle, image: highestImage(disc) ?? UIImage(systemName: QualityBadge.remuxSymbol)) { _ in
@@ -50,7 +56,13 @@ enum PlayQualityMenu {
                 play(.dataSaver)
             }
         }
-        return UIMenu(options: .displayInline, children: [highest, dataSaver])
+        let ultraSaver = UIAction(title: ultraSaverTitle, image: UIImage(systemName: ultraSaverSymbol)) { _ in
+            Task { @MainActor in
+                Haptics.play(.buttons)
+                play(.ultraSaver)
+            }
+        }
+        return UIMenu(options: .displayInline, children: [highest, dataSaver, ultraSaver])
     }
 
     /// Highest Quality's mark when the film's best disc is known: the remux symbol, then the disc's mark. Nil without a disc, where the menu

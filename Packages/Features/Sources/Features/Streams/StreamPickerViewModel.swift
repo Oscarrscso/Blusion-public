@@ -48,6 +48,8 @@ public final class StreamPickerViewModel {
     private let autoPickLog = Logger(subsystem: "app.blusion.player", category: "auto-pick")
     /// The previous viewing session's store. The app's file store unless one is handed over (tests, previews).
     private let snapshotStore: any PlaybackSnapshotStore
+    private let persistsSession: Bool
+    private let isPrivateSession: @Sendable () -> Bool
     /// Set by `loadSessionResume`: the session the player last left open for this request, to walk back into.
     public private(set) var resumeSnapshot: PlaybackSnapshot?
     private var sniffTasks: [Task<Void, Never>] = []
@@ -78,10 +80,13 @@ public final class StreamPickerViewModel {
     /// count as the file's extension.
     private static let videoExtensions: Set<String> = ["mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "flv", "mpg", "mpeg"]
 
-    public init(request: StreamRequest, services: AppServices, snapshotStore: (any PlaybackSnapshotStore)? = nil) {
+    public init(request: StreamRequest, services: AppServices, snapshotStore: (any PlaybackSnapshotStore)? = nil,
+                isPrivateSession: @escaping @Sendable () -> Bool = { GhostMode.isOn }) {
         self.request = request
         self.services = services
         self.snapshotStore = snapshotStore ?? PlaybackSession.store
+        self.isPrivateSession = isPrivateSession
+        self.persistsSession = !isPrivateSession()
         self.listing = StreamListing(asking: [])
     }
 
@@ -158,9 +163,7 @@ public final class StreamPickerViewModel {
     public func setAutoPlaysBestStream(_ value: Bool) async {
         autoPlaysBestStream = value
         if !value { waitTarget = nil }
-        settings = await services.settings.load()
-        settings.autoPlayBestStream = value
-        await services.settings.save(settings)
+        settings = await services.settings.update { $0.autoPlayBestStream = value }
     }
 
     /// By default, compare every addon response. A caller can impose a deadline; later answers still improve the open picker. When Auto Pick waits for one
@@ -264,7 +267,10 @@ public final class StreamPickerViewModel {
     /// Reads the previous viewing session for this request, to walk back into: after the app was left or killed (a backgrounding keeps
     /// the live session alive instead). A session watched through is set aside at once, so it never comes back.
     public func loadSessionResume() async {
+        resumeSnapshot = nil
+        guard persistsSession, !isPrivateSession() else { return }
         guard let snapshot = await snapshotStore.load(), snapshot.request.identity == request.identity else { return }
+        guard !isPrivateSession(), !Task.isCancelled else { return }
         if snapshot.isEffectivelyFinished() {
             await snapshotStore.clear()
             return
@@ -310,8 +316,9 @@ public final class StreamPickerViewModel {
     /// goes on its own store as it always has; this is only for walking back into the same stream. A stream handed to another player
     /// has no session to come back to.
     public func saveResumeSnapshot(for item: RankedStream) async {
-        guard item.route.isPlayable else { return }
+        guard persistsSession, !isPrivateSession(), item.route.isPlayable else { return }
         let saved = await services.progress.progress(for: request.identity)
+        guard !isPrivateSession(), !Task.isCancelled else { return }
         let state = PlaybackSaveState(position: ProgressRecorder.resumePosition(for: saved), duration: saved?.duration, isPaused: false,
                                       layout: VideoLayout(zoomMode: settings.player.zoomMode,
                                                           aspectRatio: settings.player.aspectRatios[AspectRatioChoice.titleKey(for: request)] ?? .original),
@@ -324,6 +331,7 @@ public final class StreamPickerViewModel {
     /// `PlaybackSession.clear()`. Also used by tests.
     public func clearSessionResume() async {
         resumeSnapshot = nil
+        guard persistsSession, !isPrivateSession() else { return }
         await snapshotStore.clear()
     }
 

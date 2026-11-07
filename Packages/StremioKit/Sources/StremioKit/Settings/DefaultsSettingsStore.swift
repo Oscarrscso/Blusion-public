@@ -8,6 +8,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
         public static let downloadsDeleteWhenWatched = "settings.downloadsDeleteWhenWatched"
         public static let preferredResolution = "settings.preferredResolution"
         public static let dataSaver = "settings.dataSaver"
+        public static let ultraSaver = "settings.ultraSaver"
         public static let subtitleLanguage = "settings.subtitleLanguage"
         public static let fallbackEngineEnabled = "settings.fallbackEngineEnabled"
         public static let playerPreference = "settings.playerPreference"
@@ -87,6 +88,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
                                 haptics: HapticPreferences.saved(in: defaults))
         result.downloadsAllowCellular = defaults.bool(forKey: Keys.downloadsAllowCellular)
         result.dataSaver = defaults.bool(forKey: Keys.dataSaver)
+        result.ultraSaver = defaults.bool(forKey: Keys.ultraSaver)
         result.usesHeroPosters = defaults.bool(forKey: Keys.usesHeroPosters)
         result.showsBestDiscOnPosters = defaults.object(forKey: Keys.showsBestDiscOnPosters) as? Bool ?? PlaybackSettings().showsBestDiscOnPosters
         result.posterMarkPlacement = defaults.string(forKey: Keys.posterMarkPlacement).flatMap(PosterMarkPlacement.init(rawValue:)) ?? .topTrailing
@@ -97,6 +99,7 @@ public final class DefaultsSettingsStore: SettingsStore, @unchecked Sendable {
     public func save(_ settings: PlaybackSettings) async {
         defaults.set(settings.downloadsAllowCellular, forKey: Keys.downloadsAllowCellular)
         defaults.set(settings.dataSaver, forKey: Keys.dataSaver)
+        defaults.set(settings.ultraSaver, forKey: Keys.ultraSaver)
         defaults.set(settings.downloadsDeleteWhenWatched, forKey: Keys.downloadsDeleteWhenWatched)
         if let resolution = settings.preferredResolution, resolution > 0 {
             defaults.set(resolution, forKey: Keys.preferredResolution)

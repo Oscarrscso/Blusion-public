@@ -70,45 +70,10 @@ extension View {
         }
     }
 
-    /// A pushed title that opened with no animation (`TitleDestination.opensInstantly`) also closes with none: its back button and the
-    /// back swipe both pop through `AppRouter.goBack`, which closes it with animations off. Mac keeps the system back button, which
-    /// animates its own pop.
-    func instantDestination() -> some View {
-        modifier(InstantDestination())
-    }
-
     /// Gives a navigation stack its one back swipe: a swipe towards the trailing edge, anywhere on a pushed screen, pops that screen
     /// through the router. Apply to the stack's root screen, with the stack's path.
     func backSwipe(path: ReferenceWritableKeyPath<AppRouter, NavigationPath>) -> some View {
         modifier(BackSwipeModifier(path: path))
-    }
-}
-
-private struct InstantDestination: ViewModifier {
-    @Environment(\.isPhoneLandscape) private var isPhoneLandscape
-    @Environment(AppRouter.self) private var router
-
-    func body(content: Content) -> some View {
-        #if targetEnvironment(macCatalyst)
-        content
-        #else
-        content
-            .navigationBarBackButtonHidden()
-            .toolbar {
-                if !isPhoneLandscape || UIDevice.current.userInterfaceIdiom != .phone {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            router.goBack(in: \.homePath)
-                        } label: {
-                            Image(systemName: "chevron.backward")
-                                .fontWeight(.semibold)
-                        }
-                        .accessibilityLabel("Back")
-                        .accessibilityIdentifier("detail.back")
-                    }
-                }
-            }
-        #endif
     }
 }
 

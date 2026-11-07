@@ -44,6 +44,14 @@ public final class SettingsViewModel {
 
     private let services: AppServices
     private let reset: DataResetService
+    private var mutationRevision = 0
+
+    private func update(_ change: @escaping SettingsMutation) async {
+        mutationRevision += 1
+        let revision = mutationRevision
+        let saved = await services.settings.update(change)
+        if revision == mutationRevision { settings = saved }
+    }
 
     public init(services: AppServices) {
         self.services = services
@@ -77,35 +85,29 @@ public final class SettingsViewModel {
     }
 
     public func setPreferredResolution(_ value: Int?) async {
-        settings = await services.settings.load()
-        settings.preferredResolution = value
-        await services.settings.save(settings)
+        await update { $0.preferredResolution = value }
     }
 
     public func setDataSaver(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.dataSaver = value
-        await services.settings.save(settings)
+        await update { $0.dataSaver = value }
+    }
+
+    public func setDataSaverLevel(_ level: DataSaverLevel) async {
+        await update { $0.dataSaverLevel = level }
     }
 
     public func setSubtitleLanguage(_ code: String?) async {
-        settings = await services.settings.load()
-        settings.subtitleLanguage = code
-        await services.settings.save(settings)
+        await update { $0.subtitleLanguage = code }
     }
 
     /// Player preferences (subtitle, audio, picture and gesture defaults). The player saves changes made during playback the same way.
-    public func updatePlayer(_ change: (inout PlayerPreferences) -> Void) async {
-        settings = await services.settings.load()
-        change(&settings.player)
-        await services.settings.save(settings)
+    public func updatePlayer(_ change: @escaping @MainActor @Sendable (inout PlayerPreferences) -> Void) async {
+        await update { change(&$0.player) }
     }
 
     /// The Haptics page's tuning. Saved as it changes and applied at once, so the next tap is the one being tuned.
-    public func updateHaptics(_ change: (inout HapticPreferences) -> Void) async {
-        settings = await services.settings.load()
-        change(&settings.haptics)
-        await services.settings.save(settings)
+    public func updateHaptics(_ change: @escaping @MainActor @Sendable (inout HapticPreferences) -> Void) async {
+        await update { change(&$0.haptics) }
         #if canImport(UIKit)
         Haptics.apply(settings.haptics)
         #endif
@@ -113,17 +115,20 @@ public final class SettingsViewModel {
 
     /// Saves the OpenSubtitles API key and login as typed; blank fields remove them.
     public func commitOpenSubtitles() async {
-        settings = await services.settings.load()
         func trimmed(_ text: String) -> String? {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : value
         }
-        settings.openSubtitlesAPIKey = trimmed(openSubtitlesAPIKeyText)
-        settings.openSubtitlesUsername = trimmed(openSubtitlesUsernameText)
-        settings.openSubtitlesPassword = trimmed(openSubtitlesPasswordText)
-        await services.settings.save(settings)
+        let key = trimmed(openSubtitlesAPIKeyText)
+        let username = trimmed(openSubtitlesUsernameText)
+        let password = trimmed(openSubtitlesPasswordText)
+        await update {
+            $0.openSubtitlesAPIKey = key
+            $0.openSubtitlesUsername = username
+            $0.openSubtitlesPassword = password
+        }
         let saved = await services.settings.load()
-        lastMessage = saved.openSubtitlesAPIKey == settings.openSubtitlesAPIKey
+        lastMessage = saved.openSubtitlesAPIKey == key
             ? "OpenSubtitles saved." : "The OpenSubtitles key could not be saved to secure storage. Try again."
     }
 
@@ -133,71 +138,51 @@ public final class SettingsViewModel {
     }
 
     public func setFallbackEngineEnabled(_ enabled: Bool) async {
-        settings = await services.settings.load()
-        settings.fallbackEngineEnabled = enabled
-        await services.settings.save(settings)
+        await update { $0.fallbackEngineEnabled = enabled }
     }
 
     public func setPlayerPreference(_ value: PlayerPreference) async {
-        settings = await services.settings.load()
-        settings.playerPreference = value
-        await services.settings.save(settings)
+        await update { $0.playerPreference = value }
     }
 
     public func setAutoPlayBestStream(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.autoPlayBestStream = value
-        await services.settings.save(settings)
+        await update { $0.autoPlayBestStream = value }
     }
 
     public func setAutoPickSource(_ value: StreamSourcePreference) async {
-        settings = await services.settings.load()
-        settings.autoPickSource = value
-        await services.settings.save(settings)
+        await update { $0.autoPickSource = value }
     }
 
     public func setContinueWatchingRefreshSeconds(_ value: Int) async {
-        settings = await services.settings.load()
-        settings.continueWatchingRefreshSeconds = value
-        await services.settings.save(settings)
+        await update { $0.continueWatchingRefreshSeconds = value }
     }
 
     /// Also switches the poster ratings in the store the posters read.
     public func setShowsPosterRatings(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.showsPosterRatings = value
-        services.posterRatings.isEnabled = value
-        await services.settings.save(settings)
+        await update { $0.showsPosterRatings = value }
+        services.posterRatings.isEnabled = settings.showsPosterRatings
     }
 
     /// Also switches the rating logos in the store they read, so posters and detail rows change at once.
     public func setShowsColouredRatingLogos(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.showsColouredRatingLogos = value
-        services.posterRatings.showsColouredLogos = value
-        await services.settings.save(settings)
+        await update { $0.showsColouredRatingLogos = value }
+        services.posterRatings.showsColouredLogos = settings.showsColouredRatingLogos
     }
 
     /// Also switches the disc marks in the store the posters read.
     public func setShowsBestDiscOnPosters(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.showsBestDiscOnPosters = value
-        services.posterRatings.showsBestDisc = value
-        await services.settings.save(settings)
+        await update { $0.showsBestDiscOnPosters = value }
+        services.posterRatings.showsBestDisc = settings.showsBestDiscOnPosters
     }
 
     /// Also moves the marks on the posters on screen.
     public func setPosterMarkPlacement(_ value: PosterMarkPlacement) async {
-        settings = await services.settings.load()
-        settings.posterMarkPlacement = value
-        services.posterRatings.markPlacement = value
-        await services.settings.save(settings)
+        await update { $0.posterMarkPlacement = value }
+        services.posterRatings.markPlacement = settings.posterMarkPlacement
     }
 
     public func setUsesHeroPosters(_ value: Bool) async {
-        settings = await services.settings.load()
-        settings.usesHeroPosters = value
-        await services.settings.save(settings)
+        await update { $0.usesHeroPosters = value }
     }
 
     public func refreshRatings() async {
@@ -208,10 +193,8 @@ public final class SettingsViewModel {
     /// Saves the streaming server field if it is empty or valid; otherwise leaves the stored value alone.
     public func commitServerURL() async {
         guard serverURLMessage == nil else { return }
-        settings = await services.settings.load()
         let trimmed = serverURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.streamingServerURL = trimmed.isEmpty ? nil : trimmed
-        await services.settings.save(settings)
+        await update { $0.streamingServerURL = trimmed.isEmpty ? nil : trimmed }
     }
 
     /// Clears the last confirmation, so a page opened later does not show another page's message.

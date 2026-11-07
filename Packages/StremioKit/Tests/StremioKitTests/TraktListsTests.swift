@@ -67,6 +67,16 @@ import StremioKitTestSupport
         #expect(transport.callCount == 0)
     }
 
+    @Test func aCachedPrivateResponseCannotBypassSignIn() async throws {
+        let transport = StubTransport(data: Data("[]".utf8))
+        let cache = TraktBrowseCache()
+        await cache.store(HTTPResult(data: Data(popular.utf8), response: HTTPResponseInfo(statusCode: 200)),
+                          for: "account|key|users/me/lists")
+        let trakt = client(transport, cache: cache)
+        await #expect(throws: TraktAccountError.needsSignIn) { try await trakt.myLists(clientID: "key") }
+        #expect(transport.callCount == 0)
+    }
+
     @Test func aSortedListReadsThroughTheSortPathAndAnUnsortedOneKeepsItsOwnOrder() async throws {
         let transport = StubTransport(data: Data("[]".utf8))
         let trakt = client(transport)

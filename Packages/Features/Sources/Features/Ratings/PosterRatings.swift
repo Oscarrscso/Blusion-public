@@ -194,8 +194,11 @@ public final class PosterRatingsStore {
         reviewServicesRevision += 1
     }
 
-    /// Returns the same object every time. No observed property changes synchronously when called from a view body.
-    public func ratings(for item: MetaPreview, includeReviews: Bool = false, source: RatingSource? = nil) -> TitleRatings {
+    /// Returns the same object every time. No observed property changes synchronously when called from a view body. `includeMarks` asks
+    /// for the title's disc and streamer whether or not posters show marks, ahead of other titles, for a screen built on them (the video
+    /// store's cases).
+    public func ratings(for item: MetaPreview, includeReviews: Bool = false, source: RatingSource? = nil,
+                        includeMarks: Bool = false) -> TitleRatings {
         let entry: TitleRatings
         if let known = entries[item.identity] {
             entry = known
@@ -208,13 +211,14 @@ public final class PosterRatingsStore {
             entry = TitleRatings(id: item.identity, imdb: item.imdbRating)
             entries[item.identity] = entry
         }
-        let wantsDisc = showsBestDisc && bestBlurays != nil && item.type == "movie" && source == nil
+        let wantsMarks = (showsBestDisc || includeMarks) && source == nil
+        let wantsDisc = wantsMarks && bestBlurays != nil && item.type == "movie"
         // A film asks for its streamer only once Best Blurays names no disc for it; a series has no disc to wait for.
-        let wantsStreamer = showsBestDisc && tmdb != nil && source == nil
+        let wantsStreamer = wantsMarks && tmdb != nil
             && (item.type == "series" || item.type == "movie" && (bestBlurays == nil || entry.discChecked && entry.bestDisc == nil))
         guard !isClearing, isEnabled || includeReviews || wantsDisc || wantsStreamer, LetterboxdRatings.isIMDbID(item.id) else { return entry }
-        if wantsDisc { enqueue(item, provider: .bestBlurays, includeReviews: false) }
-        if wantsStreamer { enqueue(item, provider: .streaming, includeReviews: false) }
+        if wantsDisc { enqueue(item, provider: .bestBlurays, includeReviews: includeMarks) }
+        if wantsStreamer { enqueue(item, provider: .streaming, includeReviews: includeMarks) }
         guard isEnabled || includeReviews else { return entry }
         if source == nil || source == .imdb { lookUpInDataset(item, entry: entry) }
         if letterboxd != nil, item.type == "movie", source == nil || source == .letterboxd {
@@ -478,12 +482,12 @@ public final class PosterRatingsStore {
         }
     }
 
-    /// Score lookups run while ratings are on or a title page asks. Mark lookups run while marks are on; disc lookups one film at a time,
-    /// so bestblurays.com, a community site, is never asked about several films at once.
+    /// Score lookups run while ratings are on or a title page asks. Mark lookups run while marks are on or a screen built on them asks;
+    /// disc lookups one film at a time, so bestblurays.com, a community site, is never asked about several films at once.
     private func canStart(_ lookup: Lookup) -> Bool {
         switch lookup.provider {
-        case .bestBlurays: showsBestDisc && !tasks.keys.contains { $0.hasPrefix("\(Provider.bestBlurays.rawValue):") }
-        case .streaming: showsBestDisc
+        case .bestBlurays: (showsBestDisc || lookup.includeReviews) && !tasks.keys.contains { $0.hasPrefix("\(Provider.bestBlurays.rawValue):") }
+        case .streaming: showsBestDisc || lookup.includeReviews
         case .letterboxd, .tmdb, .omdb: isEnabled || lookup.includeReviews
         }
     }
@@ -502,7 +506,9 @@ public final class PosterRatingsStore {
         switch lookup.provider {
         case .bestBlurays:
             guard let checked = record.discCheckedAt else { return nil }
-            if record.disc == nil, showsBestDisc, tmdb != nil { enqueue(lookup.item, provider: .streaming, includeReviews: false) }
+            if record.disc == nil, showsBestDisc || lookup.includeReviews, tmdb != nil {
+                enqueue(lookup.item, provider: .streaming, includeReviews: lookup.includeReviews)
+            }
             // A film's best disc changes rarely: a named disc is kept a month, and "none named" a week.
             return checked.addingTimeInterval(record.disc != nil ? 30 * 86_400 : 7 * 86_400)
         default:
@@ -865,6 +871,8 @@ public final class PosterRatingsStore {
     private struct Lookup {
         let item: MetaPreview
         let provider: Provider
+        /// A screen asked for this title itself, so it goes ahead of the others and runs whatever the settings. For a mark: a screen built
+        /// on marks asked (`includeMarks`).
         var includeReviews: Bool
         var id: String { "\(provider.rawValue):\(item.identity)" }
         var cacheKey: String {

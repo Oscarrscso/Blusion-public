@@ -90,6 +90,15 @@ public enum RowLayout: String, Sendable, Codable, CaseIterable {
     case parallax
     /// Posters standing like book spines; the one picked opens out to its whole cover.
     case spines
+    /// A slot machine: three reels of posters that spin when its lever is pulled and land on three titles at random.
+    case slots
+    /// A pile of posters; the top one is flicked away to the bottom of the pile, and its details stand beside it.
+    case deck
+    /// Instant photos of the titles' stills, tilted and taped, that develop as they first come on screen.
+    case snapshots
+    /// A video store's shelf: each title face out in the case of its best release (Blu-ray, 4K Ultra HD, or its streaming service's),
+    /// picked up to be turned over and read.
+    case videoStore
 }
 
 /// How a row's cards look. The defaults are Blusion's poster grid.
@@ -228,6 +237,12 @@ public struct TraktListReference: Sendable, Codable, Equatable, Hashable {
 }
 
 extension WidgetSource {
+    /// Private lists are never served from a cache or a last-launch snapshot.
+    public var requiresAccount: Bool {
+        if case .traktList(let list) = self { return list.needsAccount }
+        return false
+    }
+
     /// True for a Trakt list or feed, which needs the Trakt client ID.
     public var usesTrakt: Bool {
         switch self {

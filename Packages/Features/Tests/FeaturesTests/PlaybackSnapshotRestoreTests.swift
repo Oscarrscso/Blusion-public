@@ -59,7 +59,7 @@ import Testing
         let saved = try #require(await store.load())
         #expect(saved.request.identity == request.identity)
         #expect(saved.stream.kind == .direct)
-        #expect(saved.stream.urlPath == "https://a.example.com/1/f.mkv", "the link itself, with its token, was never saved")
+        #expect(saved.stream.urlPath == "sha256:v2:105f49715bfcc9a6a73be77685ed186859250c7f22e492fc304c78d497ec5234", "the link itself, with its token, was never saved")
         #expect(saved.wasPaused == false && saved.audioTrack == nil, "nothing was chosen yet at the start")
         #expect(saved.layout == VideoLayout(fit: .stretch, crop: .ratio2x1), "save the settings shown to the user, not a legacy zoom")
     }
@@ -72,6 +72,19 @@ import Testing
         await picker.load()
         await picker.saveResumeSnapshot(for: try #require(picker.listing.items.first))
         #expect(await store.load() == nil, "a stream in another player app has no session to walk back into")
+    }
+
+    @Test func aGhostPickerLeavesThePreviousSessionUntouched() async throws {
+        let saved = Self.snapshot(request: request)
+        let store = InMemoryPlaybackSnapshotStore(saved)
+        let services = try await services(bodies: [body([direct("4K REMUX", "https://a.example.com/1/f.mkv")])])
+        let picker = StreamPickerViewModel(request: request, services: services, snapshotStore: store, isPrivateSession: { true })
+        await picker.load()
+        await picker.loadSessionResume()
+        #expect(picker.resumeSnapshot == nil)
+        await picker.saveResumeSnapshot(for: try #require(picker.listing.items.first))
+        await picker.clearSessionResume()
+        #expect(await store.load() == saved)
     }
 
     // MARK: walking back in
@@ -98,7 +111,7 @@ import Testing
         let matched = try #require(after.matchedResumeStream(), "the same file, on its new link")
         #expect(after.automaticStartCandidate == matched, "the start resumes the session's own stream")
         let handed = try #require(after.resumeHandoff(for: matched))
-        #expect(handed.stream.urlPath == "https://a.example.com/1/f.mkv")
+        #expect(handed.stream.urlPath == "sha256:v2:e9520016fd1b5245d93ac1af0ec05cca5e1352b65b5b6a556b2f835cbf9783f9")
         #expect(handed.position == 1_200, "the resume position of the session, as progress had it")
         #expect(after.resumeHandoff(for: try #require(after.listing.items.first(where: { $0.id != matched.id }))) == nil,
                 "another stream is not handed a session")

@@ -5,7 +5,8 @@ import StremioKit
 public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
     case row = "Row", spotlight = "Spotlight", banner = "Carousel"
     /// Rows drawn in one of Blusion's own layouts (`RowLayout`).
-    case mosaic = "Mosaic", flow = "Flow", wall = "Wall", parallax = "Parallax", spines = "Spines"
+    case mosaic = "Mosaic", flow = "iPod", wall = "Wall", parallax = "Parallax", spines = "Spines"
+    case slots = "Slots", deck = "Deck", snapshots = "Snapshots", videoStore = "Video Store"
 
     public var id: String { rawValue }
 
@@ -20,11 +21,21 @@ public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
         case .wall: "square.grid.3x3"
         case .parallax: "square.3.layers.3d"
         case .spines: "books.vertical"
+        case .slots: "dice"
+        case .deck: "rectangle.stack"
+        case .snapshots: "photo.stack"
+        case .videoStore: "film.stack"
         }
     }
 
-    /// The items a widget of this style loads unless the user changes it.
-    public var defaultLimit: Int { self == .spotlight ? 8 : 20 }
+    /// The items a widget of this style loads unless the user changes it. The wall shows many at once, so it loads more.
+    public var defaultLimit: Int {
+        switch self {
+        case .spotlight: 8
+        case .wall: 40
+        default: 20
+        }
+    }
 
     /// The layout a row of this style is drawn in; nil for the shelf, the spotlight and the carousel.
     public var layout: RowLayout? {
@@ -35,6 +46,10 @@ public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
         case .wall: return .wall
         case .parallax: return .parallax
         case .spines: return .spines
+        case .slots: return .slots
+        case .deck: return .deck
+        case .snapshots: return .snapshots
+        case .videoStore: return .videoStore
         }
     }
 
@@ -46,6 +61,10 @@ public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
         case .wall: self = .wall
         case .parallax: self = .parallax
         case .spines: self = .spines
+        case .slots: self = .slots
+        case .deck: self = .deck
+        case .snapshots: self = .snapshots
+        case .videoStore: self = .videoStore
         }
     }
 
@@ -64,7 +83,7 @@ public enum WidgetStyle: String, CaseIterable, Identifiable, Sendable {
         var configuration = configuration
         configuration.layout = layout
         switch self {
-        case .row, .mosaic, .flow, .wall, .parallax, .spines: return .row(configuration)
+        case .row, .mosaic, .flow, .wall, .parallax, .spines, .slots, .deck, .snapshots, .videoStore: return .row(configuration)
         case .spotlight: return .hero(configuration)
         case .banner: return .banner(configuration)
         }

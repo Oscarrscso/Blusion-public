@@ -137,6 +137,11 @@ struct DesktopDetailHero<Controls: View, Trailer: View, Synopsis: View, Informat
             JustifiedText(text: description, color: UIColor.white.withAlphaComponent(0.85), lineLimit: 3, isTruncated: $overviewIsCut)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("detail.overview")
+        } else if model.isLoading {
+            DetailSkeletonParagraph(lines: 3)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading synopsis")
+                .transition(.opacity)
         }
     }
 

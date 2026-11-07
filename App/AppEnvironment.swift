@@ -105,7 +105,7 @@ final class AppEnvironment {
                 downloads = InMemoryDownloadStore()
             }
         }
-        let settings = DefaultsSettingsStore(defaults: settingsDefaults, secrets: secrets, logger: logger)
+        let settings = QueuedSettingsStore(base: DefaultsSettingsStore(defaults: settingsDefaults, secrets: secrets, logger: logger))
         // Before any view exists: the haptics are the listener's own, and the first gesture of the session must already obey them.
         Haptics.apply(HapticPreferences.saved(in: settingsDefaults))
         let registry = AddonRegistry(store: store, secrets: secrets, client: client, logger: logger)

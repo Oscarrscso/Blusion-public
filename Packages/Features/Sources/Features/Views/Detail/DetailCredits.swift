@@ -15,7 +15,8 @@ struct DetailCredits: View {
     @Environment(\.appAppearance) private var appearance
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics.titleSectionSpacing) {
+        // A faint line parts the cast from the information, as it parts the page's other sections.
+        TitleSections(contentMargin: contentMargin) {
             if !appearance.showsCast {
                 // Appearance's Cast & Crew is off: the information alone.
                 EmptyView()
@@ -48,9 +49,9 @@ struct DetailCredits: View {
                     ShelfScroll(margin: contentMargin, spacing: metrics.cardSpacing) {
                         ForEach(0..<6, id: \.self) { index in
                             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                                RoundedRectangle(cornerRadius: Theme.Radius.poster * metrics.cornerScale(for: .artwork))
-                                    .fill(Theme.placeholder)
+                                Theme.placeholder
                                     .frame(width: width, height: width * 1.5)
+                                    .mediaArtwork(cornerRadius: Theme.Radius.poster)
                                     .loadingCardSpinner()
                                 VStack(alignment: .leading, spacing: 2) {
                                     DetailSkeletonLine(font: width < metrics.posterWidth ? .caption.weight(.semibold) : Theme.Typography.cardTitle,

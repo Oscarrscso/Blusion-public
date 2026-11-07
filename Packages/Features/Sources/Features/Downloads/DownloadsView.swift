@@ -93,9 +93,7 @@ struct DownloadSettingsPage: View {
                     Haptics.play(.choices)
                     cellular = value
                     Task {
-                        var settings = await services.settings.load()
-                        settings.downloadsAllowCellular = value
-                        await services.settings.save(settings)
+                        _ = await services.settings.update { $0.downloadsAllowCellular = value }
                         await services.downloads?.preferencesChanged()
                     }
                 }))
@@ -105,9 +103,7 @@ struct DownloadSettingsPage: View {
                     Haptics.play(.choices)
                     deleteWatched = value
                     Task {
-                        var settings = await services.settings.load()
-                        settings.downloadsDeleteWhenWatched = value
-                        await services.settings.save(settings)
+                        _ = await services.settings.update { $0.downloadsDeleteWhenWatched = value }
                     }
                 }))
                 .accessibilityIdentifier("settings.downloads.deleteWatched")

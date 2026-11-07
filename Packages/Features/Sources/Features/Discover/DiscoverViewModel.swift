@@ -47,6 +47,7 @@ public final class DiscoverViewModel {
         var genre: String?
         var received = 0
         var hasMore = true
+        var seenIDs: Set<String> = []
     }
 
     private let services: AppServices
@@ -195,6 +196,10 @@ public final class DiscoverViewModel {
             }
         }
         guard current == generation else { return }
+        guard !Task.isCancelled else {
+            state = items.isEmpty ? .idle : .loaded
+            return
+        }
         if pages.isEmpty, let failure, !pending.isEmpty {
             let error = AddonError.from(failure)
             if Task.isCancelled || error == .cancelled {
@@ -205,9 +210,12 @@ public final class DiscoverViewModel {
             return
         }
         for (index, page) in pages {
+            let identities = page.map(\.identity)
             cursors[index].received += page.count
-            cursors[index].hasMore = !page.isEmpty && cursors[index].source.catalog.supportsSkip
+            cursors[index].hasMore = identities.contains { !cursors[index].seenIDs.contains($0) } && cursors[index].source.catalog.supportsSkip
+            cursors[index].seenIDs.formUnion(identities)
         }
+        let previousCount = items.count
         var known = Set(items.map(\.identity))
         let ordered = pages.keys.sorted().map { index in
             let page = pages[index] ?? []
@@ -219,6 +227,11 @@ public final class DiscoverViewModel {
             for page in ordered where position < page.count && known.insert(page[position].identity).inserted { items.append(page[position]) }
         }
         canLoadMore = cursors.contains(where: \.hasMore)
+        // A locally filtered raw page can add no cards. Keep paging until the screen can trigger the next load itself.
+        if items.count == previousCount, canLoadMore {
+            await loadMixedPage(generation: current)
+            return
+        }
         state = .loaded
     }
 

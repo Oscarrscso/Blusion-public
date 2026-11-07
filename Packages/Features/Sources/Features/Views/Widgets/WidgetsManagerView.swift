@@ -14,10 +14,9 @@ struct WidgetsManagerView: View {
     @Environment(\.layoutMetrics) private var metrics
     let services: AppServices
     @State private var model: WidgetsManagerViewModel
-    /// The style of the new widget whose screen is pushed.
-    @State private var creating: WidgetStyle?
     @State private var openedWidget: HomeWidget?
-    @State private var showsGenreCollection = false
+    /// True while Add Widget is pushed.
+    @State private var showsGallery = false
     @State private var showsImport = false
     @State private var showsReset = false
     @State private var showsPendingImport = false
@@ -85,29 +84,9 @@ struct WidgetsManagerView: View {
         order.prefix { showcaseIDs.contains($0) }.count
     }
 
-    /// The plus: a menu of the widgets that can be added.
-    private var addMenu: some View {
-        // Adding a widget shows the cards, so the new one is not hidden with the rest.
-        Menu {
-            // The style comes first: the new widget opens already in it.
-            Menu("New Widget", systemImage: "rectangle.stack.badge.plus") {
-                ForEach(WidgetStyle.allCases) { style in
-                    Button(style.rawValue, systemImage: style.systemImage) { hidesWidgets = false; creating = style }
-                }
-            }
-            .accessibilityIdentifier("widgets.add.widget")
-            Button("Genre Collection", systemImage: "square.grid.2x2") { hidesWidgets = false; showsGenreCollection = true }
-                .disabled(model.catalogChoices.allSatisfy { $0.genres.isEmpty })
-            Button("Streaming Services", systemImage: "play.tv") {
-                hidesWidgets = false
-                Task { await model.add(WidgetsManagerViewModel.makeServicesCollection()) }
-            }
-            Button("Continue Watching", systemImage: "play.circle") {
-                hidesWidgets = false
-                Task { await model.add(HomeWidget(title: "Continue", content: .continueWatching)) }
-            }
-            .disabled(model.widgets.contains { $0.content == .continueWatching })
-        } label: {
+    /// The plus: Add Widget, a page of every widget that can be added, each drawn as Home draws it.
+    private var addButton: some View {
+        Button { showsGallery = true } label: {
             Image(systemName: "plus")
         }
         .pointerFeedback()
@@ -334,12 +313,12 @@ struct WidgetsManagerView: View {
                     settings.schedule = schedule
                     Task { await model.setShuffle(settings) }
                 })) {
-                    ForEach(WidgetShuffle.choices, id: \.self) { Text(WidgetBuilderModel.shuffleText($0)).tag($0) }
+                    ForEach(WidgetShuffle.choices, id: \.self) { Text(WidgetBuilderModel.shuffleText($0, compact: true)).tag($0) }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .lineLimit(1)
-                .truncationMode(.tail)
+                // The menu's label keeps to one line; the row's title takes what is left.
+                .fixedSize()
                 .accessibilityIdentifier("widgets.shuffle")
             }
             Divider().padding(.leading, WidgetsPageRow<EmptyView>.textInset)
@@ -447,7 +426,7 @@ struct WidgetsManagerView: View {
                 HStack {
                     Spacer()
                     hideToggle
-                    addMenu
+                    addButton
                 }
                 #endif
                 if hidesWidgets && !model.widgets.isEmpty { hiddenRowsLine }
@@ -474,7 +453,7 @@ struct WidgetsManagerView: View {
         #if !targetEnvironment(macCatalyst)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { hideToggle }
-            ToolbarItem(placement: .topBarTrailing) { addMenu }
+            ToolbarItem(placement: .topBarTrailing) { addButton }
         }
         #endif
         .task { await model.load() }
@@ -487,14 +466,12 @@ struct WidgetsManagerView: View {
             if !old.isEmpty, !Set(new).isSubset(of: old) { withAnimation { hidesWidgets = false } }
         }
         .navigationDestination(item: $openedWidget) { WidgetEditorView(widget: $0, model: model, services: services) }
-        .navigationDestination(item: $creating) { WidgetEditorView(style: $0, model: model, services: services) }
-        .sheet(isPresented: $showsGenreCollection) {
-            NavigationStack {
-                GenreCollectionPicker(model: model) { choice, genres in
-                    let title = GenreCollectionPicker.title(for: choice)
-                    Task { await model.add(WidgetsManagerViewModel.makeGenreCollection(title: title, choice: choice, genres: genres)) }
-                    showsGenreCollection = false
-                }
+        // Adding a widget shows the cards, so the new one is not hidden with the rest. Leaving Add Widget also leaves the settings opened
+        // from it, back to the cards.
+        .navigationDestination(isPresented: $showsGallery) {
+            WidgetGalleryView(model: model, services: services) {
+                hidesWidgets = false
+                showsGallery = false
             }
         }
         .sheet(isPresented: $showsImport, onDismiss: {

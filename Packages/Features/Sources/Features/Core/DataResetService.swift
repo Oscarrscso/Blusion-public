@@ -1,4 +1,5 @@
 import Foundation
+import Persistence
 import PlayerKit
 import StremioKit
 
@@ -33,9 +34,11 @@ public struct DataResetService: Sendable {
     }
 
     private let services: AppServices
+    private let snapshotStore: any PlaybackSnapshotStore
 
-    public init(services: AppServices) {
+    public init(services: AppServices, snapshotStore: (any PlaybackSnapshotStore)? = nil) {
         self.services = services
+        self.snapshotStore = snapshotStore ?? PlaybackSession.store
     }
 
     /// Returns a sentence describing what was cleared.
@@ -46,6 +49,7 @@ public struct DataResetService: Sendable {
             await services.downloads?.deleteAll()
         case .history:
             await services.progress.clear()
+            await snapshotStore.clear()
         case .library:
             await services.library.clear()
         case .settings:
@@ -63,7 +67,8 @@ public struct DataResetService: Sendable {
                 services.posterRatings.showsBestDisc = PlaybackSettings().showsBestDiscOnPosters
                 services.posterRatings.markPlacement = PlaybackSettings().posterMarkPlacement
             }
-            await services.widgetContent.invalidate()
+            await services.trakt.clearCache()
+            await services.widgetContent.forgetEverything()
         case .widgets:
             await services.widgets.save(nil)
             await services.widgetShuffle.clear()

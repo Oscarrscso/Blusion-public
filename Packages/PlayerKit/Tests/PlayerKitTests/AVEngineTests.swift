@@ -83,6 +83,16 @@ import Testing
         engine.stop()
     }
 
+    @Test(.enabled(if: MockServer.hasMediaFixtures, "needs generated media: run Tools/MockAddon/make-fixtures.sh (ffmpeg)"),
+          arguments: ["hls/index.m3u8", "hls/opaque", "redirect-hls"])
+    func headerHLSLoadsWholePlaylistsAndUsesTheRedirectedBase(_ path: String) async throws {
+        let engine = silentEngine()
+        defer { engine.stop() }
+        engine.load(PlaybackItem(url: try media(path), headers: ["X-Mock-Token": "abc"], title: "hls"))
+        engine.play()
+        #expect(await wait(engine) { $0.status == .playing && $0.position >= 1.0 } != nil)
+    }
+
     @Test(.enabled(if: MockServer.hasMediaFixtures, "needs generated media: run Tools/MockAddon/make-fixtures.sh (ffmpeg)"))
     func reachesTheEnd() async throws {
         let engine = silentEngine()

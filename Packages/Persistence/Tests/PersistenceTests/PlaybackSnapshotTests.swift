@@ -92,8 +92,9 @@ import Testing
         for secret in ["SECRET", "Bearer", "Authorization", "X-Api-Key", "token=", "expires="] {
             #expect(!json.contains(secret), "the snapshot leaked \(secret)")
         }
-        #expect(json.contains("https://debrid.example.com/files/12/nemo2160.mkv"), "host and path locate the file again")
-        #expect(!json.contains("?"), "the link's query was stripped")
+        #expect(json.contains("sha256:v2:"), "the matching identity is a versioned one-way fingerprint")
+        #expect(!json.contains("debrid.example.com"), "even the host and path are kept out of the snapshot")
+        #expect(!json.contains("?"), "the link's query is only represented inside its fingerprint")
     }
 
     // MARK: same-stream matching (AddonStream, id-level; full-listing tests live in Features)
@@ -126,10 +127,19 @@ import Testing
                                         filename: nil, videoSize: nil, videoHash: nil, headers: [:])))
     }
 
+    @Test func querySelectedFilesAndContradictoryFactsNeverMatch() throws {
+        let first = try #require(PlaybackStreamIdentity.make(for: Self.stream(url: "https://media.example/download?file=one",
+                                                                            filename: nil, videoSize: nil)))
+        #expect(!first.matches(Self.stream(url: "https://media.example/download?file=two", filename: nil, videoSize: nil)))
+        let known = try #require(PlaybackStreamIdentity.make(for: Self.stream(url: "https://media.example/file.mkv")))
+        #expect(!known.matches(Self.stream(url: "https://media.example/file.mkv", filename: "Another.mkv", videoSize: 100)))
+        #expect(first.matches(Self.stream(url: "https://media.example/download?file=one", filename: nil, videoSize: nil)))
+    }
+
     /// The identity copies only what the addon published about the file, and a source Blusion never plays back has no identity at all.
     @Test func theIdentityTakesOnlyTheFilesPublishedFacts() {
         let identity = PlaybackStreamIdentity.make(for: Self.stream())!
-        #expect(identity.urlPath == "https://debrid.example.com/files/12/nemo2160.mkv")
+        #expect(identity.urlPath == "sha256:v2:649d2e0da357ff990e1191277e0e01dfecf0604bca46ee541e414859de5c9cec")
         #expect(identity.filename == "Finding.Nemo.2003.2160p.REMUX.mkv")
         #expect(identity.videoSize == 8_800_000_000)
         #expect(identity.kind == .direct)

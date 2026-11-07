@@ -337,7 +337,7 @@ struct PlayerControls: View {
                 .accessibilityIdentifier("player.time")
                 .accessibilityLabel("Elapsed time")
                 .accessibilityValue(model.positionText)
-            Slider(value: Binding(get: { model.fraction }, set: { model.updateScrub(fraction: $0) }), in: 0...1) { editing in
+            CornerSlider(value: Binding(get: { model.fraction }, set: { model.updateScrub(fraction: $0) }), in: 0...1, tint: .white) { editing in
                 if editing { model.beginScrub() } else { Task { await model.endScrub() } }
             }
             .overlay {
@@ -372,7 +372,8 @@ struct PlayerControls: View {
     private var menuBar: some View {
         VStack(spacing: 4) {
             HStack(spacing: 2) {
-            PlayerMenuBar(tabs: menuTabs, selection: $panel, speedLabel: speedLabel, subtitlesOn: model.subtitleChoice != .off)
+            PlayerMenuBar(tabs: menuTabs, selection: $panel, speedLabel: speedLabel, subtitlesOn: model.subtitleChoice != .off,
+                          cornerScale: metrics.cornerScale(for: .playerControls))
                 .fixedSize()
             #if targetEnvironment(macCatalyst)
             volumeButton

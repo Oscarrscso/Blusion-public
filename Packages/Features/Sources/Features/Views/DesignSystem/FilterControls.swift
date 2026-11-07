@@ -107,9 +107,10 @@ struct BrowseFilterBar<Menus: View>: View {
                         }
                         .frame(maxWidth: .infinity)
                         #else
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: metrics.controlSpacing)],
-                                  alignment: .leading, spacing: metrics.controlSpacing) {
-                            menus
+                        ViewThatFits(in: .horizontal) {
+                            menuGrid(columns: 4)
+                                .frame(minWidth: 4 * 140 + 3 * metrics.controlSpacing)
+                            menuGrid(columns: 2)
                         }
                         #endif
                     }
@@ -125,6 +126,13 @@ struct BrowseFilterBar<Menus: View>: View {
         .padding(.bottom, metrics.controlSpacing)
         .buttonStyle(.hoverPlain)
         .buttonBorderShape(.roundedRectangle(radius: Self.menuHeight / 2 * metrics.cornerScale(for: .filters)))
+    }
+
+    private func menuGrid(columns: Int) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: metrics.controlSpacing), count: columns),
+                  alignment: .leading, spacing: metrics.controlSpacing) {
+            menus
+        }
     }
 }
 

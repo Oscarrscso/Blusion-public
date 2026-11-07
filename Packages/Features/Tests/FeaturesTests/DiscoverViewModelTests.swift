@@ -74,6 +74,28 @@ import StremioKitTestSupport
         #expect(model.selectedGenre == nil)
     }
 
+    @Test func anEmptyLocalGenrePageContinuesToTheNextRawPage() async throws {
+        let manifest = Manifest(id: "genres", name: "Genres", version: "1", resources: [ResourceDescriptor(name: "catalog")], types: ["movie"],
+                                catalogs: [CatalogDescriptor(type: "movie", id: "genres", extra: [ExtraDescriptor(name: "genre", options: ["Drama"])]),
+                                           CatalogDescriptor(type: "movie", id: "paged", extra: [ExtraDescriptor(name: "skip")])])
+        let transport = StubTransport { request, _ in
+            let parsed = request.url.flatMap(AddonRequestBuilder.parse)
+            let body: String
+            if parsed?.id == "paged" {
+                body = parsed?.extras.contains(ExtraParam("skip", "1")) == true
+                    ? #"{"metas":[{"id":"tt2","type":"movie","name":"Drama","genres":["Drama"]}]}"#
+                    : #"{"metas":[{"id":"tt1","type":"movie","name":"Action","genres":["Action"]}]}"#
+            } else { body = #"{"metas":[]}"# }
+            return StubTransport.response(Data(body.utf8), for: request)
+        }
+        let (registry, client) = try await makeStubbedRegistry(manifests: [manifest], transport: transport)
+        let model = DiscoverViewModel(services: AppServices(registry: registry, client: client))
+        await model.loadSources()
+        await model.select(genre: "Drama")
+        #expect(model.items.map(\.id) == ["tt2"])
+        #expect(model.state == .loaded)
+    }
+
     @Test func typesNarrowEveryCatalogAndAllRestoresThem() async throws {
         let server = try MockServer.shared()
         let services = services(server)

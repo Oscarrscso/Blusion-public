@@ -107,8 +107,7 @@ struct AppDestinations: ViewModifier {
             .navigationDestination(for: MetaPreview.self) { preview in
                 IMDbTitlePage(preview: preview, services: services) { DetailView(preview: $0, services: services) }
                     .titlePage(on: path)
-                    // Only a title opened from Search is recorded as a recent search, and the title's name is what is kept.
-                    .onAppear { if path == \.searchPath { recordSearchedTitle(preview.name) } }
+                    .onAppear { recordIfSearched(preview.name) }
             }
             .navigationDestination(for: TitleDestination.self) { destination in
                 let detail = IMDbTitlePage(preview: destination.preview, services: services) {
@@ -116,8 +115,10 @@ struct AppDestinations: ViewModifier {
                                handoff: destination.handoff, streams: destination.streams, heroPostersOverride: destination.usesHeroPosters)
                 }
                 .titlePage(on: path)
+                .onAppear { recordIfSearched(destination.preview.name) }
+                // A title opened with no animation closes with none: Back and the back swipe pop it through `AppRouter.goBack`.
                 if destination.opensInstantly {
-                    detail.instantDestination()
+                    detail
                 } else {
                     detail.zoomDestination(id: destination.sourceID, in: zoomNamespace)
                 }
@@ -136,8 +137,10 @@ struct AppDestinations: ViewModifier {
             .backSwipe(path: path)
     }
 
-    /// Puts the title at the top of the recent searches, and tells Search to read them again.
-    private func recordSearchedTitle(_ name: String) {
+    /// A title opened straight from Search's results goes to the top of the recent searches, and Search reads them again; the title's name
+    /// is what is kept. One opened further in, from a service or a category, was not searched for.
+    private func recordIfSearched(_ name: String) {
+        guard path == \.searchPath, router.searchPath.count == 1 else { return }
         services.searchHistory.save(SearchViewModel.recording(name, into: services.searchHistory.load()))
         router.recentSearchRevision += 1
     }
@@ -179,7 +182,8 @@ private struct TitlePageBars: ViewModifier {
     }
 }
 
-/// Mac and landscape iPhone browsing pages use Back without a navigation bar.
+/// Mac and landscape iPhone browsing pages use Back without a navigation bar. Elsewhere the navigation bar's Back is `RoundBackButton`
+/// in place of the system's, so it takes Other Buttons' corners and the buttons' finish as every other round button does.
 private struct BrowsingBackNavigation: ViewModifier {
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
@@ -189,9 +193,44 @@ private struct BrowsingBackNavigation: ViewModifier {
         #else
         let usesCornerBack = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
         content
-            .navigationBarBackButtonHidden(usesCornerBack)
+            .navigationBarBackButtonHidden()
             .toolbarVisibility(usesCornerBack ? .hidden : .automatic, for: .navigationBar)
+            .toolbar {
+                if !usesCornerBack {
+                    ToolbarItem(placement: .topBarLeading) {
+                        RoundBackButton()
+                            .accessibilityIdentifier("navigation.back")
+                    }
+                    // The button draws its own glass in its own shape.
+                    .sharedBackgroundVisibility(.hidden)
+                }
+            }
         #endif
+    }
+}
+
+/// Back as a round glass button in Other Buttons' corners and the buttons' finish: in the navigation bar of every browsing page, and in
+/// the top corner in phone landscape. Pops the showing tab's stack as the back swipe does, so a title opened from the spotlight closes
+/// with no animation.
+struct RoundBackButton: View {
+    @Environment(AppRouter.self) private var router
+    @Environment(\.layoutMetrics) private var metrics
+
+    var body: some View {
+        let shape = ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons))
+        Button {
+            Haptics.play(.navigation)
+            router.goBackOnTab()
+        } label: {
+            Image(systemName: "chevron.backward")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .buttonSurface(.regular.interactive(), in: shape)
+                .contentShape(shape)
+        }
+        .buttonStyle(.hoverPlain)
+        .accessibilityLabel("Back")
     }
 }
 

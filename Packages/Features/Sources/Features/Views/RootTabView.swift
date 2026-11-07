@@ -99,7 +99,7 @@ public final class AppRouter {
     func tapTab(_ tab: LaunchRoute.Tab) {
         let isShowing = self.tab == tab
         switch tab {
-        // A title opened from the spotlight closes with no animation, as its own back button closes it (see `goBack`).
+        // A title opened from the spotlight closes with no animation, as Back closes it (see `goBack`).
         case .home: if isShowing { popToRoot(\.homePath, instantly: spotlightDepth != nil) }
         case .discover: if isShowing { popToRoot(\.discoverPath) }
         case .library: if isShowing { popToRoot(\.libraryPath) }
@@ -128,9 +128,9 @@ public final class AppRouter {
         withTransaction(transaction) { self[keyPath: path] = NavigationPath() }
     }
 
-    /// The one way back in a stack: the back swipe and the spotlight title's own back button both pop here, so one gesture never pops
-    /// twice. A title opened from Home's spotlight with no animation closes with none (see `instantDestination()`); every other screen
-    /// closes with its own transition. True when a screen was popped, so the caller knows that screen is on its way out; false when
+    /// The one way back in a stack: the back swipe and Back (`RoundBackButton`) both pop here, so one gesture never pops twice. A title
+    /// opened from Home's spotlight with no animation (`TitleDestination.opensInstantly`) closes with none; every other screen closes
+    /// with its own transition. True when a screen was popped, so the caller knows that screen is on its way out; false when
     /// there was nothing to pop.
     @discardableResult
     func goBack(in path: ReferenceWritableKeyPath<AppRouter, NavigationPath>) -> Bool {
@@ -935,11 +935,8 @@ public struct RootTabView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 21, weight: .medium))
-                            .frame(width: 44, height: 44)
-                            .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                            .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
                     }
-                    .buttonStyle(.hoverPlain)
+                    .buttonStyle(FixedGlassButtonStyle(size: 44))
                     .foregroundStyle(.white)
                     .accessibilityLabel("Search")
                     .accessibilityIdentifier("landscape.search")
@@ -959,24 +956,12 @@ public struct RootTabView: View {
         // See All grids, categories and the stream picker), whose navigation bars are hidden there, so it is the same button everywhere.
         .overlay(alignment: .topLeading) {
             if showsLandscapeBack {
-                Button {
-                    Haptics.play(.navigation)
-                    router.goBackOnTab()
-                } label: {
-                    Image(systemName: "chevron.backward")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .buttonSurface(.regular.interactive(), in: ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                        .contentShape(ScaledCapsule(scale: metrics.circularButtonScale(for: .actionButtons)))
-                }
-                .buttonStyle(.hoverPlain)
-                .accessibilityLabel("Back")
-                .accessibilityIdentifier("landscape.back")
-                .padding(.top, LandscapeTabBarState.cornerInset)
-                .padding(.leading, landscapeEdgeInset)
-                .ignoresSafeArea(.container, edges: .top)
-                .transition(.opacity)
+                RoundBackButton()
+                    .accessibilityIdentifier("landscape.back")
+                    .padding(.top, LandscapeTabBarState.cornerInset)
+                    .padding(.leading, landscapeEdgeInset)
+                    .ignoresSafeArea(.container, edges: .top)
+                    .transition(.opacity)
             }
         }
         .onChange(of: router.tab) { _, _ in

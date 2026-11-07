@@ -1,4 +1,5 @@
 import Foundation
+import Persistence
 import Testing
 import PlayerKit
 import StremioKit
@@ -158,6 +159,52 @@ import StremioKitTestSupport
     }
 
     // MARK: settings
+
+    @Test func clearingHistoryAlsoClearsThePreviousPlaybackSession() async throws {
+        let saved = PlaybackSnapshot(request: StreamRequest(type: "movie", id: "a", title: "A"),
+                                     stream: PlaybackStreamIdentity(kind: .direct), position: 40)
+        let store = InMemoryPlaybackSnapshotStore(saved)
+        let services = services(progress: [progress("a", 40)])
+        await DataResetService(services: services, snapshotStore: store).clear(.history)
+        #expect(await store.load() == nil)
+        #expect(await services.progress.all().isEmpty)
+    }
+
+    @Test func overlappingSettingsWritersKeepBothChanges() async throws {
+        let gate = AsyncTestGate()
+        let underlying = DelayedSettingsStore(gate: gate)
+        let client = makeClient(StubTransport(data: Data()))
+        let registry = AddonRegistry(store: InMemoryAddonStore(), secrets: InMemorySecretStore(), client: client)
+        let services = AppServices(registry: registry, client: client, settings: underlying)
+        let first = SettingsViewModel(services: services)
+        let second = SettingsViewModel(services: services)
+        let resolution = Task { await first.setPreferredResolution(1080) }
+        while !(await underlying.hasStartedSave) { await Task.yield() }
+        let subtitles = Task { await second.setSubtitleLanguage("spa") }
+        await Task.yield()
+        await gate.release()
+        await resolution.value
+        await subtitles.value
+        let stored = await services.settings.load()
+        #expect(stored.preferredResolution == 1080)
+        #expect(stored.subtitleLanguage == "spa")
+    }
+
+    private actor DelayedSettingsStore: SettingsStore {
+        private var value = PlaybackSettings()
+        private let gate: AsyncTestGate
+        private(set) var hasStartedSave = false
+
+        init(gate: AsyncTestGate) { self.gate = gate }
+        func load() -> PlaybackSettings { value }
+        func save(_ settings: PlaybackSettings) async {
+            if !hasStartedSave {
+                hasStartedSave = true
+                await gate.wait()
+            }
+            value = settings
+        }
+    }
 
     @Test func settingsPersistEachChange() async {
         let services = services()

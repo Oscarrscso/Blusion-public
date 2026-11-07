@@ -47,6 +47,8 @@ enum Theme {
     static let surface = Color.white.opacity(0.11)
     static let surfaceStrong = Color.white.opacity(0.18)
     static let separator = Color.white.opacity(0.12)
+    /// The faint line between a title page's sections: fainter than `separator`, so it parts them without drawing the eye.
+    static let sectionLine = Color.white.opacity(0.06)
     static let artworkBorder = Color.white.opacity(0.22)
     /// The grey of the metadata line under a title's name, on Home's spotlight and on the title page alike. A fixed colour rather than a
     /// hierarchical style, so the line never takes a tint from the view around it.
@@ -213,8 +215,10 @@ private struct ScreenBackgroundModifier: ViewModifier {
 extension View {
     /// The shared top edge for root browsing grids. In phone landscape the page uses the space normally reserved for a navigation bar,
     /// then restores the app's standard margin so Library, Discover and category grids start on the same line.
-    func browsePageTopMargin() -> some View {
-        modifier(BrowsePageTopMarginModifier())
+    /// `underLargeTitle`: the system's large title stands over the page (See All), with room of its own under its baseline, so the
+    /// content starts closer and the gap under the title's letters matches the one between Back and their top.
+    func browsePageTopMargin(underLargeTitle: Bool = false) -> some View {
+        modifier(BrowsePageTopMarginModifier(underLargeTitle: underLargeTitle))
     }
 
     /// A page's navigation background. Mac keeps it transparent while retaining native Back, Search and toolbar controls.
@@ -225,6 +229,7 @@ extension View {
 }
 
 private struct BrowsePageTopMarginModifier: ViewModifier {
+    let underLargeTitle: Bool
     @Environment(\.isPhoneLandscape) private var isPhoneLandscape
 
     func body(content: Content) -> some View {
@@ -235,7 +240,8 @@ private struct BrowsePageTopMarginModifier: ViewModifier {
         let usesLandscapeEdge = isPhoneLandscape && UIDevice.current.userInterfaceIdiom == .phone
         content
             .ignoresSafeArea(.container, edges: usesLandscapeEdge ? .top : [])
-            .contentMargins(.top, Theme.Spacing.l, for: .scrollContent)
+            // A phone on its side shows no large title.
+            .contentMargins(.top, underLargeTitle && !isPhoneLandscape ? Theme.Spacing.xs : Theme.Spacing.l, for: .scrollContent)
         #endif
     }
 }

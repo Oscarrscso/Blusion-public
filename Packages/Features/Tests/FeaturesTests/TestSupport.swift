@@ -11,3 +11,20 @@ func waitUntil(timeout: TimeInterval = 10, _ condition: @MainActor () -> Bool) a
 }
 
 struct WaitTimeout: Error {}
+
+actor AsyncTestGate {
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func release() {
+        isOpen = true
+        let continuations = waiting
+        waiting = []
+        continuations.forEach { $0.resume() }
+    }
+}

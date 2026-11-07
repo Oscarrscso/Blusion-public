@@ -814,6 +814,10 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public static let cardScaleRange: ClosedRange<Double> = 0.6...1.6
     public static let cornerScaleRange: ClosedRange<Double> = 0...2.5
     public static let spacingScaleRange: ClosedRange<Double> = 0.3...2
+    public static let shelfSpacingScaleRange: ClosedRange<Double> = 0...3
+    public static let sideMarginScaleRange: ClosedRange<Double> = 0...2
+    public static let shelfDividerThicknessRange: ClosedRange<Double> = 0.5...4
+    public static let shelfDividerOpacityRange: ClosedRange<Double> = 0.03...0.6
     public static let tintStrengthRange: ClosedRange<Double> = 0.04...0.3
     /// The column counts a phone's portrait poster grid offers. A wide window fits as many columns as the card size allows instead.
     public static let phoneGridColumnRange: ClosedRange<Int> = 2...6
@@ -866,6 +870,16 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     }
     /// The gaps between cards and between shelves, as a share of the layout's own (`spacingScaleRange`).
     public var spacingScale: Double = 0.3
+    /// The gap between shelves on its own; nil follows `spacingScale`.
+    public var shelfSpacingScale: Double?
+    /// The page's left and right margin, as a share of the layout's own (it also follows `spacingScale`, so tight spacing reaches the edges).
+    public var sideMarginScale: Double = 1
+    /// A horizontal line between shelves, with its thickness, strength and whether it runs edge to edge.
+    public var showsShelfDividers = false
+    public var shelfDividerThickness: Double = 1
+    public var shelfDividerOpacity: Double = 0.12
+    public var shelfDividerFullWidth = false
+    public var effectiveShelfSpacingScale: Double { shelfSpacingScale ?? spacingScale }
     /// Poster columns of a grid (Library, Discover, See All) on a phone held upright.
     public var phoneGridColumns = 3
     /// Every poster carries its title and a grey line underneath, as landscape and square cards do.
@@ -958,6 +972,12 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         cornerOverrides = look.cornerOverrides
         includesCircularButtons = look.includesCircularButtons
         spacingScale = look.spacingScale
+        shelfSpacingScale = look.shelfSpacingScale
+        sideMarginScale = look.sideMarginScale
+        showsShelfDividers = look.showsShelfDividers
+        shelfDividerThickness = look.shelfDividerThickness
+        shelfDividerOpacity = look.shelfDividerOpacity
+        shelfDividerFullWidth = look.shelfDividerFullWidth
         phoneGridColumns = look.phoneGridColumns
         showsPosterTitles = look.showsPosterTitles
         captionLines = look.captionLines
@@ -1029,6 +1049,14 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         includesCircularButtons = read(.includesCircularButtons, includesCircularButtons)
         spacingScale = clamp(read(.spacing, legacy(.legacyDensity, Self.legacySpacingScales) ?? spacingScale), Self.spacingScaleRange,
                              spacingScale)
+        shelfSpacingScale = (try? container.decodeIfPresent(Double.self, forKey: .shelfSpacing)).flatMap { $0 }
+            .map { clamp($0, Self.shelfSpacingScaleRange, spacingScale) }
+        sideMarginScale = clamp(read(.sideMargin, sideMarginScale), Self.sideMarginScaleRange, sideMarginScale)
+        showsShelfDividers = read(.showsShelfDividers, showsShelfDividers)
+        shelfDividerThickness = clamp(read(.shelfDividerThickness, shelfDividerThickness), Self.shelfDividerThicknessRange,
+                                      shelfDividerThickness)
+        shelfDividerOpacity = clamp(read(.shelfDividerOpacity, shelfDividerOpacity), Self.shelfDividerOpacityRange, shelfDividerOpacity)
+        shelfDividerFullWidth = read(.shelfDividerFullWidth, shelfDividerFullWidth)
         phoneGridColumns = min(max(read(.phoneGridColumns, phoneGridColumns), Self.phoneGridColumnRange.lowerBound),
                                Self.phoneGridColumnRange.upperBound)
         showsPosterTitles = read(.showsPosterTitles, showsPosterTitles)
@@ -1100,6 +1128,12 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(cornerOverrides, forKey: .cornerOverrides)
         try container.encode(includesCircularButtons, forKey: .includesCircularButtons)
         try container.encode(spacingScale, forKey: .spacing)
+        try container.encodeIfPresent(shelfSpacingScale, forKey: .shelfSpacing)
+        try container.encode(sideMarginScale, forKey: .sideMargin)
+        try container.encode(showsShelfDividers, forKey: .showsShelfDividers)
+        try container.encode(shelfDividerThickness, forKey: .shelfDividerThickness)
+        try container.encode(shelfDividerOpacity, forKey: .shelfDividerOpacity)
+        try container.encode(shelfDividerFullWidth, forKey: .shelfDividerFullWidth)
         try container.encode(phoneGridColumns, forKey: .phoneGridColumns)
         try container.encode(showsPosterTitles, forKey: .showsPosterTitles)
         try container.encode(captionLines, forKey: .captionLines)
@@ -1142,6 +1176,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         case textSize, font, boldText, italicText, fontWidth, letterSpacing, lineSpacing, headingFont, headingWeight, headingSize,
              headingWidth, headingSpacing, uppercaseHeadings, headingColour
         case cornerOverrides, includesCircularButtons
+        case shelfSpacing, sideMargin, showsShelfDividers, shelfDividerThickness, shelfDividerOpacity, shelfDividerFullWidth
         case cardSize, cornerScale, spacing, phoneGridColumns, showsPosterTitles, captionLines, showsCaptionDetails, uppercaseCaptions,
              outline, artworkTone, progressColour, progressThickness, showsTimeLeft
         case layout
@@ -1173,6 +1208,9 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             && lhs.headingColour == rhs.headingColour
         let sizes: Bool = lhs.cardScale == rhs.cardScale && lhs.cornerScale == rhs.cornerScale && lhs.spacingScale == rhs.spacingScale
             && lhs.phoneGridColumns == rhs.phoneGridColumns
+            && lhs.shelfSpacingScale == rhs.shelfSpacingScale && lhs.sideMarginScale == rhs.sideMarginScale
+            && lhs.showsShelfDividers == rhs.showsShelfDividers && lhs.shelfDividerThickness == rhs.shelfDividerThickness
+            && lhs.shelfDividerOpacity == rhs.shelfDividerOpacity && lhs.shelfDividerFullWidth == rhs.shelfDividerFullWidth
             && lhs.cornerOverrides == rhs.cornerOverrides && lhs.includesCircularButtons == rhs.includesCircularButtons
         let captions: Bool = lhs.showsPosterTitles == rhs.showsPosterTitles && lhs.captionLines == rhs.captionLines
             && lhs.showsCaptionDetails == rhs.showsCaptionDetails && lhs.uppercaseCaptions == rhs.uppercaseCaptions
@@ -1255,6 +1293,12 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         case .cards:
             result.cardScale = defaults.cardScale
             result.spacingScale = defaults.spacingScale
+            result.shelfSpacingScale = defaults.shelfSpacingScale
+            result.sideMarginScale = defaults.sideMarginScale
+            result.showsShelfDividers = defaults.showsShelfDividers
+            result.shelfDividerThickness = defaults.shelfDividerThickness
+            result.shelfDividerOpacity = defaults.shelfDividerOpacity
+            result.shelfDividerFullWidth = defaults.shelfDividerFullWidth
             result.phoneGridColumns = defaults.phoneGridColumns
             result.showsPosterTitles = defaults.showsPosterTitles
             result.captionLines = defaults.captionLines
@@ -1301,11 +1345,11 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     /// What a card's height depends on besides its own shape, size and width: a shelf or grid that measured its cards measures again when
     /// this changes.
     public var layoutKey: String {
-        let numbers = [cardScale, spacingScale, cornerScale].map { String(format: "%.3f", $0) }
+        let numbers = [cardScale, spacingScale, cornerScale, effectiveShelfSpacingScale, sideMarginScale, shelfDividerThickness, shelfDividerOpacity].map { String(format: "%.3f", $0) }
         let text = [textSize.rawValue, font.rawValue, "\(boldText)", "\(italicText)", fontWidth.rawValue, letterSpacing.rawValue,
                     lineSpacing.rawValue, headingFont.rawValue, headingWeight.rawValue, headingSize.rawValue, headingWidth.rawValue,
                     headingSpacing.rawValue, "\(uppercaseHeadings)"]
-        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(uppercaseCaptions)", "\(phoneGridColumns)"]
+        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(uppercaseCaptions)", "\(phoneGridColumns)", "\(showsShelfDividers)", "\(shelfDividerFullWidth)"]
         return (numbers + text + captions).joined(separator: "|")
     }
 

@@ -178,7 +178,7 @@ struct TraktListBrowserView: View {
                 ForEach(0..<7, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous)
                         .fill(Theme.surface)
-                        .frame(height: 68)
+                        .frame(height: browser.showsUsers ? TraktListRow.minHeight : 68)
                 }
             }
             .padding(.horizontal, metrics.contentMargin)
@@ -235,6 +235,9 @@ struct TraktListRow: View {
     let list: TraktListSummary
     let isSelected: Bool
 
+    /// The least a row of the browser is tall: a list without a description, and a user.
+    static let minHeight: CGFloat = 56
+
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Spacing.m) {
             Image(systemName: list.isPrivate ? "lock.rectangle.stack" : "list.bullet.rectangle")
@@ -271,7 +274,7 @@ struct TraktListRow: View {
         }
         .padding(.horizontal, Theme.Spacing.m)
         .padding(.vertical, 10)
-        .frame(minHeight: 56)
+        .frame(minHeight: Self.minHeight)
         .glassCardSurface(cornerRadius: Theme.Radius.card)
         .overlay {
             if isSelected {
@@ -317,7 +320,7 @@ private struct TraktUserRow: View {
         }
         .padding(.horizontal, Theme.Spacing.m)
         .padding(.vertical, 10)
-        .frame(minHeight: 56)
+        .frame(minHeight: TraktListRow.minHeight)
         .glassCardSurface(cornerRadius: Theme.Radius.card)
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels), style: .continuous))
         .pointerInteraction(cornerRadius: Theme.Radius.card * metrics.cornerScale(for: .panels))
