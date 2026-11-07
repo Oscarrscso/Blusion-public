@@ -144,7 +144,7 @@ public final class PosterRatingsStore {
     @ObservationIgnored private var heroArtworkByID: [String: TMDbArtwork] = [:]
     /// Hero artwork lookups under way, by title, so a title asked for twice at once (a prewarm and the page, say) shares one request.
     @ObservationIgnored private var heroArtworkTasks: [String: Task<TMDbArtwork?, Never>] = [:]
-    /// The US age rating of each title asked for this session, for the spotlight's metadata line. Empty when TMDb has none for the title.
+    /// Age certificates by title and country. Empty when TMDb has none for that country.
     @ObservationIgnored private var certificationByID: [String: String] = [:]
     @ObservationIgnored private var certificationTasks: [String: Task<String?, Error>] = [:]
     /// The most prewarm lookups that run at once. A fast scroll past many cards asks TMDb for a few titles at a time, not all of them.
@@ -571,30 +571,31 @@ public final class PosterRatingsStore {
 
     /// The age rating already fetched for this title this session, read without waiting. Nil until a lookup for it has answered, and
     /// when TMDb has none.
-    public func cachedCertification(for item: MetaPreview) -> String? {
-        certificationByID[item.id].flatMap { $0.isEmpty ? nil : $0 }
+    public func cachedCertification(for item: MetaPreview, region: String = "US") -> String? {
+        certificationByID["\(item.identity)|\(region.uppercased())"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// The title's US age rating, for the spotlight's metadata line. Answers are kept for the session, "none" included, so a title coming
+    /// The title's age rating in one country. Answers are kept for the session, "none" included, so a title coming
     /// back into the spotlight asks nothing. A lookup that failed is not kept, and a title asked for again while its lookup runs waits
     /// for that lookup.
-    public func certification(for item: MetaPreview) async -> String? {
-        if certificationByID[item.id] != nil { return cachedCertification(for: item) }
+    public func certification(for item: MetaPreview, region: String = "US") async -> String? {
+        let key = "\(item.identity)|\(region.uppercased())"
+        if certificationByID[key] != nil { return cachedCertification(for: item, region: region) }
         guard let tmdb, !isClearing else { return nil }
-        if let running = certificationTasks[item.id] { return try? await running.value }
-        let task = Task<String?, Error> { try await tmdb.certification(imdbID: item.id, type: item.type) }
-        certificationTasks[item.id] = task
+        if let running = certificationTasks[key] { return try? await running.value }
+        let task = Task<String?, Error> { try await tmdb.certification(imdbID: item.id, type: item.type, region: region) }
+        certificationTasks[key] = task
         let answer: String?
         do {
             answer = try await task.value
         } catch {
-            if certificationTasks[item.id] == task { certificationTasks[item.id] = nil }
+            if certificationTasks[key] == task { certificationTasks[key] = nil }
             return nil
         }
         // Forgotten while it ran (the data was cleared): the answer is handed back but not kept.
-        guard certificationTasks[item.id] == task else { return answer }
-        certificationTasks[item.id] = nil
-        certificationByID[item.id] = answer ?? ""
+        guard certificationTasks[key] == task else { return answer }
+        certificationTasks[key] = nil
+        certificationByID[key] = answer ?? ""
         return answer
     }
 

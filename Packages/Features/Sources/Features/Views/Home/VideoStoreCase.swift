@@ -129,8 +129,10 @@ struct StoreCaseFront: View, Equatable {
     var glareFollowsScroll = false
     /// The poster already decoded, for the case in the hand; nil loads it as a shelf's poster does.
     var picture: UIImage?
+    @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var certification: String?
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated {
@@ -185,7 +187,26 @@ struct StoreCaseFront: View, Equatable {
                 .padding(.vertical, radius)
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .bottom) {
+            // The moulded foot catches a thin line of the shelf's light below the sleeve.
+            Capsule()
+                .fill(.white.opacity(0.22))
+                .frame(width: width * 0.84, height: max(0.5, rim.edge * 0.28))
+                .padding(.bottom, rim.edge * 0.35)
+                .allowsHitTesting(false)
+        }
         .contentShape(shape)
+        .overlay(alignment: .bottomTrailing) {
+            if let certification {
+                StoreAgeBadge(certification: certification, diameter: width * 0.12)
+                    .padding(width * 0.04)
+            }
+        }
+        .task(id: item.identity) {
+            let loaded = await ratings?.certification(for: item, region: "IE")
+            guard !Task.isCancelled else { return }
+            certification = loaded
+        }
     }
 
     @ViewBuilder
@@ -226,7 +247,7 @@ struct StoreCaseFront: View, Equatable {
     }
 }
 
-/// The format's band across the top of a cover: Blu-ray's blue with its mark, 4K's black with "4K" and the Ultra HD Blu-ray mark, or a
+/// The format's band across the top of a cover: Blu-ray's blue with its mark, 4K's black with the Ultra HD Blu-ray mark, or a
 /// streaming service's colour with its logo and name. Without its mark, it is the band at the head of a spine.
 struct StoreBanner: View {
     let kind: StoreCaseKind
@@ -276,13 +297,7 @@ struct StoreBanner: View {
         case .bluRay:
             StoreLogo(name: "StreamLogoBluRay", height: height * 0.66, ink: .white)
         case .ultraHD:
-            HStack(spacing: height * 0.22) {
-                Text(verbatim: "4K")
-                    .font(.system(size: height * 0.74, weight: .black).width(.condensed))
-                    .foregroundStyle(.white)
-                    .fixedSize()
-                StoreLogo(name: "StreamLogoUHDBluRay", height: height * 0.56, ink: .white)
-            }
+            StoreLogo(name: "StreamLogoUHDBluRay", height: height * 0.56, ink: .white)
         case .streaming(let service):
             StoreServiceMark(service: service, height: height)
         case .plain:
@@ -355,11 +370,13 @@ private struct StoreHinge: View {
 private struct StoreSleeve: View {
     var body: some View {
         LinearGradient(stops: [
-            .init(color: .white.opacity(0.12), location: 0),
+            .init(color: .white.opacity(0.18), location: 0),
+            .init(color: .white.opacity(0.04), location: 0.08),
+            .init(color: .clear, location: 0.12),
             .init(color: .white.opacity(0.025), location: 0.18),
             .init(color: .clear, location: 0.4),
             .init(color: .clear, location: 0.8),
-            .init(color: .black.opacity(0.08), location: 1),
+            .init(color: .black.opacity(0.14), location: 1),
         ], startPoint: .topLeading, endPoint: .bottomTrailing)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -385,6 +402,41 @@ struct StoreGlare: View {
             .blendMode(.plusLighter)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// IFCO's classification colours. Unknown or missing certificates draw no badge.
+private struct StoreAgeBadge: View {
+    let certification: String
+    let diameter: CGFloat
+
+    private var colour: Color? {
+        switch certification.uppercased() {
+        case "G": Color(red: 0, green: 0.5, blue: 1)
+        case "PG": Color(red: 0, green: 1, blue: 0)
+        case "12", "12A": Color(red: 1, green: 0.5, blue: 0)
+        case "15", "15A": Color(red: 1, green: 0, blue: 1)
+        case "16": Color(red: 0.5, green: 0, blue: 1)
+        case "18": Color(red: 1, green: 0, blue: 0)
+        default: nil
+        }
+    }
+
+    var body: some View {
+        if let colour {
+            Text(certification.uppercased())
+                .font(.system(size: diameter * 0.4, weight: .black).width(.condensed))
+                .foregroundStyle(.white)
+                .shadow(color: .black, radius: 0.5, y: 0.5)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: diameter, height: diameter)
+                .background(colour, in: Circle())
+                .overlay { Circle().strokeBorder(.white, lineWidth: max(1, diameter * 0.035)) }
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                .accessibilityLabel("Irish age rating \(certification)")
+                .allowsHitTesting(false)
+        }
     }
 }
 
@@ -421,7 +473,7 @@ struct StoreCaseBack: View, Equatable {
     let kind: StoreCaseKind
     let width: CGFloat
     let showsRating: Bool
-    /// The title's age rating ("PG-13"), when TMDb has one.
+    /// The title's Irish certificate, when TMDb has one.
     let certification: String?
     @Environment(\.layoutMetrics) private var metrics
 
@@ -461,7 +513,12 @@ struct StoreCaseBack: View, Equatable {
         }
         .frame(width: width, height: height)
         .clipShape(shape)
-        .overlay { shape.strokeBorder(.black.opacity(0.55), lineWidth: 0.5) }
+        .overlay {
+            shape.strokeBorder(.black.opacity(0.75), lineWidth: 0.5)
+            shape.inset(by: 0.75).strokeBorder(
+                LinearGradient(colors: [.white.opacity(0.42), .clear, .black.opacity(0.4), .white.opacity(0.16)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: max(0.5, width * 0.004))
+        }
     }
 
     /// The cover's ground: its poster, faint, sinking into the case's colour.
@@ -478,26 +535,36 @@ struct StoreCaseBack: View, Equatable {
     /// Every size is a share of the cover's width (`unit` is a hundredth of it), as print is. The synopsis gives up lines first when
     /// the cover is short of room.
     private func content(unit: CGFloat) -> some View {
-        let details = [layoutDetailLine(item, showsRating: showsRating), item.runtime ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        let details = [layoutDetailLine(item, showsRating: false), item.runtime ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         let synopsis = item.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return VStack(alignment: .leading, spacing: unit * 2.4) {
-            LayoutLogo(item: item, width: unit * 64, height: unit * 13)
+            HStack(spacing: unit * 2) {
+                LayoutLogo(item: item, width: unit * 64, height: unit * 13)
+                Spacer(minLength: 0)
+                if showsRating, let rating = item.imdbRating {
+                    Text(verbatim: "★ \(ScoreText.wholeScore(rating))")
+                        .font(.system(size: unit * 4, weight: .bold))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+            }
             if !details.isEmpty {
                 Text(details)
-                    .font(.system(size: unit * 3.6, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .font(.system(size: unit * 4, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(2)
             }
             if !synopsis.isEmpty {
                 Text(synopsis)
-                    .font(.system(size: unit * 4.1))
+                    .font(.system(size: unit * 4.5))
                     .lineSpacing(unit * 0.4)
                     .foregroundStyle(.white.opacity(0.9))
                     .multilineTextAlignment(.leading)
-                    .lineLimit(9)
+                    .lineLimit(5)
             }
-            StoreStill(url: still, title: item.name, width: unit * 90, border: max(1, unit * 0.7))
+            StoreStill(url: still, title: item.name, width: unit * 78, border: max(1, unit * 0.7))
+                .frame(maxWidth: .infinity)
             Spacer(minLength: 0)
             footer(unit: unit)
         }
@@ -507,13 +574,7 @@ struct StoreCaseBack: View, Equatable {
     private func footer(unit: CGFloat) -> some View {
         HStack(alignment: .bottom, spacing: unit * 3) {
             if let certification, !certification.isEmpty {
-                Text(certification)
-                    .font(.system(size: unit * 5, weight: .black).width(.condensed))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .padding(.horizontal, unit * 1.8)
-                    .padding(.vertical, unit * 0.5)
-                    .overlay { Rectangle().strokeBorder(.white.opacity(0.85), lineWidth: max(0.5, unit * 0.35)) }
+                StoreAgeBadge(certification: certification, diameter: unit * 10)
             }
             formatMark(unit: unit)
             Spacer(minLength: 0)
@@ -651,7 +712,7 @@ struct StoreCaseSpine: View, Equatable {
         let depth = StoreCase.depth(forWidth: width)
         let band = StoreCase.bannerHeight(coverHeight: height)
         ZStack(alignment: .top) {
-            Color(white: 0.07)
+            Rectangle().fill(kind.shell)
             VStack(spacing: depth * 0.5) {
                 if kind.hasBanner {
                     StoreBanner(kind: kind, width: depth, height: band, showsMark: false)
@@ -675,6 +736,10 @@ struct StoreCaseSpine: View, Equatable {
         }
         .frame(width: depth, height: height)
         .clipShape(RoundedRectangle(cornerRadius: depth * 0.35, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: depth * 0.35, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: max(0.5, depth * 0.025))
+        }
         .accessibilityHidden(true)
     }
 
@@ -684,9 +749,7 @@ struct StoreCaseSpine: View, Equatable {
         case .bluRay:
             StoreLogo(name: "StreamLogoBluRay", height: depth * 0.42, ink: .white)
         case .ultraHD:
-            Text(verbatim: "4K")
-                .font(.system(size: depth * 0.5, weight: .black).width(.condensed))
-                .foregroundStyle(.white)
+            StoreLogo(name: "StreamLogoUHDBluRay", height: depth * 0.22, ink: .white)
         case .streaming:
             if let provider = kind.provider {
                 StoreLogo(name: provider.logoName, height: depth * 0.5, ink: provider.markInk)
@@ -722,6 +785,14 @@ struct StoreCaseEdge: View, Equatable {
                 Spacer(minLength: 0)
             }
             .padding(.vertical, depth * 0.3)
+            // The recessed opening grip interrupts the seam halfway down the case.
+            RoundedRectangle(cornerRadius: depth * 0.2, style: .continuous)
+                .fill(.black.opacity(0.65))
+                .frame(width: depth * 0.48, height: height * 0.12)
+                .overlay {
+                    RoundedRectangle(cornerRadius: depth * 0.2, style: .continuous)
+                        .strokeBorder(.white.opacity(0.2), lineWidth: max(0.5, depth * 0.035))
+                }
             LinearGradient(stops: [
                 .init(color: .black.opacity(0.45), location: 0),
                 .init(color: .white.opacity(0.1), location: 0.5),

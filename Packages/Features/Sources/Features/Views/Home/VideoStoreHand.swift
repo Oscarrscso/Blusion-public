@@ -5,8 +5,8 @@ import UIKit
 
 /// The video store's case in the hand, over the whole window. It lifts out of its slot on the shelf and flies up, turning a little as it
 /// comes, while Home dims and blurs behind it. A sideways drag turns it with the finger, in perspective, past its spine to its back and on
-/// round; let go, it settles on whichever side it was thrown towards. A tap on it, or Turn Over, turns it over. Open flies it back to its
-/// slot and opens its title from there; Put Back, a tap beside it or Escape flies it back. With Reduce Motion it fades in and out where it
+/// round; let go, it settles on whichever side it was thrown towards. A tap on it, or Turn Over, turns it over. View Title flies it back to
+/// its slot and opens its title from there; Put Back, a tap beside it or Escape flies it back. With Reduce Motion it fades in and out where it
 /// is held and turns over at once.
 struct StoreHand: View {
     let item: MetaPreview
@@ -16,6 +16,7 @@ struct StoreHand: View {
     /// Called once the case is back in its slot: true when its title should open.
     let onDone: (_ opens: Bool) -> Void
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
+    @Environment(HeroMetaStore.self) private var heroMeta: HeroMetaStore?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutMetrics) private var metrics
     /// 0 in the slot, 1 in the hand.
@@ -27,6 +28,8 @@ struct StoreHand: View {
     @State private var dragStart: Double?
     @State private var isLeaving = false
     @State private var certification: String?
+    @State private var prices: TitlePrices?
+    @State private var isLoadingPrices = true
     /// The poster at the size the hand shows it: at first whatever size the shelf decoded, so it is there in the first frame.
     @State private var picture: UIImage?
 
@@ -40,17 +43,23 @@ struct StoreHand: View {
 
     var body: some View {
         let kind = StoreCaseKind(ratings?.ratings(for: item, includeMarks: true))
+        let details = heroMeta?.preview(for: item) ?? item
         let shown = reduceMotion ? presence : min(max(progress, 0), 1)
         GeometryReader { proxy in
             let layout = StoreHandLayout(size: proxy.size)
             let origin = proxy.frame(in: .global).origin
             let slot = reduceMotion ? nil : slotFrame().map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
             ZStack(alignment: .topLeading) {
-                StoreHeldCase(item: item, kind: kind, width: layout.width, showsRating: showsRating, certification: certification,
+                StoreHeldCase(item: details, kind: kind, width: layout.width, showsRating: showsRating, certification: certification,
                               picture: picture, slot: slot, centre: layout.centre, angle: angle, progress: reduceMotion ? 1 : progress)
                     .opacity(reduceMotion ? presence : 1)
                     .allowsHitTesting(false)
                 caseArea(layout: layout, kind: kind)
+                information(details: details, kind: kind)
+                    .frame(width: layout.information.width, height: layout.information.height)
+                    .position(x: layout.information.midX, y: layout.information.midY)
+                    .opacity(shown)
+                    .allowsHitTesting(!isLeaving)
                 controls(layout: layout)
                     .opacity(shown)
                     .allowsHitTesting(!isLeaving)
@@ -70,13 +79,73 @@ struct StoreHand: View {
         .onAppear(perform: arrive)
         .task(id: item.identity) { await loadPicture() }
         .task(id: item.identity) { await loadCertification() }
+        .task(id: item.identity) {
+            await heroMeta?.load(for: item)
+            guard !Task.isCancelled else { return }
+            prices = await heroMeta?.prices(for: item)
+            guard !Task.isCancelled else { return }
+            isLoadingPrices = false
+        }
+    }
+
+    private func information(details: MetaPreview, kind: StoreCaseKind) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
+                    Text(details.name)
+                        .font(.title2.bold())
+                        .accessibilityAddTraits(.isHeader)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if showsRating, let ratings {
+                        RatingsLine(ratings: ratings.ratings(for: details, includeReviews: true), font: .subheadline.weight(.semibold))
+                            .fixedSize()
+                    }
+                }
+                let metadata = [layoutDetailLine(details, showsRating: false), details.runtime ?? "",
+                                kind.spokenName].filter { !$0.isEmpty }.joined(separator: " · ")
+                if !metadata.isEmpty {
+                    Text(metadata)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if isLoadingPrices {
+                    ProgressView().accessibilityLabel("Loading prices")
+                }
+                if let prices {
+                    ForEach(TitlePrices.Kind.allCases, id: \.self) { kind in
+                        ForEach(TitlePrices.Quality.allCases.reversed(), id: \.self) { quality in
+                            if let offer = prices.cheapest(kind, quality).first {
+                                LabeledContent("\(quality.label) \(kind.label)") {
+                                    VStack(alignment: .trailing, spacing: 2) {
+                                        Text(offer.priceText).fontWeight(.semibold).monospacedDigit()
+                                        Text(offer.store).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !prices.streamers.isEmpty {
+                        LabeledContent("Streaming", value: prices.streamers.joined(separator: ", "))
+                    }
+                }
+                if let synopsis = details.description, !synopsis.isEmpty {
+                    Text(synopsis)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, Theme.Spacing.s)
+        }
+        .scrollIndicatorsFlash(onAppear: true)
+        .foregroundStyle(.white)
     }
 
     /// Where the case is held: it takes a tap to turn over and a drag to turn with the finger, and is one element for VoiceOver.
     private func caseArea(layout: StoreHandLayout, kind: StoreCaseKind) -> some View {
         let height = StoreCase.height(forWidth: layout.width)
         let showsBack = cos(angle) < 0
-        let synopsis = item.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let synopsis = (heroMeta?.preview(for: item) ?? item).description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return Color.clear
             .frame(width: layout.width, height: height)
             .contentShape(Rectangle())
@@ -86,21 +155,18 @@ struct StoreHand: View {
             .allowsHitTesting(!isLeaving)
             .accessibilityElement()
             .accessibilityLabel(item.name)
-            .accessibilityValue(showsBack ? synopsis : kind.spokenName)
+            .accessibilityValue([showsBack ? synopsis : kind.spokenName, certification.map { "Irish age rating \($0)" } ?? ""]
+                .filter { !$0.isEmpty }.joined(separator: ", "))
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { turnOver() }
-            .accessibilityAction(named: "Open") { leave(opens: true) }
+            .accessibilityAction(named: "View Title") { leave(opens: true) }
             .position(layout.centre)
     }
 
-    /// Turn Over, Open and Put Back: in a row under the case, or a column beside it in a wide window.
+    /// The native actions stay below the information, separate from the case's turning gesture.
     private func controls(layout: StoreHandLayout) -> some View {
         GlassEffectContainer {
-            if layout.stacksControls {
-                VStack(spacing: Theme.Spacing.m) { buttons }
-            } else {
-                HStack(spacing: Theme.Spacing.m) { buttons }
-            }
+            HStack(spacing: Theme.Spacing.m) { buttons }
         }
         .position(layout.controls)
     }
@@ -115,7 +181,8 @@ struct StoreHand: View {
         .buttonStyle(FixedGlassButtonStyle())
         .help("Turn Over")
         .accessibilityLabel("Turn Over")
-        Button("Open") { leave(opens: true) }
+        .keyboardShortcut(.rightArrow, modifiers: [])
+        Button("View Title") { leave(opens: true) }
             .buttonStyle(.primaryActionCompact)
             .keyboardShortcut(.defaultAction)
         Button {
@@ -162,7 +229,7 @@ struct StoreHand: View {
         if reduceMotion {
             angle = target
         } else {
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.8)) { angle = target }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) { angle = target }
         }
     }
 
@@ -174,7 +241,7 @@ struct StoreHand: View {
         }
     }
 
-    /// Flies the case back to its slot, front out, and hands over once it is there. The Open button gives its own haptic.
+    /// Flies the case back to its slot, front out, and hands over once it is there. View Title gives its own haptic.
     private func leave(opens: Bool) {
         guard !isLeaving else { return }
         isLeaving = true
@@ -204,49 +271,49 @@ struct StoreHand: View {
         picture = full
     }
 
-    /// The age rating for the back, from what this session already knows or else from TMDb.
+    /// The Irish certificate for the case, kept separately from the heroes' US certificates.
     private func loadCertification() async {
         guard let ratings else { return }
-        if let known = ratings.cachedCertification(for: item) {
+        if let known = ratings.cachedCertification(for: item, region: "IE") {
             certification = known
             return
         }
-        let answer = await ratings.certification(for: item)
+        let answer = await ratings.certification(for: item, region: "IE")
         guard !Task.isCancelled else { return }
         certification = answer
     }
 }
 
-/// Where the hand holds the case and its buttons: the case as large as fits above a row of buttons, or beside a column of them in a window
-/// wider than it is tall.
+/// The case beside its scrollable details in a wide window, or above them on a phone. Prices loading never move the case or buttons.
 @MainActor
 private struct StoreHandLayout {
     let width: CGFloat
     let centre: CGPoint
     let controls: CGPoint
-    let stacksControls: Bool
+    let information: CGRect
 
     init(size: CGSize) {
         let button = CircleActionButton.diameter
         let margin: CGFloat = 24
-        stacksControls = size.width > size.height * 1.2
-        if stacksControls {
-            // The column is about as wide as Open.
-            let column = button * 2.4
-            let gap: CGFloat = 40
-            let fitted = min((size.height - margin * 2) / StoreCase.aspect, (size.width - column - gap - margin * 2) * 0.9, 440)
-            width = max(120, fitted.rounded())
+        if size.width > size.height * 1.2 {
+            let column = min(360, size.width * 0.42)
+            let gap: CGFloat = 32
+            let fitted = min((size.height - margin * 2) / StoreCase.aspect, size.width - column - gap - margin * 2, 520)
+            width = max(80, fitted.rounded())
             let left = max(margin, (size.width - width - gap - column) / 2)
             centre = CGPoint(x: left + width / 2, y: size.height / 2)
-            controls = CGPoint(x: left + width + gap + column / 2, y: size.height / 2)
+            information = CGRect(x: left + width + gap, y: margin, width: column,
+                                 height: max(40, size.height - margin * 3 - button))
+            controls = CGPoint(x: information.midX, y: size.height - margin - button / 2)
         } else {
-            let row = button + 32
-            let fitted = min(size.width * 0.76, (size.height - row - margin * 2) / StoreCase.aspect, 440)
-            width = max(120, fitted.rounded())
+            let informationHeight = min(230, size.height * 0.28)
+            let fitted = min(size.width - margin * 2, (size.height - informationHeight - button - margin * 4) / StoreCase.aspect, 520)
+            width = max(80, fitted.rounded())
             let caseHeight = StoreCase.height(forWidth: width)
-            let top = max(margin, (size.height - caseHeight - row) / 2)
+            let top = max(margin, (size.height - caseHeight - informationHeight - button - margin * 2) / 2)
             centre = CGPoint(x: size.width / 2, y: top + caseHeight / 2)
-            controls = CGPoint(x: size.width / 2, y: top + caseHeight + row / 2 + 4)
+            information = CGRect(x: margin, y: top + caseHeight + margin, width: size.width - margin * 2, height: informationHeight)
+            controls = CGPoint(x: size.width / 2, y: information.maxY + margin + button / 2)
         }
     }
 }

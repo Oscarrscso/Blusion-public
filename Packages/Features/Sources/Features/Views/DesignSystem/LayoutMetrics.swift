@@ -59,6 +59,7 @@ struct LayoutMetrics: Equatable, Sendable {
     }
     /// Poster columns of a grid on a phone held upright (Appearance's Columns).
     var phonePosterColumns: Int = 3
+    var phoneLandscapePosterColumns: Int = 3
     /// Appearance's Shelves: a line between shelves.
     var showsShelfDividers = false
     var shelfDividerThickness: CGFloat = 1
@@ -103,6 +104,7 @@ struct LayoutMetrics: Equatable, Sendable {
         metrics.cornerOverrides = appearance.cornerOverrides
         metrics.includesCircularButtons = appearance.includesCircularButtons
         metrics.phonePosterColumns = appearance.phoneGridColumns
+        metrics.phoneLandscapePosterColumns = appearance.phoneLandscapeGridColumns
         return metrics
     }
 
@@ -172,9 +174,16 @@ struct LayoutMetrics: Equatable, Sendable {
             : Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top), count: 3)
     }
 
+    @MainActor
     func gridColumns(for aspect: CardAspect, inLandscape: Bool = false) -> [GridItem] {
         if inLandscape && aspect == .poster {
-            // On a phone or iPad turned sideways the columns share the whole width: a capped column stopped short of it and left a
+            #if !targetEnvironment(macCatalyst)
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                return Array(repeating: GridItem(.flexible(), spacing: cardSpacing, alignment: .top),
+                             count: max(1, phoneLandscapePosterColumns))
+            }
+            #endif
+            // On an iPad turned sideways the columns share the whole width: a capped column stopped short of it and left a
             // wider gap on the right than the page margin on the left (Library, Discover, See All). The Mac keeps its cap; its Discover
             // fills through `GridFill` instead.
             #if targetEnvironment(macCatalyst)

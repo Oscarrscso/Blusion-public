@@ -819,7 +819,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public static let shelfDividerThicknessRange: ClosedRange<Double> = 0.5...4
     public static let shelfDividerOpacityRange: ClosedRange<Double> = 0.03...0.6
     public static let tintStrengthRange: ClosedRange<Double> = 0.04...0.3
-    /// The column counts a phone's portrait poster grid offers. A wide window fits as many columns as the card size allows instead.
+    /// The column counts a phone's portrait and landscape title grids offer.
     public static let phoneGridColumnRange: ClosedRange<Int> = 2...6
     public static let captionLineRange: ClosedRange<Int> = 1...2
     /// Seconds between the spotlight's pages turning by themselves; zero leaves them for the listener to swipe.
@@ -882,6 +882,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
     public var effectiveShelfSpacingScale: Double { shelfSpacingScale ?? spacingScale }
     /// Poster columns of a grid (Library, Discover, See All) on a phone held upright.
     public var phoneGridColumns = 3
+    /// Title columns on a phone held sideways, independently of the portrait grid.
+    public var phoneLandscapeGridColumns = 3
     /// Every poster carries its title and a grey line underneath, as landscape and square cards do.
     public var showsPosterTitles = false
     /// Lines a card's title may take under it before it is cut off (`captionLineRange`). Every card of a kind keeps the same height.
@@ -979,6 +981,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         shelfDividerOpacity = look.shelfDividerOpacity
         shelfDividerFullWidth = look.shelfDividerFullWidth
         phoneGridColumns = look.phoneGridColumns
+        phoneLandscapeGridColumns = look.phoneLandscapeGridColumns
         showsPosterTitles = look.showsPosterTitles
         captionLines = look.captionLines
         showsCaptionDetails = look.showsCaptionDetails
@@ -1059,6 +1062,8 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         shelfDividerFullWidth = read(.shelfDividerFullWidth, shelfDividerFullWidth)
         phoneGridColumns = min(max(read(.phoneGridColumns, phoneGridColumns), Self.phoneGridColumnRange.lowerBound),
                                Self.phoneGridColumnRange.upperBound)
+        phoneLandscapeGridColumns = min(max(read(.phoneLandscapeGridColumns, phoneLandscapeGridColumns), Self.phoneGridColumnRange.lowerBound),
+                                        Self.phoneGridColumnRange.upperBound)
         showsPosterTitles = read(.showsPosterTitles, showsPosterTitles)
         captionLines = min(max(read(.captionLines, captionLines), Self.captionLineRange.lowerBound), Self.captionLineRange.upperBound)
         showsCaptionDetails = read(.showsCaptionDetails, showsCaptionDetails)
@@ -1135,6 +1140,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         try container.encode(shelfDividerOpacity, forKey: .shelfDividerOpacity)
         try container.encode(shelfDividerFullWidth, forKey: .shelfDividerFullWidth)
         try container.encode(phoneGridColumns, forKey: .phoneGridColumns)
+        try container.encode(phoneLandscapeGridColumns, forKey: .phoneLandscapeGridColumns)
         try container.encode(showsPosterTitles, forKey: .showsPosterTitles)
         try container.encode(captionLines, forKey: .captionLines)
         try container.encode(showsCaptionDetails, forKey: .showsCaptionDetails)
@@ -1179,6 +1185,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         case shelfSpacing, sideMargin, showsShelfDividers, shelfDividerThickness, shelfDividerOpacity, shelfDividerFullWidth
         case cardSize, cornerScale, spacing, phoneGridColumns, showsPosterTitles, captionLines, showsCaptionDetails, uppercaseCaptions,
              outline, artworkTone, progressColour, progressThickness, showsTimeLeft
+        case phoneLandscapeGridColumns
         case layout
         case heroAutoAdvance, showsPageDots
         case hidesSpoilers, spoilerStills, spoilerSynopses, spoilerTitles, expandsSynopsis, showsReviews, showsCast, showsInformation,
@@ -1208,6 +1215,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             && lhs.headingColour == rhs.headingColour
         let sizes: Bool = lhs.cardScale == rhs.cardScale && lhs.cornerScale == rhs.cornerScale && lhs.spacingScale == rhs.spacingScale
             && lhs.phoneGridColumns == rhs.phoneGridColumns
+            && lhs.phoneLandscapeGridColumns == rhs.phoneLandscapeGridColumns
             && lhs.shelfSpacingScale == rhs.shelfSpacingScale && lhs.sideMarginScale == rhs.sideMarginScale
             && lhs.showsShelfDividers == rhs.showsShelfDividers && lhs.shelfDividerThickness == rhs.shelfDividerThickness
             && lhs.shelfDividerOpacity == rhs.shelfDividerOpacity && lhs.shelfDividerFullWidth == rhs.shelfDividerFullWidth
@@ -1300,6 +1308,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
             result.shelfDividerOpacity = defaults.shelfDividerOpacity
             result.shelfDividerFullWidth = defaults.shelfDividerFullWidth
             result.phoneGridColumns = defaults.phoneGridColumns
+            result.phoneLandscapeGridColumns = defaults.phoneLandscapeGridColumns
             result.showsPosterTitles = defaults.showsPosterTitles
             result.captionLines = defaults.captionLines
             result.showsCaptionDetails = defaults.showsCaptionDetails
@@ -1349,7 +1358,7 @@ public struct AppearancePreferences: Sendable, Equatable, Codable {
         let text = [textSize.rawValue, font.rawValue, "\(boldText)", "\(italicText)", fontWidth.rawValue, letterSpacing.rawValue,
                     lineSpacing.rawValue, headingFont.rawValue, headingWeight.rawValue, headingSize.rawValue, headingWidth.rawValue,
                     headingSpacing.rawValue, "\(uppercaseHeadings)"]
-        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(uppercaseCaptions)", "\(phoneGridColumns)", "\(showsShelfDividers)", "\(shelfDividerFullWidth)"]
+        let captions = ["\(showsPosterTitles)", "\(captionLines)", "\(showsCaptionDetails)", "\(uppercaseCaptions)", "\(phoneGridColumns)", "\(phoneLandscapeGridColumns)", "\(showsShelfDividers)", "\(shelfDividerFullWidth)"]
         return (numbers + text + captions).joined(separator: "|")
     }
 

@@ -94,7 +94,7 @@ public struct AppServices: Sendable {
         self.widgetContent = widgetContent ?? WidgetContentService(registry: registry, client: client, settings: settings, trakt: trakt,
                                                                    account: traktAccount)
         self.posterRatings = posterRatings ?? PosterRatingsStore()
-        self.heroMeta = heroMeta ?? HeroMetaStore(browse: self.browse)
+        self.heroMeta = heroMeta ?? HeroMetaStore(browse: self.browse, client: client)
         self.bestBlurays = bestBlurays ?? BestBluraysClient(client: client)
         self.handoffs = handoffs ?? InMemoryHandoffStore()
         self.speedTester = speedTester ?? AddonSpeedTester(registry: registry)

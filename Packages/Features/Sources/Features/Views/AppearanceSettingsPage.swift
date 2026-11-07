@@ -31,7 +31,7 @@ extension AppearancePreferences.PlayStyle: AppearanceOption {}
 extension AppearancePreferences.ButtonFinish: AppearanceOption {}
 extension AppearancePreferences.HeadingColour: AppearanceOption {}
 
-/// The choices only a phone has: a phone held upright has a fixed number of poster columns (a wide window fits as many as the card size
+/// The choices only a phone has: a phone has separate portrait and landscape title column counts (a wide window fits as many as the card size
 /// allows), and only the iPhone has a tab bar with labels to show, a bar that shrinks and the Continue Watching bar above it.
 @MainActor
 private var isPhone: Bool {
@@ -331,6 +331,29 @@ private struct AppearanceControls {
                in: range, step: step, low: low, high: high, id: id)
     }
 
+    func columnSlider(_ title: String, _ keyPath: WritableKeyPath<AppearancePreferences, Int>, id: String) -> some View {
+        let appearance = appearance
+        let value = Binding<Double>(get: { Double(appearance.wrappedValue[keyPath: keyPath]) }, set: { newValue in
+            let columns = Int(newValue.rounded())
+            guard columns != appearance.wrappedValue[keyPath: keyPath] else { return }
+            Haptics.play(.sliders)
+            appearance.wrappedValue[keyPath: keyPath] = columns
+        })
+        let range = AppearancePreferences.phoneGridColumnRange
+        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(current[keyPath: keyPath])").monospacedDigit().foregroundStyle(.secondary)
+            }
+            .accessibilityHidden(true)
+            CornerSlider(value: value, in: Double(range.lowerBound)...Double(range.upperBound), step: 1)
+                .accessibilityLabel(title)
+                .accessibilityValue("\(current[keyPath: keyPath])")
+        }
+        .accessibilityIdentifier("settings.appearance.\(id)")
+    }
+
     func slider(_ title: String, read: @escaping (AppearancePreferences) -> Double,
                 write: @escaping (inout AppearancePreferences, Double) -> Void, in range: ClosedRange<Double>,
                 step: Double, low: String, high: String, id: String) -> some View {
@@ -460,7 +483,8 @@ private struct AppearanceCardsPage: View {
                 controls.slider("Spacing", \.spacingScale, in: AppearancePreferences.spacingScaleRange, step: 0.05,
                                 low: "arrow.down.right.and.arrow.up.left", high: "arrow.up.left.and.arrow.down.right", id: "spacing")
                 if isPhone {
-                    controls.numbers("Columns", \.phoneGridColumns, in: AppearancePreferences.phoneGridColumnRange, id: "columns")
+                    controls.columnSlider("Portrait columns", \.phoneGridColumns, id: "columns")
+                    controls.columnSlider("Landscape columns", \.phoneLandscapeGridColumns, id: "landscapeColumns")
                 }
             }
             Section("Shelves") {

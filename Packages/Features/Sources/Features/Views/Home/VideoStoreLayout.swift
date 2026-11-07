@@ -138,7 +138,9 @@ private struct StoreSlot: View, Equatable {
     let onPickUp: () -> Void
     let onOpen: () -> Void
     @Environment(PosterRatingsStore.self) private var ratings: PosterRatingsStore?
+    @Environment(HeroMetaStore.self) private var heroMeta: HeroMetaStore?
     @Environment(\.zoomNamespace) private var zoomNamespace
+    @State private var rentalPrice: String?
 
     /// The frames and the actions are left out: they only ever act on this slot's own title.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -160,6 +162,16 @@ private struct StoreSlot: View, Equatable {
                 StoreWall(pitch: shelf.slatPitch)
                     .frame(height: shelf.headroom + shelf.caseHeight)
                     .overlay(alignment: .bottomLeading) {
+                        // Soft contact shade behind the plastic, distinct from the sharp shadow on the plank.
+                        RoundedRectangle(cornerRadius: shelf.caseRadius)
+                            .fill(.black.opacity(0.45))
+                            .frame(width: shelf.caseWidth, height: shelf.caseHeight * 0.96)
+                            .blur(radius: shelf.caseShadow)
+                            .offset(x: leading + shelf.caseShadow, y: 0)
+                            .opacity(isHeld ? 0 : 1)
+                            .allowsHitTesting(false)
+                    }
+                    .overlay(alignment: .bottomLeading) {
                         caseButton(kind)
                             .padding(.leading, leading)
                     }
@@ -175,7 +187,7 @@ private struct StoreSlot: View, Equatable {
                 StoreLip()
                     .frame(height: shelf.lip)
                     .overlay(alignment: .leading) {
-                        StoreTag(name: item.name, rating: showsRating ? item.imdbRating : nil)
+                        StoreTag(name: item.name, rating: showsRating ? item.imdbRating : nil, rentalPrice: rentalPrice)
                             .frame(width: (shelf.caseWidth * 0.94).rounded(), height: max(18, shelf.lip - 9))
                             .frame(width: shelf.caseWidth)
                             .padding(.leading, leading)
@@ -192,6 +204,11 @@ private struct StoreSlot: View, Equatable {
                 .accessibilityHidden(true)
         }
         .frame(width: leading + shelf.caseWidth + trailing)
+        .task(id: item.identity) {
+            let prices = await heroMeta?.prices(for: item)
+            guard !Task.isCancelled else { return }
+            rentalPrice = prices?.bestRent?.priceText
+        }
     }
 
     private func caseButton(_ kind: StoreCaseKind) -> some View {
@@ -207,7 +224,8 @@ private struct StoreSlot: View, Equatable {
         .help(item.name)
         .titleCardMenu(item)
         .accessibilityLabel(item.name)
-        .accessibilityValue(kind.spokenName)
+        .accessibilityValue([kind.spokenName, rentalPrice.map { "Rental: \($0)" } ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: ", "))
         // VoiceOver opens the title straight away; picking the case up is offered beside it.
         .accessibilityAction(.default) { onOpen() }
         .accessibilityAction(named: "Pick Up") { onPickUp() }
@@ -330,11 +348,11 @@ private struct StoreEndPanel: View {
     }
 }
 
-/// The label in the shelf's channel under a case: its name as a store's label printer prints it, and its score when the widget shows
-/// ratings.
+/// The shelf label: title, score and the regional rental price when available.
 private struct StoreTag: View {
     let name: String
     let rating: Double?
+    let rentalPrice: String?
 
     var body: some View {
         HStack(spacing: 3) {
@@ -342,9 +360,13 @@ private struct StoreTag: View {
                 .textCase(.uppercase)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity, alignment: rating == nil ? .center : .leading)
+                .frame(maxWidth: .infinity, alignment: rating == nil && rentalPrice == nil ? .center : .leading)
             if let rating {
                 Text(verbatim: "★ \(ScoreText.wholeScore(rating))")
+                    .fixedSize()
+            }
+            if let rentalPrice {
+                Text(rentalPrice)
                     .fixedSize()
             }
         }

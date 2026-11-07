@@ -11,9 +11,19 @@ public final class HeroMetaStore {
     /// Lookups under way, by title, so a title asked for twice at once shares one request.
     @ObservationIgnored private var lookups: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let browse: BrowseService
+    @ObservationIgnored private let prices: JustWatchPrices
 
-    public nonisolated init(browse: BrowseService) {
+    public nonisolated init(browse: BrowseService, client: AddonClient) {
         self.browse = browse
+        self.prices = JustWatchPrices(client: client)
+    }
+
+    /// Regional rent and buy offers for a picked-up case, using the same session cache as the title page.
+    public func prices(for item: MetaPreview) async -> TitlePrices? {
+        let shown = preview(for: item)
+        let year = shown.releaseInfo?.firstMatch(of: /[0-9]{4}/).flatMap { Int($0.output) }
+        return try? await prices.localPrices(id: item.id, title: shown.name, year: year, type: item.type,
+                                            country: Locale.current.region?.identifier ?? "US")
     }
 
     /// The details kept for the title, or nil when none have been loaded yet.

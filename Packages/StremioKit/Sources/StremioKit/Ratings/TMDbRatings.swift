@@ -267,21 +267,20 @@ public struct TMDbRatings: Sendable {
 
     private struct VideosResponse: Decodable { let results: [TMDbVideo] }
 
-    /// The US age rating: a film's certificate ("R") from its release dates, or a show's content rating ("TV-MA"). Nil when TMDb
-    /// has none for the US.
-    public func certification(imdbID: String, type: String) async throws -> String? {
+    /// The age certificate for the requested country. Nil when TMDb has none for that country.
+    public func certification(imdbID: String, type: String, region: String = "US") async throws -> String? {
         guard let number = try await tmdbID(imdbID: imdbID, type: type) else { return nil }
         let isMovie = type == "movie"
         let (url, headers) = try request(path: [isMovie ? "movie" : "tv", String(number), isMovie ? "release_dates" : "content_ratings"])
         let result = try await client.get(url, headers: headers, limits: FetchLimits(maxBytes: 1024 * 1024), timeout: 6)
-        return try Self.parseCertification(result.data, isMovie: isMovie)
+        return try Self.parseCertification(result.data, isMovie: isMovie, country: region)
     }
 
-    /// The `release_dates` answer for a movie or the `content_ratings` answer for a show, read for the US only.
-    static func parseCertification(_ data: Data, isMovie: Bool) throws -> String? {
+    /// The `release_dates` answer for a movie or the `content_ratings` answer for a show, read for one country.
+    static func parseCertification(_ data: Data, isMovie: Bool, country: String = "US") throws -> String? {
         let response: CertificationResponse
         do { response = try JSONDecoder().decode(CertificationResponse.self, from: data) } catch { throw AddonError.invalidJSON }
-        guard let region = response.results?.first(where: { $0.iso_3166_1 == "US" }) else { return nil }
+        guard let region = response.results?.first(where: { $0.iso_3166_1 == country.uppercased() }) else { return nil }
         let value: String?
         if isMovie {
             value = region.release_dates?.compactMap(\.certification).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }

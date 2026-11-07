@@ -85,7 +85,7 @@ struct LayoutRowPlaceholder: View {
             if let title {
                 SectionHeader(title).padding(.horizontal, metrics.pageMargin)
             }
-            VStack(spacing: Theme.Spacing.m) {
+            VStack(spacing: layout == .flow ? Theme.Spacing.s : Theme.Spacing.m) {
                 Color.clear.frame(height: LayoutRow.height(of: layout, metrics: cards, containerWidth: containerWidth))
                 if layout == .flow { FlowLayoutRow.captionLines(name: " ", details: " ").hidden() }
             }
@@ -302,6 +302,7 @@ private struct FlowLayoutRow: View {
     @State private var motion = ScrollMotion()
     @Environment(\.layoutMetrics) private var metrics
     @Environment(\.heroContainerWidth) private var containerWidth
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if targetEnvironment(macCatalyst)
     @State private var isHovering = false
     #endif
@@ -352,7 +353,7 @@ private struct FlowLayoutRow: View {
     }
 
     static func cardWidth(_ metrics: LayoutMetrics) -> CGFloat { (metrics.posterWidth * 1.2).rounded() }
-    static func reflection(_ metrics: LayoutMetrics) -> CGFloat { (cardWidth(metrics) * 1.5 * 0.3).rounded() }
+    static func reflection(_ metrics: LayoutMetrics) -> CGFloat { (cardWidth(metrics) * 1.5 * 0.12).rounded() }
     /// The posters over their reflections, above the caption.
     static func height(_ metrics: LayoutMetrics) -> CGFloat {
         cardWidth(metrics) * 1.5 + FlowCard.reflectionGap + reflection(metrics)
@@ -370,21 +371,23 @@ private struct FlowLayoutRow: View {
         let reflection = Self.reflection(metrics)
         // Each poster takes only `step` of the scroll, the gap between two posters in a side stack, so a drag moves the stacks with the
         // finger. The first poster to each side stands `spread` from the middle, clear of the one facing the viewer.
-        let step = (width * 0.18).rounded()
-        let spread = width * 0.68
+        let step = (width * 0.2).rounded()
+        let spread = width * 0.66
         // Turns and scales about the poster's own middle, not its reflection's.
         let anchor = UnitPoint(x: 0.5, y: height / 2 / (height + FlowCard.reflectionGap + reflection))
         // Worked out once for the whole row, not again for each poster.
         let current = self.current
         let currentPosition = self.currentPosition
+        let reduceMotion = self.reduceMotion
         let count = items.count
-        VStack(spacing: Theme.Spacing.m) {
+        VStack(spacing: Theme.Spacing.s) {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 0) {
                     ForEach(entries) { entry in
                         let position = entry.copy * count + entry.index
-                        FlowCard(item: entry.item, width: width, height: height, reflection: reflection, isCentred: entry.id == current) {
-                            withAnimation(.snappy(duration: 0.4)) { centredID = entry.id }
+                        FlowCard(item: entry.item, width: width, height: height, reflection: reflection,
+                                 isCentred: entry.id == current, showsRating: showsRating) {
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.38)) { centredID = entry.id }
                         }
                         // Another poster coming to the middle redraws only it and the one that leaves.
                         .equatable()
@@ -392,11 +395,14 @@ private struct FlowLayoutRow: View {
                             // How many steps the poster is from the middle, leftwards when negative; past one step it is in a stack.
                             let distance = proxy.bounds(of: .scrollView).map { proxy.size.width / 2 - $0.midX } ?? 0
                             let side = min(max(distance / step, -1), 1)
+                            // Ease both ends of the turn so a cover joins and leaves its stack without a sudden change in speed.
+                            let progress = abs(side)
+                            let turn = side * progress * (3 - 2 * progress)
                             return content
-                                .rotation3DEffect(.degrees(-Double(side) * 65), axis: (x: 0, y: 1, z: 0), anchor: anchor, perspective: 0.6)
-                                .scaleEffect(1 - abs(side) * 0.2, anchor: anchor)
-                                .offset(x: side * (spread - step))
-                                .brightness(-Double(abs(side)) * 0.08)
+                                .rotation3DEffect(.degrees(reduceMotion ? 0 : -Double(turn) * 68), axis: (x: 0, y: 1, z: 0), anchor: anchor, perspective: 0.35)
+                                .scaleEffect(1 - abs(turn) * 0.16, anchor: anchor)
+                                .offset(x: turn * (spread - step))
+                                .brightness(-Double(abs(turn)) * 0.12)
                         }
                         .frame(width: step)
                         // The poster in the middle is drawn over its neighbours, and each one in a stack over the one behind it.
@@ -449,29 +455,58 @@ private struct FlowLayoutRow: View {
         }
     }
 
-    /// The middle poster's name, and its details under it, crossfading as another poster comes to the middle.
+    /// Keep the selected title's information in a steady space while the covers move above it.
     private var caption: some View {
         let item = items.indices.contains(currentIndex) ? items[currentIndex] : nil
-        return Self.captionLines(name: item?.name ?? " ", details: item.map { layoutDetailLine($0, showsRating: showsRating) } ?? " ")
+        let details = item.map {
+            [layoutDetailLine($0, showsRating: showsRating), $0.runtime ?? ""]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+        } ?? " "
+        return Self.captionLines(name: item?.name ?? " ", details: details,
+                                 synopsis: item?.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+            .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, metrics.pageMargin)
             .contentTransition(.opacity)
-            .animation(.easeOut(duration: 0.2), value: current)
-            .accessibilityHidden(true)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: item?.identity)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(items.isEmpty ? "" : "\(currentIndex + 1) of \(items.count)")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: move(by: 1)
+                case .decrement: move(by: -1)
+                @unknown default: break
+                }
+            }
     }
 
-    /// The caption's name over its details, a line each, so blank lines keep the same room as filled ones.
-    static func captionLines(name: String, details: String) -> some View {
-        VStack(spacing: 2) {
-            Text(name)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(details)
-                .font(Theme.Typography.metaLine)
-                .foregroundStyle(Theme.metaText)
-                .lineLimit(1)
+    /// The title and tagline share a row; the synopsis uses the full width beneath them.
+    static func captionLines(name: String, details: String, synopsis: String = "") -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
+                Text(name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .layoutPriority(1)
+                Text(details)
+                    .font(Theme.Typography.metaLine)
+                    .foregroundStyle(Theme.metaText)
+                    .lineLimit(1, reservesSpace: true)
+            }
+            Text(synopsis)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .multilineTextAlignment(.leading)
+    }
+
+    private func move(by step: Int) {
+        guard items.count > 1 else { return }
+        let target = min(max(currentPosition + step, 0), entries.count - 1)
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.38)) { centredID = entries[target].id }
     }
 
     #if targetEnvironment(macCatalyst)
@@ -487,8 +522,7 @@ private struct FlowLayoutRow: View {
 
     private func arrow(systemName: String, label: String, step: Int, enabled: Bool) -> some View {
         Button {
-            let target = min(max(currentPosition + step, 0), entries.count - 1)
-            withAnimation(.snappy(duration: 0.4)) { centredID = entries[target].id }
+            move(by: step)
         } label: {
             Image(systemName: systemName)
                 .font(.headline.weight(.semibold))
@@ -512,6 +546,7 @@ private struct FlowCard: View, Equatable {
     let height: CGFloat
     let reflection: CGFloat
     let isCentred: Bool
+    let showsRating: Bool
     let onCentre: () -> Void
     @Environment(AppRouter.self) private var router
     @Environment(\.zoomScope) private var zoomScope
@@ -522,27 +557,33 @@ private struct FlowCard: View, Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         MainActor.assumeIsolated {
             lhs.item == rhs.item && lhs.width == rhs.width && lhs.height == rhs.height && lhs.reflection == rhs.reflection
-                && lhs.isCentred == rhs.isCentred
+                && lhs.isCentred == rhs.isCentred && lhs.showsRating == rhs.showsRating
         }
     }
 
     /// The gap between a poster and its reflection.
-    static let reflectionGap: CGFloat = 3
+    static let reflectionGap: CGFloat = 1
 
     private var sourceID: String { "\(zoomScope)/\(item.identity)" }
 
     var body: some View {
         let radius = Theme.Radius.poster
+        let button = Button {
+            if isCentred { openTitle() } else { onCentre() }
+        } label: {
+            LayoutPoster(item: item, width: width, height: height)
+                .overlay(alignment: .bottom) {
+                    if showsRating { PosterRatingsOverlay(item: item) }
+                }
+                .mediaArtwork(cornerRadius: radius)
+                .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: radius * metrics.cornerScale(for: .artwork))
+        }
+        .buttonStyle(PressableCardStyle.poster)
         VStack(spacing: Self.reflectionGap) {
-            Button {
-                if isCentred { openTitle() } else { onCentre() }
-            } label: {
-                LayoutPoster(item: item, width: width, height: height)
-                    .mediaArtwork(cornerRadius: radius)
-                    .zoomSource(id: sourceID, in: zoomNamespace, cornerRadius: radius * metrics.cornerScale(for: .artwork))
+            // Only the selected cover needs a visibility observer and an advance lookup for its title page.
+            Group {
+                if isCentred { button.prewarmsHeroArtwork(item) } else { button }
             }
-            .buttonStyle(PressableCardStyle.poster)
-            .prewarmsHeroArtwork(item)
             .help(item.name)
             .titleCardMenu(item)
             .accessibilityLabel(item.name)
@@ -555,7 +596,9 @@ private struct FlowCard: View, Equatable {
                 .frame(width: width, height: reflection, alignment: .top)
                 .clipped()
                 .mask {
-                    LinearGradient(colors: [.white.opacity(0.42), .clear], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(stops: [.init(color: .white.opacity(0.34), location: 0),
+                                           .init(color: .white.opacity(0.08), location: 0.65),
+                                           .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
                 }
                 // Drawn once into a single picture, so the stacks' turning on every frame of a scroll does not mask it again.
                 .drawingGroup()
